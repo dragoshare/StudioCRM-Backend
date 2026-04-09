@@ -3,6 +3,7 @@ using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Metadata;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using StudioCRM.Infrastructure.Persistence;
 
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260409104750_AddUsersRolesAndTrainers")]
+    partial class AddUsersRolesAndTrainers
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -41,9 +44,6 @@ namespace StudioCRM.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("bit");
-
                     b.Property<string>("LastName")
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
@@ -52,12 +52,7 @@ namespace StudioCRM.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("nvarchar(max)");
 
-                    b.Property<int?>("TrainerId")
-                        .HasColumnType("int");
-
                     b.HasKey("Id");
-
-                    b.HasIndex("TrainerId");
 
                     b.ToTable("Clients");
                 });
@@ -171,16 +166,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.ToTable("UserRoles");
                 });
 
-            modelBuilder.Entity("StudioCRM.Domain.Entities.Client", b =>
-                {
-                    b.HasOne("StudioCRM.Domain.Entities.Trainer", "Trainer")
-                        .WithMany("Clients")
-                        .HasForeignKey("TrainerId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("Trainer");
-                });
-
             modelBuilder.Entity("StudioCRM.Domain.Entities.Trainer", b =>
                 {
                     b.HasOne("StudioCRM.Domain.Entities.User", "User")
@@ -214,11 +199,6 @@ namespace StudioCRM.Infrastructure.Migrations
             modelBuilder.Entity("StudioCRM.Domain.Entities.Role", b =>
                 {
                     b.Navigation("UserRoles");
-                });
-
-            modelBuilder.Entity("StudioCRM.Domain.Entities.Trainer", b =>
-                {
-                    b.Navigation("Clients");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.User", b =>

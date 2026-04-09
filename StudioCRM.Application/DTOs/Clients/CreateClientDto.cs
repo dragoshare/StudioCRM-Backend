@@ -1,9 +1,7 @@
-﻿namespace StudioCRM.Domain.Entities;
+﻿namespace StudioCRM.Application.DTOs.Clients;
 
-public class Client
+public class CreateClientDto
 {
-    public int Id { get; set; }
-
     public int? TrainerId { get; set; }
 
     public string FirstName { get; set; } = string.Empty;
@@ -13,10 +11,4 @@ public class Client
     public string Email { get; set; } = string.Empty;
 
     public string PhoneNumber { get; set; } = string.Empty;
-
-    public bool IsActive { get; set; } = true;
-
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public Trainer? Trainer { get; set; }
 }
