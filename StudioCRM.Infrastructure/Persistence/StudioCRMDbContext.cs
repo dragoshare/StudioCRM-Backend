@@ -5,7 +5,6 @@ using System.Text;
 using System.Threading.Tasks;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
-
 namespace StudioCRM.Infrastructure.Persistence;
 
 public class StudioCRMDbContext : DbContext
@@ -48,5 +47,8 @@ public class StudioCRMDbContext : DbContext
             .WithMany(t => t.Clients)
             .HasForeignKey(c => c.TrainerId)
             .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<Trainer>()
+            .Property(t => t.HourlyRate)
+            .HasPrecision(10, 2);
     }
 }

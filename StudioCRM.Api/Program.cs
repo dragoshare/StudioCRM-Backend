@@ -9,6 +9,7 @@ using StudioCRM.Infrastructure.Services;
 using System.Text;
 using Microsoft.OpenApi.Models;
 using StudioCRM.Api.Swagger;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // JWT settings
@@ -20,9 +21,8 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 
 // Database
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
-    options.UseSqlServer(
-        builder.Configuration.GetConnectionString("DefaultConnection"),
-        b => b.MigrationsAssembly("StudioCRM.Infrastructure")));
+    options.UseNpgsql(
+        builder.Configuration.GetConnectionString("DefaultConnection")));
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
