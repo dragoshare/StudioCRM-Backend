@@ -28,6 +28,8 @@ builder.Services.AddDbContext<StudioCRMDbContext>(options =>
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITrainerService, TrainerService>();
 builder.Services.AddScoped<IClientService, ClientService>();
+builder.Services.AddScoped<IPackageService, PackageService>();
+builder.Services.AddScoped<ISessionService, SessionService>();
 // Authentication
 builder.Services.AddAuthentication(options =>
 {

@@ -1,10 +1,4 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-
-namespace StudioCRM.Domain.Entities;
+﻿namespace StudioCRM.Domain.Entities;
 
 public class User
 {
@@ -18,13 +12,15 @@ public class User
 
     public string LastName { get; set; } = string.Empty;
 
-    public string PhoneNumber { get; set; } = string.Empty;
-
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
     public DateTime? LastLoginAt { get; set; }
 
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
+
+    public Trainer? TrainerProfile { get; set; }
 }

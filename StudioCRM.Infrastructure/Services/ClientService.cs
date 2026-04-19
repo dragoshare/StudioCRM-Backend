@@ -19,22 +19,44 @@ public class ClientService : IClientService
     {
         if (request.TrainerId.HasValue)
         {
-            var trainerExists = await _context.Trainers.AnyAsync(t => t.Id == request.TrainerId.Value);
+            var trainerExists = await _context.Trainers
+                .AnyAsync(t => t.Id == request.TrainerId.Value);
+
             if (!trainerExists)
             {
                 throw new InvalidOperationException("Trainer does not exist.");
             }
         }
 
+        if (request.ActivePackageId.HasValue)
+        {
+            var packageExists = await _context.Packages
+                .AnyAsync(p => p.Id == request.ActivePackageId.Value);
+
+            if (!packageExists)
+            {
+                throw new InvalidOperationException("Package does not exist.");
+            }
+        }
+
         var client = new Client
         {
             TrainerId = request.TrainerId,
+            ActivePackageId = request.ActivePackageId,
             FirstName = request.FirstName,
             LastName = request.LastName,
             Email = request.Email,
             PhoneNumber = request.PhoneNumber,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            AvatarUrl = request.AvatarUrl,
+            Goal = request.Goal,
+            Notes = request.Notes,
+            ProgressPercent = request.ProgressPercent,
+            BillingStatus = request.BillingStatus ?? "Pending",
+            Status = request.Status ?? "New",
+            NextSessionAt = request.NextSessionAt,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = request.CreatedBy
         };
 
         await _context.Clients.AddAsync(client);
@@ -55,11 +77,22 @@ public class ClientService : IClientService
         {
             Id = client.Id,
             TrainerId = client.TrainerId,
+            ActivePackageId = client.ActivePackageId,
             FirstName = client.FirstName,
             LastName = client.LastName,
+            FullName = $"{client.FirstName} {client.LastName}",
             Email = client.Email,
             PhoneNumber = client.PhoneNumber,
-            IsActive = client.IsActive,
+            AvatarUrl = client.AvatarUrl,
+            Goal = client.Goal,
+            Notes = client.Notes,
+            ProgressPercent = client.ProgressPercent,
+            BillingStatus = client.BillingStatus,
+            Status = client.Status,
+            NextSessionAt = client.NextSessionAt,
+            CreatedAt = client.CreatedAt,
+            UpdatedAt = client.UpdatedAt,
+            CreatedBy = client.CreatedBy,
             TrainerFullName = trainerFullName
         };
     }
@@ -73,11 +106,22 @@ public class ClientService : IClientService
             {
                 Id = c.Id,
                 TrainerId = c.TrainerId,
+                ActivePackageId = c.ActivePackageId,
                 FirstName = c.FirstName,
                 LastName = c.LastName,
+                FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
                 PhoneNumber = c.PhoneNumber,
-                IsActive = c.IsActive,
+                AvatarUrl = c.AvatarUrl,
+                Goal = c.Goal,
+                Notes = c.Notes,
+                ProgressPercent = c.ProgressPercent,
+                BillingStatus = c.BillingStatus,
+                Status = c.Status,
+                NextSessionAt = c.NextSessionAt,
+                CreatedAt = c.CreatedAt,
+                UpdatedAt = c.UpdatedAt,
+                CreatedBy = c.CreatedBy,
                 TrainerFullName = c.Trainer != null
                     ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
                     : null
@@ -95,11 +139,22 @@ public class ClientService : IClientService
             {
                 Id = c.Id,
                 TrainerId = c.TrainerId,
+                ActivePackageId = c.ActivePackageId,
                 FirstName = c.FirstName,
                 LastName = c.LastName,
+                FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
                 PhoneNumber = c.PhoneNumber,
-                IsActive = c.IsActive,
+                AvatarUrl = c.AvatarUrl,
+                Goal = c.Goal,
+                Notes = c.Notes,
+                ProgressPercent = c.ProgressPercent,
+                BillingStatus = c.BillingStatus,
+                Status = c.Status,
+                NextSessionAt = c.NextSessionAt,
+                CreatedAt = c.CreatedAt,
+                UpdatedAt = c.UpdatedAt,
+                CreatedBy = c.CreatedBy,
                 TrainerFullName = c.Trainer != null
                     ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
                     : null

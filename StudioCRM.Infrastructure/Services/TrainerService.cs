@@ -41,9 +41,9 @@ public class TrainerService : ITrainerService
             Email = request.Email,
             FirstName = request.FirstName,
             LastName = request.LastName,
-            PhoneNumber = request.PhoneNumber,
             IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
         };
 
         user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
@@ -62,11 +62,15 @@ public class TrainerService : ITrainerService
         var trainer = new Trainer
         {
             UserId = user.Id,
-            Specialization = request.Specialization,
-            EmploymentType = request.EmploymentType,
+            Bio = request.Bio,
+            Phone = request.Phone,
+            AvatarUrl = request.AvatarUrl,
+            Status = request.Status,
+            ExperienceYears = request.ExperienceYears,
             HourlyRate = request.HourlyRate,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = request.CreatedBy
         };
 
         await _context.Trainers.AddAsync(trainer);
@@ -79,11 +83,20 @@ public class TrainerService : ITrainerService
             Email = user.Email,
             FirstName = user.FirstName,
             LastName = user.LastName,
-            PhoneNumber = user.PhoneNumber,
-            Specialization = trainer.Specialization,
-            EmploymentType = trainer.EmploymentType,
+            FullName = $"{user.FirstName} {user.LastName}",
+            Role = "Trainer",
+            Bio = trainer.Bio,
+            Phone = trainer.Phone,
+            AvatarUrl = trainer.AvatarUrl,
+            Status = trainer.Status,
+            ExperienceYears = trainer.ExperienceYears,
+            RatingAverage = 0,
+            SessionsCount = 0,
+            ActiveClientsCount = 0,
             HourlyRate = trainer.HourlyRate,
-            IsActive = trainer.IsActive
+            CreatedAt = trainer.CreatedAt,
+            UpdatedAt = trainer.UpdatedAt,
+            CreatedBy = trainer.CreatedBy
         };
     }
 
@@ -91,6 +104,8 @@ public class TrainerService : ITrainerService
     {
         return await _context.Trainers
             .Include(t => t.User)
+            .Include(t => t.Clients)
+            .Include(t => t.Sessions)
             .Select(t => new TrainerDto
             {
                 Id = t.Id,
@@ -98,11 +113,22 @@ public class TrainerService : ITrainerService
                 Email = t.User.Email,
                 FirstName = t.User.FirstName,
                 LastName = t.User.LastName,
-                PhoneNumber = t.User.PhoneNumber,
-                Specialization = t.Specialization,
-                EmploymentType = t.EmploymentType,
+                FullName = t.User.FirstName + " " + t.User.LastName,
+                Role = t.User.UserRoles
+                    .Select(ur => ur.Role.Name)
+                    .FirstOrDefault() ?? "Trainer",
+                Bio = t.Bio,
+                Phone = t.Phone,
+                AvatarUrl = t.AvatarUrl,
+                Status = t.Status,
+                ExperienceYears = t.ExperienceYears,
+                RatingAverage = 0,
+                SessionsCount = t.Sessions.Count,
+                ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
                 HourlyRate = t.HourlyRate,
-                IsActive = t.IsActive
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt,
+                CreatedBy = t.CreatedBy
             })
             .ToListAsync();
     }
@@ -111,6 +137,8 @@ public class TrainerService : ITrainerService
     {
         return await _context.Trainers
             .Include(t => t.User)
+            .Include(t => t.Clients)
+            .Include(t => t.Sessions)
             .Where(t => t.Id == id)
             .Select(t => new TrainerDto
             {
@@ -119,11 +147,22 @@ public class TrainerService : ITrainerService
                 Email = t.User.Email,
                 FirstName = t.User.FirstName,
                 LastName = t.User.LastName,
-                PhoneNumber = t.User.PhoneNumber,
-                Specialization = t.Specialization,
-                EmploymentType = t.EmploymentType,
+                FullName = t.User.FirstName + " " + t.User.LastName,
+                Role = t.User.UserRoles
+                    .Select(ur => ur.Role.Name)
+                    .FirstOrDefault() ?? "Trainer",
+                Bio = t.Bio,
+                Phone = t.Phone,
+                AvatarUrl = t.AvatarUrl,
+                Status = t.Status,
+                ExperienceYears = t.ExperienceYears,
+                RatingAverage = 0,
+                SessionsCount = t.Sessions.Count,
+                ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
                 HourlyRate = t.HourlyRate,
-                IsActive = t.IsActive
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt,
+                CreatedBy = t.CreatedBy
             })
             .FirstOrDefaultAsync();
     }
