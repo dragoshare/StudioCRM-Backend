@@ -1,8 +1,8 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Auth;
 using StudioCRM.Application.Interfaces;
-using Microsoft.AspNetCore.Authorization;
-using System.Security.Claims;
 
 namespace StudioCRM.Api.Controllers;
 
@@ -16,6 +16,7 @@ public class AuthController : ControllerBase
     {
         _authService = authService;
     }
+
     [AllowAnonymous]
     [HttpPost("login")]
     public async Task<IActionResult> Login([FromBody] LoginRequestDto request)
@@ -29,19 +30,59 @@ public class AuthController : ControllerBase
 
         return Ok(result);
     }
-    [HttpGet("me")]
+
+    [AllowAnonymous]
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterDto request)
+    {
+        var result = await _authService.RegisterAsync(request);
+        return Ok(result);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("refresh")]
+    public async Task<IActionResult> Refresh([FromBody] RefreshTokenRequestDto request)
+    {
+        var result = await _authService.RefreshAsync(request);
+        return Ok(result);
+    }
+
+    [AllowAnonymous]
+    [HttpPost("forgot-password")]
+    public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto request)
+    {
+        await _authService.ForgotPasswordAsync(request);
+        return Ok(new { message = "If the account exists, a reset token has been generated." });
+    }
+
+    [AllowAnonymous]
+    [HttpPost("reset-password")]
+    public async Task<IActionResult> ResetPassword([FromBody] ResetPasswordDto request)
+    {
+        await _authService.ResetPasswordAsync(request);
+        return Ok(new { message = "Password has been reset." });
+    }
+
     [Authorize]
+    [HttpPost("logout")]
+    public IActionResult Logout()
+    {
+        return Ok(new { message = "Logged out successfully." });
+    }
+
+    [Authorize]
+    [HttpGet("me")]
     public IActionResult Me()
     {
-        var userId = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        var email = User.FindFirst(ClaimTypes.Email)?.Value;
-        var role = User.FindFirst(ClaimTypes.Role)?.Value;
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        var email = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue(ClaimTypes.Email);
+        var roles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
         return Ok(new
         {
             userId,
             email,
-            role
+            roles
         });
     }
 }

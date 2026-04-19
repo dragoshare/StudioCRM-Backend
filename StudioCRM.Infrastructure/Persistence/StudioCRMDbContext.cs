@@ -20,6 +20,8 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
+    public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -81,5 +83,18 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Package>()
             .Property(p => p.Price)
             .HasPrecision(10, 2);
+        modelBuilder.Entity<RefreshToken>()
+            .HasOne(rt => rt.User)
+            .WithMany(u => u.RefreshTokens)
+            .HasForeignKey(rt => rt.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<RefreshToken>()
+            .HasIndex(rt => rt.Token)
+            .IsUnique();
+
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email)
+            .IsUnique();
     }
 }
