@@ -34,6 +34,63 @@ public class PackageService : IPackageService
         await _context.Packages.AddAsync(package);
         await _context.SaveChangesAsync();
 
+        return MapToDto(package);
+    }
+
+    public async Task<List<PackageDto>> GetAllAsync()
+    {
+        return await _context.Packages
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => MapToDto(p))
+            .ToListAsync();
+    }
+
+    public async Task<PackageDto?> GetByIdAsync(int id)
+    {
+        return await _context.Packages
+            .Where(p => p.Id == id)
+            .Select(p => MapToDto(p))
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<PackageDto?> UpdateAsync(int id, UpdatePackageDto request)
+    {
+        var package = await _context.Packages.FirstOrDefaultAsync(p => p.Id == id);
+        if (package is null)
+        {
+            return null;
+        }
+
+        package.Name = request.Name;
+        package.Description = request.Description;
+        package.Price = request.Price;
+        package.Currency = request.Currency;
+        package.SessionsLimit = request.SessionsLimit;
+        package.DurationDays = request.DurationDays;
+        package.IsActive = request.IsActive;
+        package.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return MapToDto(package);
+    }
+
+    public async Task<bool> DeleteAsync(int id)
+    {
+        var package = await _context.Packages.FirstOrDefaultAsync(p => p.Id == id);
+        if (package is null)
+        {
+            return false;
+        }
+
+        _context.Packages.Remove(package);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    private static PackageDto MapToDto(Package package)
+    {
         return new PackageDto
         {
             Id = package.Id,
@@ -48,46 +105,5 @@ public class PackageService : IPackageService
             UpdatedAt = package.UpdatedAt,
             CreatedBy = package.CreatedBy
         };
-    }
-
-    public async Task<List<PackageDto>> GetAllAsync()
-    {
-        return await _context.Packages
-            .Select(p => new PackageDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Price,
-                Currency = p.Currency,
-                SessionsLimit = p.SessionsLimit,
-                DurationDays = p.DurationDays,
-                IsActive = p.IsActive,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt,
-                CreatedBy = p.CreatedBy
-            })
-            .ToListAsync();
-    }
-
-    public async Task<PackageDto?> GetByIdAsync(int id)
-    {
-        return await _context.Packages
-            .Where(p => p.Id == id)
-            .Select(p => new PackageDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Price,
-                Currency = p.Currency,
-                SessionsLimit = p.SessionsLimit,
-                DurationDays = p.DurationDays,
-                IsActive = p.IsActive,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt,
-                CreatedBy = p.CreatedBy
-            })
-            .FirstOrDefaultAsync();
     }
 }

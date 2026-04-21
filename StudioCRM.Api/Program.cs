@@ -31,6 +31,7 @@ builder.Services.AddScoped<ITrainerService, TrainerService>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<IPackageService, PackageService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
+builder.Services.AddScoped<IDashboardService, DashboardService>();
 // Authentication
 builder.Services.AddAuthentication(options =>
 {

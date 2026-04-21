@@ -18,19 +18,14 @@ public class PackagesController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<PackageDto>>> GetAll()
     {
-        var result = await _packageService.GetAllAsync();
-        return Ok(result);
+        return Ok(await _packageService.GetAllAsync());
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<PackageDto>> GetById(int id)
     {
         var result = await _packageService.GetByIdAsync(id);
-        if (result is null)
-        {
-            return NotFound();
-        }
-
+        if (result is null) return NotFound();
         return Ok(result);
     }
 
@@ -39,5 +34,21 @@ public class PackagesController : ControllerBase
     {
         var result = await _packageService.CreateAsync(request);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<PackageDto>> Update(int id, UpdatePackageDto request)
+    {
+        var result = await _packageService.UpdateAsync(id, request);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var deleted = await _packageService.DeleteAsync(id);
+        if (!deleted) return NotFound();
+        return NoContent();
     }
 }

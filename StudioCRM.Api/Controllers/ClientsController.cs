@@ -1,5 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
-using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.Interfaces;
 
@@ -7,7 +6,6 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
-[Authorize(Roles = "Owner")]
 public class ClientsController : ControllerBase
 {
     private readonly IClientService _clientService;
@@ -18,36 +16,45 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> GetAll()
+    public async Task<ActionResult<List<ClientDto>>> GetAll()
     {
-        var result = await _clientService.GetAllAsync();
-        return Ok(result);
+        return Ok(await _clientService.GetAllAsync());
     }
 
     [HttpGet("{id:int}")]
-    public async Task<IActionResult> GetById(int id)
+    public async Task<ActionResult<ClientDto>> GetById(int id)
     {
         var result = await _clientService.GetByIdAsync(id);
-
-        if (result is null)
-        {
-            return NotFound();
-        }
-
+        if (result is null) return NotFound();
         return Ok(result);
     }
 
-    [HttpPost]
-    public async Task<IActionResult> Create([FromBody] CreateClientDto request)
+    [HttpGet("filter")]
+    public async Task<ActionResult<List<ClientDto>>> Filter([FromQuery] ClientFilterDto filter)
     {
-        try
-        {
-            var result = await _clientService.CreateAsync(request);
-            return Ok(result);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        return Ok(await _clientService.GetFilteredAsync(filter));
+    }
+
+    [HttpPost]
+    public async Task<ActionResult<ClientDto>> Create(CreateClientDto request)
+    {
+        var result = await _clientService.CreateAsync(request);
+        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<ClientDto>> Update(int id, UpdateClientDto request)
+    {
+        var result = await _clientService.UpdateAsync(id, request);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var deleted = await _clientService.DeleteAsync(id);
+        if (!deleted) return NotFound();
+        return NoContent();
     }
 }

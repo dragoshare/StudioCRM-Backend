@@ -18,20 +18,21 @@ public class SessionsController : ControllerBase
     [HttpGet]
     public async Task<ActionResult<List<SessionDto>>> GetAll()
     {
-        var result = await _sessionService.GetAllAsync();
-        return Ok(result);
+        return Ok(await _sessionService.GetAllAsync());
     }
 
     [HttpGet("{id:int}")]
     public async Task<ActionResult<SessionDto>> GetById(int id)
     {
         var result = await _sessionService.GetByIdAsync(id);
-        if (result is null)
-        {
-            return NotFound();
-        }
-
+        if (result is null) return NotFound();
         return Ok(result);
+    }
+
+    [HttpGet("filter")]
+    public async Task<ActionResult<List<SessionDto>>> Filter([FromQuery] SessionFilterDto filter)
+    {
+        return Ok(await _sessionService.GetFilteredAsync(filter));
     }
 
     [HttpPost]
@@ -39,5 +40,21 @@ public class SessionsController : ControllerBase
     {
         var result = await _sessionService.CreateAsync(request);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+    }
+
+    [HttpPut("{id:int}")]
+    public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)
+    {
+        var result = await _sessionService.UpdateAsync(id, request);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpDelete("{id:int}")]
+    public async Task<IActionResult> Delete(int id)
+    {
+        var deleted = await _sessionService.DeleteAsync(id);
+        if (!deleted) return NotFound();
+        return NoContent();
     }
 }
