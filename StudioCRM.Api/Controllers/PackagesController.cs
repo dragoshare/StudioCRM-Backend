@@ -51,4 +51,18 @@ public class PackagesController : ControllerBase
         if (!deleted) return NotFound();
         return NoContent();
     }
+
+    [HttpPost("{id:int}/restore")]
+    public async Task<IActionResult> Restore(int id)
+    {
+        var restored = await _packageService.RestoreAsync(id);
+        if (!restored) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("deleted")]
+    public async Task<ActionResult<List<PackageDto>>> GetDeleted()
+    {
+        return Ok(await _packageService.GetDeletedAsync());
+    }
 }

@@ -120,9 +120,72 @@ public class ClientService : IClientService
             return false;
         }
 
-        _context.Clients.Remove(client);
+        client.IsDeleted = true;
+        client.DeletedAt = DateTime.UtcNow;
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(); 
+        return true;
+    }
+
+    public async Task<bool> RestoreAsync(int id)
+    {
+        var client = await _context.Clients
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == id);
+
+        if (client is null || !client.IsDeleted)
+        {
+            return false;
+        }
+
+        client.IsDeleted = false;
+        client.DeletedAt = null;
+        client.UpdatedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
         return true;
+    }
+    public async Task<List<ClientDto>> GetDeletedAsync()
+    {
+        return await _context.Clients
+            .IgnoreQueryFilters()
+            .Include(c => c.Trainer)
+                .ThenInclude(t => t!.User)
+            .Include(c => c.ActivePackage)
+            .Where(c => c.IsDeleted)
+            .Select(c => new ClientDto
+            {
+                Id = c.Id,
+                TrainerId = c.TrainerId,
+                ActivePackageId = c.ActivePackageId,
+
+                FirstName = c.FirstName,
+                LastName = c.LastName,
+                FullName = c.FirstName + " " + c.LastName,
+
+                Email = c.Email,
+                PhoneNumber = c.PhoneNumber,
+                AvatarUrl = c.AvatarUrl,
+
+                Goal = c.Goal,
+                Notes = c.Notes,
+
+                ProgressPercent = c.ProgressPercent,
+                BillingStatus = c.BillingStatus,
+                Status = c.Status,
+
+                NextSessionAt = c.NextSessionAt,
+
+                CreatedAt = c.CreatedAt,
+                UpdatedAt = c.UpdatedAt,
+                CreatedBy = c.CreatedBy,
+
+                TrainerFullName = c.Trainer != null
+                    ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
+                    : null
+            })
+            .ToListAsync();
     }
 
     public async Task<List<ClientDto>> GetFilteredAsync(ClientFilterDto filter)

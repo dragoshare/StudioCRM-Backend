@@ -120,20 +120,73 @@ public class TrainerService : ITrainerService
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var trainer = await _context.Trainers
-            .Include(t => t.User)
-            .FirstOrDefaultAsync(t => t.Id == id);
+        var trainer = await _context.Trainers.FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null)
         {
             return false;
         }
 
-        _context.Trainers.Remove(trainer);
-        _context.Users.Remove(trainer.User);
-        await _context.SaveChangesAsync();
+        trainer.IsDeleted = true;
+        trainer.DeletedAt = DateTime.UtcNow;
+        trainer.UpdatedAt = DateTime.UtcNow;
 
+        await _context.SaveChangesAsync();
         return true;
+    }
+
+    public async Task<bool> RestoreAsync(int id)
+    {
+        var trainer = await _context.Trainers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.Id == id);
+
+        if (trainer is null || !trainer.IsDeleted)
+        {
+            return false;
+        }
+
+        trainer.IsDeleted = false;
+        trainer.DeletedAt = null;
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<TrainerDto>> GetDeletedAsync()
+    {
+        return await _context.Trainers
+            .IgnoreQueryFilters()
+            .Include(t => t.User)
+            .Include(t => t.Clients)
+            .Include(t => t.Sessions)
+            .Where(t => t.IsDeleted)
+            .Select(t => new TrainerDto
+            {
+                Id = t.Id,
+                UserId = t.UserId,
+                Email = t.User.Email,
+                FirstName = t.User.FirstName,
+                LastName = t.User.LastName,
+                FullName = t.User.FirstName + " " + t.User.LastName,
+                Role = t.User.UserRoles
+                    .Select(ur => ur.Role.Name)
+                    .FirstOrDefault() ?? "Trainer",
+                Bio = t.Bio,
+                Phone = t.Phone,
+                AvatarUrl = t.AvatarUrl,
+                Status = t.Status,
+                ExperienceYears = t.ExperienceYears,
+                RatingAverage = 0,
+                SessionsCount = t.Sessions.Count,
+                ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
+                HourlyRate = t.HourlyRate,
+                CreatedAt = t.CreatedAt,
+                UpdatedAt = t.UpdatedAt,
+                CreatedBy = t.CreatedBy
+            })
+            .ToListAsync();
     }
 
     private IQueryable<TrainerDto> BuildTrainerQuery()

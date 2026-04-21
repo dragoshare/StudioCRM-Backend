@@ -27,4 +27,6 @@ public class Package
     public ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
 }

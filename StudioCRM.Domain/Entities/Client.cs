@@ -41,4 +41,6 @@ public class Client
     public Package? ActivePackage { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
 }

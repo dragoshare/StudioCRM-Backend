@@ -96,5 +96,16 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<User>()
             .HasIndex(u => u.Email)
             .IsUnique();
+        modelBuilder.Entity<Client>()
+            .HasQueryFilter(c => !c.IsDeleted);
+
+        modelBuilder.Entity<Trainer>()
+            .HasQueryFilter(t => !t.IsDeleted);
+
+        modelBuilder.Entity<Package>()
+            .HasQueryFilter(p => !p.IsDeleted);
+
+        modelBuilder.Entity<Session>()
+            .HasQueryFilter(s => !s.IsDeleted);
     }
 }

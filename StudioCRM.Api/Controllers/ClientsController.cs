@@ -53,8 +53,33 @@ public class ClientsController : ControllerBase
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> Delete(int id)
     {
-        var deleted = await _clientService.DeleteAsync(id);
-        if (!deleted) return NotFound();
+        try
+        {
+            var deleted = await _clientService.DeleteAsync(id);
+            if (!deleted) return NotFound();
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+    [HttpPost("{id}/restore")]
+    public async Task<IActionResult> Restore(int id)
+    {
+        var result = await _clientService.RestoreAsync(id);
+
+        if (!result)
+        {
+            return NotFound();
+        }
+
         return NoContent();
+    }
+
+    [HttpGet("deleted")]
+    public async Task<ActionResult<List<ClientDto>>> GetDeleted()
+    {
+        return Ok(await _clientService.GetDeletedAsync());
     }
 }

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using System.Collections.Generic;
+using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Trainers;
 using StudioCRM.Application.Interfaces;
 
@@ -50,5 +51,19 @@ public class TrainersController : ControllerBase
         var deleted = await _trainerService.DeleteAsync(id);
         if (!deleted) return NotFound();
         return NoContent();
+    }
+
+    [HttpPost("{id:int}/restore")]
+    public async Task<IActionResult> Restore(int id)
+    {
+        var restored = await _trainerService.RestoreAsync(id);
+        if (!restored) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("deleted")]
+    public async Task<ActionResult<List<TrainerDto>>> GetDeleted()
+    {
+        return Ok(await _trainerService.GetDeletedAsync());
     }
 }

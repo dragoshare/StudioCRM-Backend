@@ -10,4 +10,6 @@ public interface ISessionService
     Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request);
     Task<bool> DeleteAsync(int id);
     Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter);
+    Task<bool> RestoreAsync(int id);
+    Task<List<SessionDto>> GetDeletedAsync();
 }

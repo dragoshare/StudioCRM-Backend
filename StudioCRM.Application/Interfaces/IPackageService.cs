@@ -9,4 +9,6 @@ public interface IPackageService
     Task<PackageDto?> GetByIdAsync(int id);
     Task<PackageDto?> UpdateAsync(int id, UpdatePackageDto request);
     Task<bool> DeleteAsync(int id);
+    Task<bool> RestoreAsync(int id);
+    Task<List<PackageDto>> GetDeletedAsync();
 }

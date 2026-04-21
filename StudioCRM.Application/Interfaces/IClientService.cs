@@ -10,4 +10,6 @@ public interface IClientService
     Task<ClientDto?> UpdateAsync(int id, UpdateClientDto request);
     Task<bool> DeleteAsync(int id);
     Task<List<ClientDto>> GetFilteredAsync(ClientFilterDto filter);
+    Task<bool> RestoreAsync(int id);
+    Task<List<ClientDto>> GetDeletedAsync();
 }

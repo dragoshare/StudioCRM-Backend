@@ -57,4 +57,17 @@ public class SessionsController : ControllerBase
         if (!deleted) return NotFound();
         return NoContent();
     }
+    [HttpPost("{id:int}/restore")]
+    public async Task<IActionResult> Restore(int id)
+    {
+        var restored = await _sessionService.RestoreAsync(id);
+        if (!restored) return NotFound();
+        return NoContent();
+    }
+
+    [HttpGet("deleted")]
+    public async Task<ActionResult<List<SessionDto>>> GetDeleted()
+    {
+        return Ok(await _sessionService.GetDeletedAsync());
+    }
 }

@@ -88,9 +88,60 @@ public class SessionService : ISessionService
             return false;
         }
 
-        _context.Sessions.Remove(session);
+        session.IsDeleted = true;
+        session.DeletedAt = DateTime.UtcNow;
+        session.UpdatedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
         return true;
+    }
+    public async Task<bool> RestoreAsync(int id)
+    {
+        var session = await _context.Sessions
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (session is null || !session.IsDeleted)
+        {
+            return false;
+        }
+
+        session.IsDeleted = false;
+        session.DeletedAt = null;
+        session.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<SessionDto>> GetDeletedAsync()
+    {
+        return await _context.Sessions
+            .IgnoreQueryFilters()
+            .Include(s => s.Trainer).ThenInclude(t => t.User)
+            .Include(s => s.Client)
+            .Include(s => s.Package)
+            .Where(s => s.IsDeleted)
+            .Select(s => new SessionDto
+            {
+                Id = s.Id,
+                Title = s.Title,
+                Note = s.Note,
+                StartAt = s.StartAt,
+                EndAt = s.EndAt,
+                TrainerId = s.TrainerId,
+                ClientId = s.ClientId,
+                PackageId = s.PackageId,
+                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
+                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                PackageName = s.Package != null ? s.Package.Name : null,
+                Location = s.Location,
+                Status = s.Status,
+                CreatedAt = s.CreatedAt,
+                UpdatedAt = s.UpdatedAt,
+                CreatedBy = s.CreatedBy
+            })
+            .ToListAsync();
     }
 
     public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)

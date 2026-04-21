@@ -33,4 +33,7 @@ public class Session
     public Client Client { get; set; } = null!;
 
     public Package? Package { get; set; }
+
+    public bool IsDeleted { get; set; } = false;
+    public DateTime? DeletedAt { get; set; }
 }

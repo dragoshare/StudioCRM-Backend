@@ -83,10 +83,52 @@ public class PackageService : IPackageService
             return false;
         }
 
-        _context.Packages.Remove(package);
-        await _context.SaveChangesAsync();
+        package.IsDeleted = true;
+        package.DeletedAt = DateTime.UtcNow;
+        package.UpdatedAt = DateTime.UtcNow;
 
+        await _context.SaveChangesAsync();
         return true;
+    }
+    public async Task<bool> RestoreAsync(int id)
+    {
+        var package = await _context.Packages
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+
+        if (package is null || !package.IsDeleted)
+        {
+            return false;
+        }
+
+        package.IsDeleted = false;
+        package.DeletedAt = null;
+        package.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<List<PackageDto>> GetDeletedAsync()
+    {
+        return await _context.Packages
+            .IgnoreQueryFilters()
+            .Where(p => p.IsDeleted)
+            .Select(p => new PackageDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                Description = p.Description,
+                Price = p.Price,
+                Currency = p.Currency,
+                SessionsLimit = p.SessionsLimit,
+                DurationDays = p.DurationDays,
+                IsActive = p.IsActive,
+                CreatedAt = p.CreatedAt,
+                UpdatedAt = p.UpdatedAt,
+                CreatedBy = p.CreatedBy
+            })
+            .ToListAsync();
     }
 
     private static PackageDto MapToDto(Package package)
