@@ -24,6 +24,7 @@ public class StudioCRMDbContext : DbContext
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
+    public DbSet<Invitation> Invitations => Set<Invitation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -136,5 +137,14 @@ public class StudioCRMDbContext : DbContext
             .WithMany(l => l.Sessions)
             .HasForeignKey(s => s.LocationId)
             .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Invitation>()
+            .HasOne(i => i.Location)
+            .WithMany()
+            .HasForeignKey(i => i.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Invitation>()
+            .HasIndex(i => i.Token)
+            .IsUnique();
     }
 }
