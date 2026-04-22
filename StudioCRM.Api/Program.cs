@@ -20,6 +20,8 @@ builder.Services.Configure<JwtSettings>(
 var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
     ?? throw new InvalidOperationException("JWT settings are not configured.");
 
+builder.Services.Configure<AppSettings>(
+    builder.Configuration.GetSection("App"));
 // Database
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
     options.UseNpgsql(

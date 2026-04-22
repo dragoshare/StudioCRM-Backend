@@ -16,6 +16,10 @@ public class Invitation
 
     public bool IsAccepted { get; set; } = false;
 
+    public DateTime? AcceptedAt { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public int CreatedBy { get; set; }

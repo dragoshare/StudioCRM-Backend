@@ -1,8 +1,10 @@
 ﻿using System.Security.Cryptography;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 
@@ -13,14 +15,17 @@ public class InvitationService : IInvitationService
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly PasswordHasher<User> _passwordHasher;
+    private readonly AppSettings _appSettings;
 
     public InvitationService(
         StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IOptions<AppSettings> appOptions)
     {
         _context = context;
         _currentUser = currentUser;
         _passwordHasher = new PasswordHasher<User>();
+        _appSettings = appOptions.Value;
     }
 
     public async Task<InvitationDto> CreateAsync(CreateInvitationDto request)
@@ -44,7 +49,11 @@ public class InvitationService : IInvitationService
             throw new InvalidOperationException("User with this email already exists.");
 
         var existingPendingInvitation = await _context.Invitations
-            .AnyAsync(i => i.Email == request.Email && !i.IsAccepted && i.ExpiresAt > DateTime.UtcNow);
+            .AnyAsync(i =>
+                i.Email == request.Email &&
+                !i.IsAccepted &&
+                i.CancelledAt == null &&
+                i.ExpiresAt > DateTime.UtcNow);
 
         if (existingPendingInvitation)
             throw new InvalidOperationException("There is already an active invitation for this email.");
@@ -66,18 +75,75 @@ public class InvitationService : IInvitationService
         await _context.Invitations.AddAsync(invitation);
         await _context.SaveChangesAsync();
 
-        return new InvitationDto
+        return MapToDto(invitation, location.Name);
+    }
+
+    public async Task<List<InvitationDto>> GetAllAsync(InvitationFilterDto? filter = null)
+    {
+        var query = _context.Invitations
+            .Include(i => i.Location)
+            .AsQueryable();
+
+        if (filter is not null)
         {
-            Id = invitation.Id,
-            Email = invitation.Email,
-            Role = invitation.Role,
-            LocationId = invitation.LocationId,
-            LocationName = location.Name,
-            Token = invitation.Token,
-            InviteLink = $"https://twoj-frontend.pl/accept-invitation?token={invitation.Token}",
-            ExpiresAt = invitation.ExpiresAt,
-            IsAccepted = invitation.IsAccepted
-        };
+            if (!string.IsNullOrWhiteSpace(filter.Role))
+                query = query.Where(i => i.Role == filter.Role);
+
+            if (filter.LocationId.HasValue)
+                query = query.Where(i => i.LocationId == filter.LocationId.Value);
+
+            if (!string.IsNullOrWhiteSpace(filter.Search))
+            {
+                var search = filter.Search.ToLower();
+                query = query.Where(i => i.Email.ToLower().Contains(search));
+            }
+
+            if (!string.IsNullOrWhiteSpace(filter.Status))
+            {
+                var now = DateTime.UtcNow;
+
+                query = filter.Status switch
+                {
+                    "Pending" => query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > now),
+                    "Accepted" => query.Where(i => i.IsAccepted),
+                    "Expired" => query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt <= now),
+                    "Cancelled" => query.Where(i => i.CancelledAt != null),
+                    _ => query
+                };
+            }
+        }
+
+        return await query
+            .OrderByDescending(i => i.CreatedAt)
+            .Select(i => new InvitationDto
+            {
+                Id = i.Id,
+                Email = i.Email,
+                Role = i.Role,
+                LocationId = i.LocationId,
+                LocationName = i.Location.Name,
+                Token = i.Token,
+                InviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={i.Token}",
+                ExpiresAt = i.ExpiresAt,
+                IsAccepted = i.IsAccepted,
+                AcceptedAt = i.AcceptedAt,
+                CancelledAt = i.CancelledAt,
+                CreatedAt = i.CreatedAt,
+                Status = GetStatus(i)
+            })
+            .ToListAsync();
+    }
+
+    public async Task<InvitationDto?> GetByIdAsync(int id)
+    {
+        var invitation = await _context.Invitations
+            .Include(i => i.Location)
+            .FirstOrDefaultAsync(i => i.Id == id);
+
+        if (invitation is null)
+            return null;
+
+        return MapToDto(invitation, invitation.Location.Name);
     }
 
     public async Task<ValidateInvitationDto?> ValidateAsync(string token)
@@ -86,7 +152,7 @@ public class InvitationService : IInvitationService
             .Include(i => i.Location)
             .FirstOrDefaultAsync(i => i.Token == token);
 
-        if (invitation is null || invitation.IsAccepted || invitation.ExpiresAt <= DateTime.UtcNow)
+        if (invitation is null || invitation.IsAccepted || invitation.CancelledAt != null || invitation.ExpiresAt <= DateTime.UtcNow)
             return null;
 
         return new ValidateInvitationDto
@@ -105,7 +171,7 @@ public class InvitationService : IInvitationService
             .Include(i => i.Location)
             .FirstOrDefaultAsync(i => i.Token == request.Token);
 
-        if (invitation is null || invitation.IsAccepted || invitation.ExpiresAt <= DateTime.UtcNow)
+        if (invitation is null || invitation.IsAccepted || invitation.CancelledAt != null || invitation.ExpiresAt <= DateTime.UtcNow)
             return false;
 
         var existingUser = await _context.Users
@@ -188,9 +254,82 @@ public class InvitationService : IInvitationService
         }
 
         invitation.IsAccepted = true;
+        invitation.AcceptedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
 
         return true;
+    }
+
+    public async Task<InvitationDto?> ResendAsync(int id)
+    {
+        var invitation = await _context.Invitations
+            .Include(i => i.Location)
+            .FirstOrDefaultAsync(i => i.Id == id);
+
+        if (invitation is null)
+            return null;
+
+        if (invitation.IsAccepted)
+            throw new InvalidOperationException("Accepted invitation cannot be resent.");
+
+        if (invitation.CancelledAt != null)
+            throw new InvalidOperationException("Cancelled invitation cannot be resent.");
+
+        invitation.Token = GenerateToken();
+        invitation.ExpiresAt = DateTime.UtcNow.AddDays(3);
+
+        await _context.SaveChangesAsync();
+
+        return MapToDto(invitation, invitation.Location.Name);
+    }
+
+    public async Task<bool> CancelAsync(int id)
+    {
+        var invitation = await _context.Invitations
+            .FirstOrDefaultAsync(i => i.Id == id);
+
+        if (invitation is null)
+            return false;
+
+        if (invitation.IsAccepted)
+            throw new InvalidOperationException("Accepted invitation cannot be cancelled.");
+
+        if (invitation.CancelledAt is not null)
+            return true;
+
+        invitation.CancelledAt = DateTime.UtcNow;
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    private InvitationDto MapToDto(Invitation invitation, string locationName)
+    {
+        return new InvitationDto
+        {
+            Id = invitation.Id,
+            Email = invitation.Email,
+            Role = invitation.Role,
+            LocationId = invitation.LocationId,
+            LocationName = locationName,
+            Token = invitation.Token,
+            InviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}",
+            ExpiresAt = invitation.ExpiresAt,
+            IsAccepted = invitation.IsAccepted,
+            AcceptedAt = invitation.AcceptedAt,
+            CancelledAt = invitation.CancelledAt,
+            CreatedAt = invitation.CreatedAt,
+            Status = GetStatus(invitation)
+        };
+    }
+
+    private static string GetStatus(Invitation invitation)
+    {
+        if (invitation.IsAccepted) return "Accepted";
+        if (invitation.CancelledAt != null) return "Cancelled";
+        if (invitation.ExpiresAt <= DateTime.UtcNow) return "Expired";
+        return "Pending";
     }
 
     private static string GenerateToken()

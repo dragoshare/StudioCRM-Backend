@@ -19,4 +19,12 @@ public class InvitationDto
     public DateTime ExpiresAt { get; set; }
 
     public bool IsAccepted { get; set; }
+
+    public DateTime? AcceptedAt { get; set; }
+
+    public DateTime? CancelledAt { get; set; }
+
+    public DateTime CreatedAt { get; set; }
+
+    public string Status { get; set; } = string.Empty;
 }
