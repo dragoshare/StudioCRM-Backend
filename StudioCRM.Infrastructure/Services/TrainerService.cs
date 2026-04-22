@@ -24,17 +24,24 @@ public class TrainerService : ITrainerService
             .FirstOrDefaultAsync(u => u.Email == request.Email);
 
         if (existingUser is not null)
-        {
             throw new InvalidOperationException("User with this email already exists.");
-        }
+
+        if (request.LocationIds is null || request.LocationIds.Count == 0)
+            throw new InvalidOperationException("Trainer must be assigned to at least one location.");
+
+        var distinctLocationIds = request.LocationIds.Distinct().ToList();
+
+        var locationsExist = await _context.Locations
+            .CountAsync(l => distinctLocationIds.Contains(l.Id));
+
+        if (locationsExist != distinctLocationIds.Count)
+            throw new InvalidOperationException("One or more locations do not exist.");
 
         var trainerRole = await _context.Roles
             .FirstOrDefaultAsync(r => r.Name == "Trainer");
 
         if (trainerRole is null)
-        {
             throw new InvalidOperationException("Trainer role does not exist.");
-        }
 
         var user = new User
         {
@@ -74,6 +81,15 @@ public class TrainerService : ITrainerService
         await _context.Trainers.AddAsync(trainer);
         await _context.SaveChangesAsync();
 
+        await _context.TrainerLocations.AddRangeAsync(
+            distinctLocationIds.Select(locationId => new TrainerLocation
+            {
+                TrainerId = trainer.Id,
+                LocationId = locationId
+            }));
+
+        await _context.SaveChangesAsync();
+
         return await GetProjectedById(trainer.Id);
     }
 
@@ -97,9 +113,18 @@ public class TrainerService : ITrainerService
             .FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null)
-        {
             return null;
-        }
+
+        if (request.LocationIds is null || request.LocationIds.Count == 0)
+            throw new InvalidOperationException("Trainer must be assigned to at least one location.");
+
+        var distinctLocationIds = request.LocationIds.Distinct().ToList();
+
+        var locationsExist = await _context.Locations
+            .CountAsync(l => distinctLocationIds.Contains(l.Id));
+
+        if (locationsExist != distinctLocationIds.Count)
+            throw new InvalidOperationException("One or more locations do not exist.");
 
         trainer.User.FirstName = request.FirstName;
         trainer.User.LastName = request.LastName;
@@ -113,6 +138,19 @@ public class TrainerService : ITrainerService
         trainer.HourlyRate = request.HourlyRate;
         trainer.UpdatedAt = DateTime.UtcNow;
 
+        var existingTrainerLocations = await _context.TrainerLocations
+            .Where(tl => tl.TrainerId == trainer.Id)
+            .ToListAsync();
+
+        _context.TrainerLocations.RemoveRange(existingTrainerLocations);
+
+        await _context.TrainerLocations.AddRangeAsync(
+            distinctLocationIds.Select(locationId => new TrainerLocation
+            {
+                TrainerId = trainer.Id,
+                LocationId = locationId
+            }));
+
         await _context.SaveChangesAsync();
 
         return await GetProjectedById(id);
@@ -123,9 +161,7 @@ public class TrainerService : ITrainerService
         var trainer = await _context.Trainers.FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null)
-        {
             return false;
-        }
 
         trainer.IsDeleted = true;
         trainer.DeletedAt = DateTime.UtcNow;
@@ -142,9 +178,7 @@ public class TrainerService : ITrainerService
             .FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null || !trainer.IsDeleted)
-        {
             return false;
-        }
 
         trainer.IsDeleted = false;
         trainer.DeletedAt = null;
@@ -159,8 +193,12 @@ public class TrainerService : ITrainerService
         return await _context.Trainers
             .IgnoreQueryFilters()
             .Include(t => t.User)
+            .ThenInclude(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
             .Include(t => t.Clients)
             .Include(t => t.Sessions)
+            .Include(t => t.TrainerLocations)
+                .ThenInclude(tl => tl.Location)
             .Where(t => t.IsDeleted)
             .Select(t => new TrainerDto
             {
@@ -184,7 +222,9 @@ public class TrainerService : ITrainerService
                 HourlyRate = t.HourlyRate,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
-                CreatedBy = t.CreatedBy
+                CreatedBy = t.CreatedBy,
+                LocationIds = t.TrainerLocations.Select(tl => tl.LocationId).ToList(),
+                LocationNames = t.TrainerLocations.Select(tl => tl.Location.Name).ToList()
             })
             .ToListAsync();
     }
@@ -193,8 +233,12 @@ public class TrainerService : ITrainerService
     {
         return _context.Trainers
             .Include(t => t.User)
+            .ThenInclude(u => u.UserRoles)
+            .ThenInclude(ur => ur.Role)
             .Include(t => t.Clients)
             .Include(t => t.Sessions)
+            .Include(t => t.TrainerLocations)
+                .ThenInclude(tl => tl.Location)
             .Select(t => new TrainerDto
             {
                 Id = t.Id,
@@ -217,7 +261,9 @@ public class TrainerService : ITrainerService
                 HourlyRate = t.HourlyRate,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
-                CreatedBy = t.CreatedBy
+                CreatedBy = t.CreatedBy,
+                LocationIds = t.TrainerLocations.Select(tl => tl.LocationId).ToList(),
+                LocationNames = t.TrainerLocations.Select(tl => tl.Location.Name).ToList()
             });
     }
 

@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Mvc;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Packages;
 using StudioCRM.Application.Interfaces;
 
@@ -6,6 +7,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize]
 public class PackagesController : ControllerBase
 {
     private readonly IPackageService _packageService;
@@ -16,12 +18,14 @@ public class PackagesController : ControllerBase
     }
 
     [HttpGet]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<PackageDto>>> GetAll()
     {
         return Ok(await _packageService.GetAllAsync());
     }
 
     [HttpGet("{id:int}")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<PackageDto>> GetById(int id)
     {
         var result = await _packageService.GetByIdAsync(id);
@@ -30,6 +34,7 @@ public class PackagesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<PackageDto>> Create(CreatePackageDto request)
     {
         var result = await _packageService.CreateAsync(request);
@@ -37,6 +42,7 @@ public class PackagesController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<PackageDto>> Update(int id, UpdatePackageDto request)
     {
         var result = await _packageService.UpdateAsync(id, request);
@@ -45,6 +51,7 @@ public class PackagesController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Delete(int id)
     {
         var deleted = await _packageService.DeleteAsync(id);
@@ -53,6 +60,7 @@ public class PackagesController : ControllerBase
     }
 
     [HttpPost("{id:int}/restore")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Restore(int id)
     {
         var restored = await _packageService.RestoreAsync(id);
@@ -61,6 +69,7 @@ public class PackagesController : ControllerBase
     }
 
     [HttpGet("deleted")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<List<PackageDto>>> GetDeleted()
     {
         return Ok(await _packageService.GetDeletedAsync());

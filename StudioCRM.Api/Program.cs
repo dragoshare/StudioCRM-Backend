@@ -32,7 +32,10 @@ builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<IPackageService, PackageService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
+builder.Services.AddScoped<ILocationService, LocationService>();
+builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 // Authentication
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>
 {
     options.DefaultAuthenticateScheme = JwtBearerDefaults.AuthenticationScheme;
@@ -113,5 +116,4 @@ using (var scope = app.Services.CreateScope())
     var dbContext = scope.ServiceProvider.GetRequiredService<StudioCRMDbContext>();
     await DataSeeder.SeedAsync(dbContext);
 }
-
 app.Run();

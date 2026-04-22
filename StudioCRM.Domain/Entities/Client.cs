@@ -7,6 +7,7 @@ public class Client
     public int? TrainerId { get; set; }
 
     public int? ActivePackageId { get; set; }
+    public int LocationId { get; set; }
 
     public string FirstName { get; set; } = string.Empty;
 
@@ -39,6 +40,7 @@ public class Client
     public Trainer? Trainer { get; set; }
 
     public Package? ActivePackage { get; set; }
+    public Location Location { get; set; } = null!;
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
     public bool IsDeleted { get; set; } = false;

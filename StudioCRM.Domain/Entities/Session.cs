@@ -18,7 +18,9 @@ public class Session
 
     public int? PackageId { get; set; }
 
-    public string? Location { get; set; }
+    public string? StudioRoom { get; set; }
+
+    public int LocationId { get; set; }
 
     public string Status { get; set; } = "Planned";
 
@@ -28,12 +30,15 @@ public class Session
 
     public int? CreatedBy { get; set; }
 
+    public bool IsDeleted { get; set; } = false;
+
+    public DateTime? DeletedAt { get; set; }
+
     public Trainer Trainer { get; set; } = null!;
 
     public Client Client { get; set; } = null!;
 
     public Package? Package { get; set; }
 
-    public bool IsDeleted { get; set; } = false;
-    public DateTime? DeletedAt { get; set; }
+    public Location Location { get; set; } = null!;
 }

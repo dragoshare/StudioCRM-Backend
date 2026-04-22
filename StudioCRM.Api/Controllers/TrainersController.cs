@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Trainers;
 using StudioCRM.Application.Interfaces;
@@ -7,6 +8,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/[controller]")]
+[Authorize(Roles = "Owner")]
 public class TrainersController : ControllerBase
 {
     private readonly ITrainerService _trainerService;

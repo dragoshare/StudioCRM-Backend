@@ -24,12 +24,15 @@ public class Trainer
 
     public int? CreatedBy { get; set; }
 
+    public bool IsDeleted { get; set; } = false;
+
+    public DateTime? DeletedAt { get; set; }
+
     public User User { get; set; } = null!;
 
     public ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
 
-    public bool IsDeleted { get; set; } = false;
-    public DateTime? DeletedAt { get; set; }
+    public ICollection<TrainerLocation> TrainerLocations { get; set; } = new List<TrainerLocation>();
 }

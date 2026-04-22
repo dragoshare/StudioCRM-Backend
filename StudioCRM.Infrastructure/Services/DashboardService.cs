@@ -14,20 +14,42 @@ public class DashboardService : IDashboardService
         _context = context;
     }
 
-    public async Task<OwnerDashboardDto> GetOwnerDashboardAsync()
+    public async Task<OwnerDashboardDto> GetOwnerDashboardAsync(int? locationId = null)
     {
         var today = DateTime.UtcNow.Date;
         var tomorrow = today.AddDays(1);
         var dayAfterTomorrow = today.AddDays(2);
 
-        var trainersCount = await _context.Trainers.CountAsync();
-        var activeClientsCount = await _context.Clients.CountAsync(c => c.Status == "Active");
-        var plannedSessionsCount = await _context.Sessions.CountAsync(s => s.Status == "Planned");
-        var activePackagesCount = await _context.Packages.CountAsync(p => p.IsActive);
+        var trainersQuery = _context.Trainers.AsQueryable();
+        if (locationId.HasValue)
+        {
+            trainersQuery = trainersQuery.Where(t =>
+                t.TrainerLocations.Any(tl => tl.LocationId == locationId.Value));
+        }
 
-        var todaySessions = await _context.Sessions
+        var clientsQuery = _context.Clients.AsQueryable();
+        if (locationId.HasValue)
+        {
+            clientsQuery = clientsQuery.Where(c => c.LocationId == locationId.Value);
+        }
+
+        var sessionsQuery = _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Client)
+            .Include(s => s.Location)
+            .AsQueryable();
+
+        if (locationId.HasValue)
+        {
+            sessionsQuery = sessionsQuery.Where(s => s.LocationId == locationId.Value);
+        }
+
+        var trainersCount = await trainersQuery.CountAsync();
+        var activeClientsCount = await clientsQuery.CountAsync(c => c.Status == "Active");
+        var plannedSessionsCount = await sessionsQuery.CountAsync(s => s.Status == "Planned");
+        var activePackagesCount = await _context.Packages.CountAsync(p => p.IsActive);
+
+        var todaySessions = await sessionsQuery
             .Where(s => s.StartAt >= today && s.StartAt < tomorrow)
             .OrderBy(s => s.StartAt)
             .Select(s => new DashboardSessionDto
@@ -38,14 +60,12 @@ public class DashboardService : IDashboardService
                 EndAt = s.EndAt,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
                 ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
-                Location = s.Location,
+                Location = s.Location.Name,
                 Status = s.Status
             })
             .ToListAsync();
 
-        var tomorrowSessions = await _context.Sessions
-            .Include(s => s.Trainer).ThenInclude(t => t.User)
-            .Include(s => s.Client)
+        var tomorrowSessions = await sessionsQuery
             .Where(s => s.StartAt >= tomorrow && s.StartAt < dayAfterTomorrow)
             .OrderBy(s => s.StartAt)
             .Select(s => new DashboardSessionDto
@@ -56,12 +76,12 @@ public class DashboardService : IDashboardService
                 EndAt = s.EndAt,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
                 ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
-                Location = s.Location,
+                Location = s.Location.Name,
                 Status = s.Status
             })
             .ToListAsync();
 
-        var recentClients = await _context.Clients
+        var recentClients = await clientsQuery
             .OrderByDescending(c => c.CreatedAt)
             .Take(5)
             .Select(c => new DashboardClientDto

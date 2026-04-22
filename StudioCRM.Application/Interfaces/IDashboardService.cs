@@ -4,5 +4,5 @@ namespace StudioCRM.Application.Interfaces;
 
 public interface IDashboardService
 {
-    Task<OwnerDashboardDto> GetOwnerDashboardAsync();
+    Task<OwnerDashboardDto> GetOwnerDashboardAsync(int? locationId = null);
 }

@@ -45,15 +45,41 @@ public static class DataSeeder
 
             var ownerRole = await context.Roles.FirstAsync(r => r.Name == "Owner");
 
-            var userRole = new UserRole
+            await context.UserRoles.AddAsync(new UserRole
             {
                 UserId = owner.Id,
                 RoleId = ownerRole.Id
-            };
+            });
 
-            await context.UserRoles.AddAsync(userRole);
             await context.SaveChangesAsync();
         }
+
+        if (!await context.Locations.AnyAsync())
+        {
+            var locations = new List<Location>
+            {
+                new Location
+                {
+                    Name = "Niepołomice",
+                    City = "Niepołomice",
+                    Address = "ul. Przykładowa 1",
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                },
+                new Location
+                {
+                    Name = "Kłaj",
+                    City = "Kłaj",
+                    Address = "ul. Przykładowa 2",
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow
+                }
+            };
+
+            await context.Locations.AddRangeAsync(locations);
+            await context.SaveChangesAsync();
+        }
+
         if (!await context.Trainers.AnyAsync())
         {
             var passwordHasher = new PasswordHasher<User>();
@@ -90,83 +116,112 @@ public static class DataSeeder
                 ExperienceYears = 5,
                 HourlyRate = 120,
                 CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
+                UpdatedAt = DateTime.UtcNow,
+                CreatedBy = 1
             };
 
             await context.Trainers.AddAsync(trainer);
             await context.SaveChangesAsync();
+
+            var locations = await context.Locations.OrderBy(l => l.Id).ToListAsync();
+
+            await context.TrainerLocations.AddRangeAsync(new List<TrainerLocation>
+            {
+                new TrainerLocation
+                {
+                    TrainerId = trainer.Id,
+                    LocationId = locations[0].Id
+                },
+                new TrainerLocation
+                {
+                    TrainerId = trainer.Id,
+                    LocationId = locations[1].Id
+                }
+            });
+
+            await context.SaveChangesAsync();
         }
+
         if (!await context.Packages.AnyAsync())
         {
             var packages = new List<Package>
-    {
-        new Package
-        {
-            Name = "4 treningi",
-            Price = 400,
-            Currency = "PLN",
-            SessionsLimit = 4,
-            DurationDays = 30,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        },
-        new Package
-        {
-            Name = "8 treningów",
-            Price = 720,
-            Currency = "PLN",
-            SessionsLimit = 8,
-            DurationDays = 30,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        }
-    };
+            {
+                new Package
+                {
+                    Name = "4 treningi",
+                    Price = 400,
+                    Currency = "PLN",
+                    SessionsLimit = 4,
+                    DurationDays = 30,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    CreatedBy = 1
+                },
+                new Package
+                {
+                    Name = "8 treningów",
+                    Price = 720,
+                    Currency = "PLN",
+                    SessionsLimit = 8,
+                    DurationDays = 30,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    CreatedBy = 1
+                }
+            };
 
             await context.Packages.AddRangeAsync(packages);
             await context.SaveChangesAsync();
         }
+
         if (!await context.Clients.AnyAsync())
         {
             var trainer = await context.Trainers.FirstAsync();
             var package = await context.Packages.FirstAsync();
+            var defaultLocation = await context.Locations.FirstAsync();
 
             var clients = new List<Client>
-    {
-        new Client
-        {
-            FirstName = "Anna",
-            LastName = "Nowak",
-            Email = "anna@test.pl",
-            PhoneNumber = "111222333",
-            TrainerId = trainer.Id,
-            ActivePackageId = package.Id,
-            Status = "Active",
-            ProgressPercent = 20,
-            BillingStatus = "Paid",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        },
-        new Client
-        {
-            FirstName = "Piotr",
-            LastName = "Zielinski",
-            Email = "piotr@test.pl",
-            PhoneNumber = "444555666",
-            TrainerId = trainer.Id,
-            ActivePackageId = package.Id,
-            Status = "Active",
-            ProgressPercent = 50,
-            BillingStatus = "Pending",
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        }
-    };
+            {
+                new Client
+                {
+                    FirstName = "Anna",
+                    LastName = "Nowak",
+                    Email = "anna@test.pl",
+                    PhoneNumber = "111222333",
+                    TrainerId = trainer.Id,
+                    ActivePackageId = package.Id,
+                    LocationId = defaultLocation.Id,
+                    Status = "Active",
+                    ProgressPercent = 20,
+                    BillingStatus = "Paid",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    CreatedBy = 1
+                },
+                new Client
+                {
+                    FirstName = "Piotr",
+                    LastName = "Zieliński",
+                    Email = "piotr@test.pl",
+                    PhoneNumber = "444555666",
+                    TrainerId = trainer.Id,
+                    ActivePackageId = package.Id,
+                    LocationId = defaultLocation.Id,
+                    Status = "Active",
+                    ProgressPercent = 50,
+                    BillingStatus = "Pending",
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow,
+                    CreatedBy = 1
+                }
+            };
 
             await context.Clients.AddRangeAsync(clients);
             await context.SaveChangesAsync();
         }
+
         if (!await context.Sessions.AnyAsync())
         {
             var trainer = await context.Trainers.FirstAsync();
@@ -183,10 +238,12 @@ public static class DataSeeder
             TrainerId = trainer.Id,
             ClientId = client.Id,
             PackageId = package.Id,
-            Location = "Studio Niepołomice",
+            StudioRoom = "Studio Niepołomice",
+            LocationId = client.LocationId,
             Status = "Planned",
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = 1
         },
         new Session
         {
@@ -196,10 +253,12 @@ public static class DataSeeder
             TrainerId = trainer.Id,
             ClientId = client.Id,
             PackageId = package.Id,
-            Location = "Studio Kłaj",
+            StudioRoom = "Studio Kłaj",
+            LocationId = client.LocationId,
             Status = "Planned",
             CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = 1
         }
     };
 

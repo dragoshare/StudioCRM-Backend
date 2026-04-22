@@ -17,4 +17,5 @@ public class CreateTrainerDto
     public decimal HourlyRate { get; set; }
 
     public int? CreatedBy { get; set; }
+    public List<int> LocationIds { get; set; } = [];
 }

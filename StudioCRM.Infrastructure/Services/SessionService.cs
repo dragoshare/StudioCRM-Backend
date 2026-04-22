@@ -9,15 +9,34 @@ namespace StudioCRM.Infrastructure.Services;
 public class SessionService : ISessionService
 {
     private readonly StudioCRMDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
-    public SessionService(StudioCRMDbContext context)
+    public SessionService(StudioCRMDbContext context, ICurrentUserService currentUser)
     {
         _context = context;
+        _currentUser = currentUser;
     }
 
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
-        await ValidateReferences(request.TrainerId, request.ClientId, request.PackageId);
+        if (_currentUser.IsTrainer)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new InvalidOperationException("Current trainer user is invalid.");
+
+            var currentTrainer = await _context.Trainers
+                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+
+            if (currentTrainer is null)
+                throw new InvalidOperationException("Trainer profile not found.");
+
+            if (request.TrainerId != currentTrainer.Id)
+                throw new InvalidOperationException("Trainer can create sessions only for themselves.");
+
+            request.TrainerId = currentTrainer.Id;
+        }
+
+        await ValidateReferences(request.TrainerId, request.ClientId, request.PackageId, request.LocationId);
 
         var session = new Session
         {
@@ -28,7 +47,8 @@ public class SessionService : ISessionService
             TrainerId = request.TrainerId,
             ClientId = request.ClientId,
             PackageId = request.PackageId,
-            Location = request.Location,
+            StudioRoom = request.StudioRoom,
+            LocationId = request.LocationId,
             Status = request.Status,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -43,26 +63,45 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetAllAsync()
     {
-        return await BuildSessionQuery()
+        var query = ApplyAccessControl(BuildSessionQuery());
+
+        return await query
             .OrderBy(s => s.StartAt)
             .ToListAsync();
     }
 
     public async Task<SessionDto?> GetByIdAsync(int id)
     {
-        return await BuildSessionQuery()
+        var query = ApplyAccessControl(BuildSessionQuery());
+
+        return await query
             .FirstOrDefaultAsync(s => s.Id == id);
     }
 
     public async Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request)
     {
-        await ValidateReferences(request.TrainerId, request.ClientId, request.PackageId);
-
         var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == id);
         if (session is null)
-        {
             return null;
+
+        if (_currentUser.IsTrainer)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new InvalidOperationException("Current trainer user is invalid.");
+
+            var currentTrainer = await _context.Trainers
+                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+
+            if (currentTrainer is null)
+                throw new InvalidOperationException("Trainer profile not found.");
+
+            if (session.TrainerId != currentTrainer.Id)
+                throw new InvalidOperationException("Trainer can update only their own sessions.");
+
+            request.TrainerId = currentTrainer.Id;
         }
+
+        await ValidateReferences(request.TrainerId, request.ClientId, request.PackageId, request.LocationId);
 
         session.Title = request.Title;
         session.Note = request.Note;
@@ -71,7 +110,8 @@ public class SessionService : ISessionService
         session.TrainerId = request.TrainerId;
         session.ClientId = request.ClientId;
         session.PackageId = request.PackageId;
-        session.Location = request.Location;
+        session.StudioRoom = request.StudioRoom;
+        session.LocationId = request.LocationId;
         session.Status = request.Status;
         session.UpdatedAt = DateTime.UtcNow;
 
@@ -84,9 +124,7 @@ public class SessionService : ISessionService
     {
         var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == id);
         if (session is null)
-        {
             return false;
-        }
 
         session.IsDeleted = true;
         session.DeletedAt = DateTime.UtcNow;
@@ -95,6 +133,7 @@ public class SessionService : ISessionService
         await _context.SaveChangesAsync();
         return true;
     }
+
     public async Task<bool> RestoreAsync(int id)
     {
         var session = await _context.Sessions
@@ -102,9 +141,7 @@ public class SessionService : ISessionService
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (session is null || !session.IsDeleted)
-        {
             return false;
-        }
 
         session.IsDeleted = false;
         session.DeletedAt = null;
@@ -121,6 +158,7 @@ public class SessionService : ISessionService
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Client)
             .Include(s => s.Package)
+            .Include(s => s.Location)
             .Where(s => s.IsDeleted)
             .Select(s => new SessionDto
             {
@@ -132,10 +170,12 @@ public class SessionService : ISessionService
                 TrainerId = s.TrainerId,
                 ClientId = s.ClientId,
                 PackageId = s.PackageId,
+                LocationId = s.LocationId,
+                LocationName = s.Location.Name,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
                 ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
                 PackageName = s.Package != null ? s.Package.Name : null,
-                Location = s.Location,
+                StudioRoom = s.StudioRoom,
                 Status = s.Status,
                 CreatedAt = s.CreatedAt,
                 UpdatedAt = s.UpdatedAt,
@@ -146,13 +186,16 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
     {
-        var query = BuildSessionQuery();
+        var query = ApplyAccessControl(BuildSessionQuery());
 
         if (filter.TrainerId.HasValue)
             query = query.Where(s => s.TrainerId == filter.TrainerId.Value);
 
         if (filter.ClientId.HasValue)
             query = query.Where(s => s.ClientId == filter.ClientId.Value);
+
+        if (filter.LocationId.HasValue)
+            query = query.Where(s => s.LocationId == filter.LocationId.Value);
 
         if (filter.DateFrom.HasValue)
             query = query.Where(s => s.StartAt >= filter.DateFrom.Value);
@@ -174,6 +217,7 @@ public class SessionService : ISessionService
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Client)
             .Include(s => s.Package)
+            .Include(s => s.Location)
             .Select(s => new SessionDto
             {
                 Id = s.Id,
@@ -184,10 +228,12 @@ public class SessionService : ISessionService
                 TrainerId = s.TrainerId,
                 ClientId = s.ClientId,
                 PackageId = s.PackageId,
+                LocationId = s.LocationId,
+                LocationName = s.Location.Name,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
                 ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
                 PackageName = s.Package != null ? s.Package.Name : null,
-                Location = s.Location,
+                StudioRoom = s.StudioRoom,
                 Status = s.Status,
                 CreatedAt = s.CreatedAt,
                 UpdatedAt = s.UpdatedAt,
@@ -195,12 +241,28 @@ public class SessionService : ISessionService
             });
     }
 
-    private async Task<SessionDto> GetProjectedById(int id)
+    private IQueryable<SessionDto> ApplyAccessControl(IQueryable<SessionDto> query)
     {
-        return await BuildSessionQuery().FirstAsync(s => s.Id == id);
+        if (_currentUser.IsOwner)
+            return query;
+
+        if (_currentUser.IsTrainer && _currentUser.UserId.HasValue)
+        {
+            return query.Where(s =>
+                _context.Trainers.Any(t => t.Id == s.TrainerId && t.UserId == _currentUser.UserId.Value));
+        }
+
+        return query.Where(s => false);
     }
 
-    private async Task ValidateReferences(int trainerId, int clientId, int? packageId)
+    private async Task<SessionDto> GetProjectedById(int id)
+    {
+        var query = ApplyAccessControl(BuildSessionQuery());
+
+        return await query.FirstAsync(s => s.Id == id);
+    }
+
+    private async Task ValidateReferences(int trainerId, int clientId, int? packageId, int locationId)
     {
         var trainerExists = await _context.Trainers.AnyAsync(t => t.Id == trainerId);
         if (!trainerExists)
@@ -216,5 +278,15 @@ public class SessionService : ISessionService
             if (!packageExists)
                 throw new InvalidOperationException("Package does not exist.");
         }
+
+        var locationExists = await _context.Locations.AnyAsync(l => l.Id == locationId);
+        if (!locationExists)
+            throw new InvalidOperationException("Location does not exist.");
+
+        var trainerInLocation = await _context.TrainerLocations
+            .AnyAsync(tl => tl.TrainerId == trainerId && tl.LocationId == locationId);
+
+        if (!trainerInLocation)
+            throw new InvalidOperationException("Trainer is not assigned to this location.");
     }
 }

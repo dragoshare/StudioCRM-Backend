@@ -22,6 +22,8 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<Location> Locations => Set<Location>();
+    public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -107,5 +109,32 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<Session>()
             .HasQueryFilter(s => !s.IsDeleted);
+
+        modelBuilder.Entity<TrainerLocation>()
+            .HasKey(tl => new { tl.TrainerId, tl.LocationId });
+
+        modelBuilder.Entity<TrainerLocation>()
+            .HasOne(tl => tl.Trainer)
+            .WithMany(t => t.TrainerLocations)
+            .HasForeignKey(tl => tl.TrainerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<TrainerLocation>()
+            .HasOne(tl => tl.Location)
+            .WithMany(l => l.TrainerLocations)
+            .HasForeignKey(tl => tl.LocationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Client>()
+            .HasOne(c => c.Location)
+            .WithMany(l => l.Clients)
+            .HasForeignKey(c => c.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Session>()
+            .HasOne(s => s.Location)
+            .WithMany(l => l.Sessions)
+            .HasForeignKey(s => s.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
     }
 }

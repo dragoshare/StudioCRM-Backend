@@ -9,10 +9,12 @@ namespace StudioCRM.Infrastructure.Services;
 public class ClientService : IClientService
 {
     private readonly StudioCRMDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
-    public ClientService(StudioCRMDbContext context)
+    public ClientService(StudioCRMDbContext context, ICurrentUserService currentUser)
     {
         _context = context;
+        _currentUser = currentUser;
     }
 
     public async Task<ClientDto> CreateAsync(CreateClientDto request)
@@ -31,10 +33,32 @@ public class ClientService : IClientService
                 throw new InvalidOperationException("Package does not exist.");
         }
 
+        var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
+        if (!locationExists)
+            throw new InvalidOperationException("Location does not exist.");
+
+        if (_currentUser.IsTrainer)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new InvalidOperationException("Current trainer user is invalid.");
+
+            var currentTrainer = await _context.Trainers
+                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+
+            if (currentTrainer is null)
+                throw new InvalidOperationException("Trainer profile not found.");
+
+            if (request.TrainerId.HasValue && request.TrainerId.Value != currentTrainer.Id)
+                throw new InvalidOperationException("Trainer can create clients only for themselves.");
+
+            request.TrainerId = currentTrainer.Id;
+        }
+
         var client = new Client
         {
             TrainerId = request.TrainerId,
             ActivePackageId = request.ActivePackageId,
+            LocationId = request.LocationId,
             FirstName = request.FirstName,
             LastName = request.LastName,
             Email = request.Email,
@@ -59,14 +83,18 @@ public class ClientService : IClientService
 
     public async Task<List<ClientDto>> GetAllAsync()
     {
-        return await BuildClientQuery()
+        var query = ApplyAccessControl(BuildClientQuery());
+
+        return await query
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync();
     }
 
     public async Task<ClientDto?> GetByIdAsync(int id)
     {
-        return await BuildClientQuery()
+        var query = ApplyAccessControl(BuildClientQuery());
+
+        return await query
             .FirstOrDefaultAsync(c => c.Id == id);
     }
 
@@ -86,14 +114,34 @@ public class ClientService : IClientService
                 throw new InvalidOperationException("Package does not exist.");
         }
 
+        var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
+        if (!locationExists)
+            throw new InvalidOperationException("Location does not exist.");
+
         var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
         if (client is null)
-        {
             return null;
+
+        if (_currentUser.IsTrainer)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new InvalidOperationException("Current trainer user is invalid.");
+
+            var currentTrainer = await _context.Trainers
+                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+
+            if (currentTrainer is null)
+                throw new InvalidOperationException("Trainer profile not found.");
+
+            if (client.TrainerId != currentTrainer.Id)
+                throw new InvalidOperationException("Trainer can update only their own clients.");
+
+            request.TrainerId = currentTrainer.Id;
         }
 
         client.TrainerId = request.TrainerId;
         client.ActivePackageId = request.ActivePackageId;
+        client.LocationId = request.LocationId;
         client.FirstName = request.FirstName;
         client.LastName = request.LastName;
         client.Email = request.Email;
@@ -116,15 +164,13 @@ public class ClientService : IClientService
     {
         var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
         if (client is null)
-        {
             return false;
-        }
 
         client.IsDeleted = true;
         client.DeletedAt = DateTime.UtcNow;
         client.UpdatedAt = DateTime.UtcNow;
 
-        await _context.SaveChangesAsync(); 
+        await _context.SaveChangesAsync();
         return true;
     }
 
@@ -135,9 +181,7 @@ public class ClientService : IClientService
             .FirstOrDefaultAsync(c => c.Id == id);
 
         if (client is null || !client.IsDeleted)
-        {
             return false;
-        }
 
         client.IsDeleted = false;
         client.DeletedAt = null;
@@ -146,6 +190,7 @@ public class ClientService : IClientService
         await _context.SaveChangesAsync();
         return true;
     }
+
     public async Task<List<ClientDto>> GetDeletedAsync()
     {
         return await _context.Clients
@@ -153,34 +198,30 @@ public class ClientService : IClientService
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Include(c => c.ActivePackage)
+            .Include(c => c.Location)
             .Where(c => c.IsDeleted)
             .Select(c => new ClientDto
             {
                 Id = c.Id,
                 TrainerId = c.TrainerId,
                 ActivePackageId = c.ActivePackageId,
-
+                LocationId = c.LocationId,
+                LocationName = c.Location.Name,
                 FirstName = c.FirstName,
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
-
                 Email = c.Email,
                 PhoneNumber = c.PhoneNumber,
                 AvatarUrl = c.AvatarUrl,
-
                 Goal = c.Goal,
                 Notes = c.Notes,
-
                 ProgressPercent = c.ProgressPercent,
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
-
                 NextSessionAt = c.NextSessionAt,
-
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
                 CreatedBy = c.CreatedBy,
-
                 TrainerFullName = c.Trainer != null
                     ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
                     : null
@@ -190,10 +231,13 @@ public class ClientService : IClientService
 
     public async Task<List<ClientDto>> GetFilteredAsync(ClientFilterDto filter)
     {
-        var query = BuildClientQuery();
+        var query = ApplyAccessControl(BuildClientQuery());
 
         if (filter.TrainerId.HasValue)
             query = query.Where(c => c.TrainerId == filter.TrainerId.Value);
+
+        if (filter.LocationId.HasValue)
+            query = query.Where(c => c.LocationId == filter.LocationId.Value);
 
         if (!string.IsNullOrWhiteSpace(filter.Status))
             query = query.Where(c => c.Status == filter.Status);
@@ -216,12 +260,15 @@ public class ClientService : IClientService
     {
         return _context.Clients
             .Include(c => c.Trainer)
-            .ThenInclude(t => t!.User)
+                .ThenInclude(t => t!.User)
+            .Include(c => c.Location)
             .Select(c => new ClientDto
             {
                 Id = c.Id,
                 TrainerId = c.TrainerId,
                 ActivePackageId = c.ActivePackageId,
+                LocationId = c.LocationId,
+                LocationName = c.Location.Name,
                 FirstName = c.FirstName,
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
@@ -243,8 +290,25 @@ public class ClientService : IClientService
             });
     }
 
+    private IQueryable<ClientDto> ApplyAccessControl(IQueryable<ClientDto> query)
+    {
+        if (_currentUser.IsOwner)
+            return query;
+
+        if (_currentUser.IsTrainer && _currentUser.UserId.HasValue)
+        {
+            return query.Where(c =>
+                c.TrainerId != null &&
+                _context.Trainers.Any(t => t.Id == c.TrainerId && t.UserId == _currentUser.UserId.Value));
+        }
+
+        return query.Where(c => false);
+    }
+
     private async Task<ClientDto> GetProjectedById(int id)
     {
-        return await BuildClientQuery().FirstAsync(c => c.Id == id);
+        var query = ApplyAccessControl(BuildClientQuery());
+
+        return await query.FirstAsync(c => c.Id == id);
     }
 }

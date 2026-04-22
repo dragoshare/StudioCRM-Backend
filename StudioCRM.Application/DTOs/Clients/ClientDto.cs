@@ -39,4 +39,6 @@ public class ClientDto
     public int? CreatedBy { get; set; }
 
     public string? TrainerFullName { get; set; }
+    public int LocationId { get; set; }
+    public string? LocationName { get; set; }
 }
