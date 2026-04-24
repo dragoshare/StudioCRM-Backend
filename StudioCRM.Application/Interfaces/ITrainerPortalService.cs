@@ -1,0 +1,11 @@
+﻿using StudioCRM.Application.DTOs.TrainerPortal;
+
+namespace StudioCRM.Application.Interfaces;
+
+public interface ITrainerPortalService
+{
+    Task<TrainerPortalMeDto?> GetMeAsync();
+    Task<List<TrainerPortalClientDto>> GetClientsAsync();
+    Task<List<TrainerPortalSessionDto>> GetSessionsAsync();
+    Task<TrainerPortalDashboardDto?> GetDashboardAsync();
+}

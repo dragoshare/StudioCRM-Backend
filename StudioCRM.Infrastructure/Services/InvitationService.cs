@@ -237,6 +237,7 @@ public class InvitationService : IInvitationService
         {
             var client = new Client
             {
+                UserId = user.Id,
                 FirstName = request.FirstName,
                 LastName = request.LastName,
                 Email = invitation.Email,

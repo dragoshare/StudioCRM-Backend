@@ -3,7 +3,7 @@
 public class Client
 {
     public int Id { get; set; }
-
+    public int? UserId { get; set; }
     public int? TrainerId { get; set; }
 
     public int? ActivePackageId { get; set; }
@@ -36,6 +36,7 @@ public class Client
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public int? CreatedBy { get; set; }
+    public User? User { get; set; }
 
     public Trainer? Trainer { get; set; }
 

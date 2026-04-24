@@ -18,11 +18,15 @@ public static class DataSeeder
         await SeedOwnerAsync(context, passwordHasher);
         await SeedMainTrainerAsync(context, passwordHasher);
         await SeedPackagesAsync(context);
-        await SeedMainClientsAsync(context);
+
+        await SeedMainClientsAsync(context, passwordHasher);
         await SeedMainSessionsAsync(context);
 
         await SeedExtraTrainersAsync(context, passwordHasher);
-        await SeedExtraClientsAsync(context);
+        await SeedExtraClientsAsync(context, passwordHasher);
+
+        await LinkExistingClientsToUsersAsync(context, passwordHasher);
+
         await SeedExtraSessionsAsync(context);
     }
 
@@ -32,8 +36,7 @@ public static class DataSeeder
 
         foreach (var roleName in requiredRoles)
         {
-            var exists = await context.Roles.AnyAsync(r => r.Name == roleName);
-            if (!exists)
+            if (!await context.Roles.AnyAsync(r => r.Name == roleName))
             {
                 await context.Roles.AddAsync(new Role { Name = roleName });
             }
@@ -94,8 +97,7 @@ public static class DataSeeder
             await context.SaveChangesAsync();
         }
 
-        var hasOwnerRole = await context.UserRoles.AnyAsync(ur => ur.UserId == owner.Id && ur.RoleId == ownerRole.Id);
-        if (!hasOwnerRole)
+        if (!await context.UserRoles.AnyAsync(ur => ur.UserId == owner.Id && ur.RoleId == ownerRole.Id))
         {
             await context.UserRoles.AddAsync(new UserRole
             {
@@ -130,8 +132,7 @@ public static class DataSeeder
             await context.SaveChangesAsync();
         }
 
-        var hasTrainerRole = await context.UserRoles.AnyAsync(ur => ur.UserId == trainerUser.Id && ur.RoleId == trainerRole.Id);
-        if (!hasTrainerRole)
+        if (!await context.UserRoles.AnyAsync(ur => ur.UserId == trainerUser.Id && ur.RoleId == trainerRole.Id))
         {
             await context.UserRoles.AddAsync(new UserRole
             {
@@ -165,6 +166,7 @@ public static class DataSeeder
         }
 
         var locations = await context.Locations.OrderBy(l => l.Id).ToListAsync();
+
         var existingLocationIds = await context.TrainerLocations
             .Where(tl => tl.TrainerId == trainer.Id)
             .Select(tl => tl.LocationId)
@@ -242,7 +244,7 @@ public static class DataSeeder
         await context.SaveChangesAsync();
     }
 
-    private static async Task SeedMainClientsAsync(StudioCRMDbContext context)
+    private static async Task SeedMainClientsAsync(StudioCRMDbContext context, PasswordHasher<User> passwordHasher)
     {
         var trainer = await context.Trainers
             .Include(t => t.User)
@@ -251,32 +253,18 @@ public static class DataSeeder
         var package = await context.Packages.OrderBy(p => p.Id).FirstAsync();
         var defaultLocation = await context.Locations.OrderBy(l => l.Id).FirstAsync();
 
-        if (!await context.Clients.AnyAsync(c => c.Email == "anna@test.pl"))
-        {
-            await context.Clients.AddAsync(new Client
-            {
-                FirstName = "Anna",
-                LastName = "Nowak",
-                Email = "anna@test.pl",
-                PhoneNumber = "111222333",
-                TrainerId = trainer.Id,
-                ActivePackageId = package.Id,
-                LocationId = defaultLocation.Id,
-                Goal = "Redukcja",
-                Notes = "Klientka testowa",
-                Status = "Active",
-                ProgressPercent = 20,
-                BillingStatus = "Paid",
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                CreatedBy = 1
-            });
-        }
+     
 
-        if (!await context.Clients.AnyAsync(c => c.Email == "piotr@test.pl"))
+        
+
+        var piotrUser = await EnsureClientUserAsync(context, passwordHasher, "piotr@test.pl", "Piotr", "Zieliński");
+
+        var piotrClient = await context.Clients.FirstOrDefaultAsync(c => c.Email == "piotr@test.pl");
+        if (piotrClient is null)
         {
             await context.Clients.AddAsync(new Client
             {
+                UserId = piotrUser.Id,
                 FirstName = "Piotr",
                 LastName = "Zieliński",
                 Email = "piotr@test.pl",
@@ -293,6 +281,11 @@ public static class DataSeeder
                 UpdatedAt = DateTime.UtcNow,
                 CreatedBy = 1
             });
+        }
+        else if (piotrClient.UserId is null)
+        {
+            piotrClient.UserId = piotrUser.Id;
+            piotrClient.UpdatedAt = DateTime.UtcNow;
         }
 
         await context.SaveChangesAsync();
@@ -371,12 +364,12 @@ public static class DataSeeder
                 };
 
                 user.PasswordHash = passwordHasher.HashPassword(user, "Test123!");
+
                 await context.Users.AddAsync(user);
                 await context.SaveChangesAsync();
             }
 
-            var hasTrainerRole = await context.UserRoles.AnyAsync(ur => ur.UserId == user.Id && ur.RoleId == trainerRole.Id);
-            if (!hasTrainerRole)
+            if (!await context.UserRoles.AnyAsync(ur => ur.UserId == user.Id && ur.RoleId == trainerRole.Id))
             {
                 await context.UserRoles.AddAsync(new UserRole
                 {
@@ -434,12 +427,8 @@ public static class DataSeeder
         }
     }
 
-    private static async Task SeedExtraClientsAsync(StudioCRMDbContext context)
+    private static async Task SeedExtraClientsAsync(StudioCRMDbContext context, PasswordHasher<User> passwordHasher)
     {
-        var existingExtraClients = await context.Clients.CountAsync(c => c.Email.StartsWith("client") && c.Email.EndsWith("@test.pl"));
-        if (existingExtraClients >= 10)
-            return;
-
         var packages = await context.Packages.OrderBy(p => p.Id).ToListAsync();
         var locations = await context.Locations.OrderBy(l => l.Id).ToListAsync();
         var trainers = await context.Trainers
@@ -451,8 +440,26 @@ public static class DataSeeder
         for (int i = 1; i <= 10; i++)
         {
             var email = $"client{i}@test.pl";
-            if (await context.Clients.AnyAsync(c => c.Email == email))
+
+            var user = await EnsureClientUserAsync(
+                context,
+                passwordHasher,
+                email,
+                $"Client{i}",
+                "Test");
+
+            var existingClient = await context.Clients.FirstOrDefaultAsync(c => c.Email == email);
+
+            if (existingClient is not null)
+            {
+                if (existingClient.UserId is null)
+                {
+                    existingClient.UserId = user.Id;
+                    existingClient.UpdatedAt = DateTime.UtcNow;
+                }
+
                 continue;
+            }
 
             var location = locations[Random.Shared.Next(locations.Count)];
 
@@ -468,6 +475,7 @@ public static class DataSeeder
 
             clientsToAdd.Add(new Client
             {
+                UserId = user.Id,
                 FirstName = $"Client{i}",
                 LastName = "Test",
                 Email = email,
@@ -490,8 +498,79 @@ public static class DataSeeder
         if (clientsToAdd.Any())
         {
             await context.Clients.AddRangeAsync(clientsToAdd);
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task LinkExistingClientsToUsersAsync(
+        StudioCRMDbContext context,
+        PasswordHasher<User> passwordHasher)
+    {
+        var clients = await context.Clients
+            .Where(c => c.UserId == null)
+            .ToListAsync();
+
+        foreach (var client in clients)
+        {
+            if (string.IsNullOrWhiteSpace(client.Email))
+                continue;
+
+            var user = await EnsureClientUserAsync(
+                context,
+                passwordHasher,
+                client.Email,
+                client.FirstName,
+                client.LastName);
+
+            client.UserId = user.Id;
+            client.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task<User> EnsureClientUserAsync(
+        StudioCRMDbContext context,
+        PasswordHasher<User> passwordHasher,
+        string email,
+        string firstName,
+        string lastName)
+    {
+        var clientRole = await context.Roles.FirstAsync(r => r.Name == "Client");
+
+        var user = await context.Users.FirstOrDefaultAsync(u => u.Email == email);
+
+        if (user is null)
+        {
+            user = new User
+            {
+                Email = email,
+                FirstName = firstName,
+                LastName = lastName,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            user.PasswordHash = passwordHasher.HashPassword(user, "Client123!");
+
+            await context.Users.AddAsync(user);
             await context.SaveChangesAsync();
         }
+
+        if (!await context.UserRoles.AnyAsync(ur => ur.UserId == user.Id && ur.RoleId == clientRole.Id))
+        {
+            await context.UserRoles.AddAsync(new UserRole
+            {
+                UserId = user.Id,
+                RoleId = clientRole.Id
+            });
+
+            await context.SaveChangesAsync();
+        }
+
+        return user;
     }
 
     private static async Task SeedExtraSessionsAsync(StudioCRMDbContext context)
