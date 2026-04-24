@@ -16,16 +16,18 @@ public class InvitationService : IInvitationService
     private readonly ICurrentUserService _currentUser;
     private readonly PasswordHasher<User> _passwordHasher;
     private readonly AppSettings _appSettings;
-
+    private readonly IEmailService _emailService;
     public InvitationService(
-        StudioCRMDbContext context,
-        ICurrentUserService currentUser,
-        IOptions<AppSettings> appOptions)
+    StudioCRMDbContext context,
+    ICurrentUserService currentUser,
+    IOptions<AppSettings> appOptions,
+    IEmailService emailService)
     {
         _context = context;
         _currentUser = currentUser;
         _passwordHasher = new PasswordHasher<User>();
         _appSettings = appOptions.Value;
+        _emailService = emailService;
     }
 
     public async Task<InvitationDto> CreateAsync(CreateInvitationDto request)
@@ -74,6 +76,14 @@ public class InvitationService : IInvitationService
 
         await _context.Invitations.AddAsync(invitation);
         await _context.SaveChangesAsync();
+       
+        var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
+
+        await _emailService.SendInvitationEmailAsync(
+            invitation.Email,
+            invitation.Role,
+            location.Name,
+            inviteLink);
 
         return MapToDto(invitation, location.Name);
     }
@@ -282,6 +292,13 @@ public class InvitationService : IInvitationService
 
         await _context.SaveChangesAsync();
 
+        var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
+
+        await _emailService.SendInvitationEmailAsync(
+            invitation.Email,
+            invitation.Role,
+            invitation.Location.Name,
+            inviteLink);
         return MapToDto(invitation, invitation.Location.Name);
     }
 

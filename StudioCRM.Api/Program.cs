@@ -10,6 +10,8 @@ using System.Text;
 using Microsoft.OpenApi.Models;
 using StudioCRM.Api.Swagger;
 using System.Security.Claims;
+using Resend;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -99,6 +101,27 @@ builder.Services.AddSwaggerGen(c =>
         }
     });
 });
+builder.Services.Configure<ResendSettings>(
+    builder.Configuration.GetSection("Resend"));
+
+builder.Services.Configure<EmailSettings>(
+    builder.Configuration.GetSection("Email"));
+
+builder.Services.Configure<AppSettings>(
+    builder.Configuration.GetSection("App"));
+
+builder.Services.AddOptions();
+
+builder.Services.AddHttpClient<ResendClient>();
+
+builder.Services.Configure<ResendClientOptions>(options =>
+{
+    options.ApiToken = builder.Configuration["Resend:ApiToken"]!;
+});
+
+builder.Services.AddTransient<IResend, ResendClient>();
+
+builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 
