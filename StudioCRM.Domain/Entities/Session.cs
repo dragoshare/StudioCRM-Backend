@@ -14,15 +14,20 @@ public class Session
 
     public int TrainerId { get; set; }
 
-    public int ClientId { get; set; }
-
-    public int? PackageId { get; set; }
+    public int LocationId { get; set; }
 
     public string? StudioRoom { get; set; }
 
-    public int LocationId { get; set; }
-
     public string Status { get; set; } = "Planned";
+    public bool IsDeleted { get; set; } = false;
+
+    public string? PlannedSessionType { get; set; }
+
+    public string? ActualSessionType { get; set; }
+
+    public int? ActualParticipantsCount { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
@@ -30,15 +35,9 @@ public class Session
 
     public int? CreatedBy { get; set; }
 
-    public bool IsDeleted { get; set; } = false;
-
-    public DateTime? DeletedAt { get; set; }
-
     public Trainer Trainer { get; set; } = null!;
 
-    public Client Client { get; set; } = null!;
-
-    public Package? Package { get; set; }
-
     public Location Location { get; set; } = null!;
+
+    public ICollection<SessionParticipant> Participants { get; set; } = new List<SessionParticipant>();
 }

@@ -83,17 +83,29 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             StartAt = importedEvent.StartAt,
             EndAt = importedEvent.EndAt,
             TrainerId = trainer.Id,
-            ClientId = request.ClientId,
-            PackageId = request.PackageId,
             LocationId = request.LocationId,
             StudioRoom = request.StudioRoom,
             Status = request.Status,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserId.Value
+            CreatedBy = _currentUser.UserId
         };
 
         await _context.Sessions.AddAsync(session);
+        await _context.SaveChangesAsync();
+
+        await _context.SessionParticipants.AddAsync(new SessionParticipant
+        {
+            SessionId = session.Id,
+            ClientId = request.ClientId,
+            PackageId = request.PackageId,
+            AttendanceStatus = "Planned",
+            CountsAgainstPackage = true,
+            SessionsCharged = 1,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
         await _context.SaveChangesAsync();
 
         importedEvent.IsConvertedToSession = true;

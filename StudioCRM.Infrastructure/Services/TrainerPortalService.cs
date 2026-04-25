@@ -72,7 +72,8 @@ public class TrainerPortalService : ITrainerPortalService
             return new List<TrainerPortalSessionDto>();
 
         return await _context.Sessions
-            .Include(s => s.Client)
+            .Include(s => s.Participants)
+            .ThenInclude(p => p.Client)
             .Include(s => s.Location)
             .Where(s => s.TrainerId == trainerId.Value)
             .OrderBy(s => s.StartAt)
@@ -83,7 +84,7 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = s.StartAt,
                 EndAt = s.EndAt,
-                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 StudioRoom = s.StudioRoom,
                 Status = s.Status
@@ -106,7 +107,8 @@ public class TrainerPortalService : ITrainerPortalService
         var now = DateTime.UtcNow;
 
         var sessionsQuery = _context.Sessions
-            .Include(s => s.Client)
+            .Include(s => s.Participants)
+            .ThenInclude(p => p.Client)
             .Include(s => s.Location)
             .Where(s => s.TrainerId == trainerId.Value);
 
@@ -129,7 +131,7 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = s.StartAt,
                 EndAt = s.EndAt,
-                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 StudioRoom = s.StudioRoom,
                 Status = s.Status
@@ -147,7 +149,7 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = s.StartAt,
                 EndAt = s.EndAt,
-                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 StudioRoom = s.StudioRoom,
                 Status = s.Status

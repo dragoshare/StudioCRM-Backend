@@ -47,6 +47,7 @@ builder.Services.AddScoped<IInvitationService, InvitationService>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITrainerPortalService, TrainerPortalService>();
 builder.Services.AddScoped<IExternalCalendarEventService, ExternalCalendarEventService>();
+builder.Services.AddScoped<ISessionParticipantService, SessionParticipantService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>

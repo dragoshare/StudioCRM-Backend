@@ -31,7 +31,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var session = await _context.Sessions
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
-            .Include(s => s.Client)
+            .Include(s => s.Participants)
+            .ThenInclude(p => p.Client)
             .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
 
@@ -170,7 +171,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private object BuildGraphEventPayload(Session session)
     {
-        var clientName = $"{session.Client.FirstName} {session.Client.LastName}";
+        var clientName = string.Join(" + ",
+             session.Participants.Select(p => $"{p.Client.FirstName} {p.Client.LastName}"));
         var trainerName = $"{session.Trainer.User.FirstName} {session.Trainer.User.LastName}";
         var locationName = session.Location.Name;
         var room = string.IsNullOrWhiteSpace(session.StudioRoom)

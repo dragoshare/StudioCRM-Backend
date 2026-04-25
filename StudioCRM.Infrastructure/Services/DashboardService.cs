@@ -35,7 +35,8 @@ public class DashboardService : IDashboardService
 
         var sessionsQuery = _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
-            .Include(s => s.Client)
+            .Include(s => s.Participants)
+            .ThenInclude(p => p.Client)
             .Include(s => s.Location)
             .AsQueryable();
 
@@ -59,7 +60,7 @@ public class DashboardService : IDashboardService
                 StartAt = s.StartAt,
                 EndAt = s.EndAt,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 Location = s.Location.Name,
                 Status = s.Status
             })
@@ -75,7 +76,7 @@ public class DashboardService : IDashboardService
                 StartAt = s.StartAt,
                 EndAt = s.EndAt,
                 TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                ClientFullName = s.Client.FirstName + " " + s.Client.LastName,
+                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 Location = s.Location.Name,
                 Status = s.Status
             })

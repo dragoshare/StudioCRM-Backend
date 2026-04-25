@@ -14,23 +14,29 @@ public class SessionDto
 
     public int TrainerId { get; set; }
 
-    public int ClientId { get; set; }
-
-    public int? PackageId { get; set; }
-
     public string TrainerFullName { get; set; } = string.Empty;
-
-    public string ClientFullName { get; set; } = string.Empty;
-
-    public string? PackageName { get; set; }
-
-    public string? StudioRoom { get; set; }
 
     public int LocationId { get; set; }
 
-    public string? LocationName { get; set; }
+    public string LocationName { get; set; } = string.Empty;
+
+    public string? StudioRoom { get; set; }
 
     public string Status { get; set; } = string.Empty;
+
+    public string? PlannedSessionType { get; set; }
+
+    public string? ActualSessionType { get; set; }
+
+    public int? ActualParticipantsCount { get; set; }
+
+    public DateTime? CompletedAt { get; set; }
+
+    public int ParticipantsCount { get; set; }
+
+    public string ClientsDisplayName { get; set; } = string.Empty;
+
+    public List<SessionParticipantListDto> Participants { get; set; } = new();
 
     public DateTime CreatedAt { get; set; }
 

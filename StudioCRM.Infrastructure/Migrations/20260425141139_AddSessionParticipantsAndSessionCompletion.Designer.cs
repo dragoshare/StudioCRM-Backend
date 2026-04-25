@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudioCRM.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260425141139_AddSessionParticipantsAndSessionCompletion")]
+    partial class AddSessionParticipantsAndSessionCompletion
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -522,7 +525,7 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("ActualSessionType")
                         .HasColumnType("text");
 
-                    b.Property<int?>("ClientId")
+                    b.Property<int>("ClientId")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("CompletedAt")
@@ -533,6 +536,9 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     b.Property<int?>("CreatedBy")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("DeletedAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime>("EndAt")
                         .HasColumnType("timestamp with time zone");
@@ -887,9 +893,11 @@ namespace StudioCRM.Infrastructure.Migrations
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.Session", b =>
                 {
-                    b.HasOne("StudioCRM.Domain.Entities.Client", null)
+                    b.HasOne("StudioCRM.Domain.Entities.Client", "Client")
                         .WithMany("Sessions")
-                        .HasForeignKey("ClientId");
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
 
                     b.HasOne("StudioCRM.Domain.Entities.Location", "Location")
                         .WithMany("Sessions")
@@ -897,9 +905,10 @@ namespace StudioCRM.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
-                    b.HasOne("StudioCRM.Domain.Entities.Package", null)
+                    b.HasOne("StudioCRM.Domain.Entities.Package", "Package")
                         .WithMany("Sessions")
-                        .HasForeignKey("PackageId");
+                        .HasForeignKey("PackageId")
+                        .OnDelete(DeleteBehavior.SetNull);
 
                     b.HasOne("StudioCRM.Domain.Entities.Trainer", "Trainer")
                         .WithMany("Sessions")
@@ -907,7 +916,11 @@ namespace StudioCRM.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.Navigation("Client");
+
                     b.Navigation("Location");
+
+                    b.Navigation("Package");
 
                     b.Navigation("Trainer");
                 });

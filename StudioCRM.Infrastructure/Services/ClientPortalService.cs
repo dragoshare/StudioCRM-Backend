@@ -58,7 +58,7 @@ public class ClientPortalService : IClientPortalService
         var nextSession = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
-            .Where(s => s.ClientId == client.Id && s.StartAt >= now)
+            .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt >= now)
             .OrderBy(s => s.StartAt)
             .Select(s => new ClientPortalSessionDto
             {
@@ -77,7 +77,7 @@ public class ClientPortalService : IClientPortalService
         var upcomingSessions = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
-            .Where(s => s.ClientId == client.Id && s.StartAt >= now)
+            .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt >= now)
             .OrderBy(s => s.StartAt)
             .Take(5)
             .Select(s => new ClientPortalSessionDto
@@ -97,7 +97,7 @@ public class ClientPortalService : IClientPortalService
         var recentSessions = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
-            .Where(s => s.ClientId == client.Id && s.StartAt < now)
+            .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt < now)
             .OrderByDescending(s => s.StartAt)
             .Take(5)
             .Select(s => new ClientPortalSessionDto
@@ -138,7 +138,7 @@ public class ClientPortalService : IClientPortalService
         return await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
-            .Where(s => s.ClientId == clientId.Value)
+            .Where(s => s.Participants.Any(p => p.ClientId == clientId.Value))
             .OrderBy(s => s.StartAt)
             .Select(s => new ClientPortalSessionDto
             {
@@ -178,8 +178,8 @@ public class ClientPortalService : IClientPortalService
 
         var usedSessionsCount = await _context.Sessions
             .CountAsync(s =>
-                s.ClientId == client.Id &&
-                s.PackageId == client.ActivePackage.Id &&
+                s.Participants.Any(p => p.ClientId == client.Id) &&
+                s.Participants.Any(p => p.PackageId == client.ActivePackageId) &&
                 s.Status == "Completed");
 
         var sessionsLimit = client.ActivePackage.SessionsLimit;

@@ -1,9 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using Microsoft.EntityFrameworkCore;
+﻿using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
+
 namespace StudioCRM.Infrastructure.Persistence;
 
 public class StudioCRMDbContext : DbContext
@@ -16,25 +13,40 @@ public class StudioCRMDbContext : DbContext
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
+
     public DbSet<Trainer> Trainers => Set<Trainer>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<Session> Sessions => Set<Session>();
+    public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
+
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
+
     public DbSet<Invitation> Invitations => Set<Invitation>();
+
     public DbSet<CalendarIntegration> CalendarIntegrations => Set<CalendarIntegration>();
     public DbSet<CalendarEventLink> CalendarEventLinks => Set<CalendarEventLink>();
     public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
     public DbSet<ExternalCalendarEvent> ExternalCalendarEvents => Set<ExternalCalendarEvent>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
+        // =========================
+        // USER / ROLES
+        // =========================
+
+        modelBuilder.Entity<User>()
+            .HasIndex(u => u.Email)
+            .IsUnique();
+
         modelBuilder.Entity<UserRole>()
-    .HasKey(ur => new { ur.UserId, ur.RoleId });
+            .HasKey(ur => new { ur.UserId, ur.RoleId });
 
         modelBuilder.Entity<UserRole>()
             .HasOne(ur => ur.User)
@@ -46,11 +58,32 @@ public class StudioCRMDbContext : DbContext
             .WithMany(r => r.UserRoles)
             .HasForeignKey(ur => ur.RoleId);
 
+        // =========================
+        // TRAINERS
+        // =========================
+
         modelBuilder.Entity<Trainer>()
             .HasOne(t => t.User)
             .WithOne(u => u.TrainerProfile)
             .HasForeignKey<Trainer>(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<Trainer>()
+            .Property(t => t.HourlyRate)
+            .HasPrecision(10, 2);
+
+        modelBuilder.Entity<Trainer>()
+            .HasQueryFilter(t => !t.IsDeleted);
+
+        // =========================
+        // CLIENTS
+        // =========================
+
+        modelBuilder.Entity<Client>()
+            .HasOne(c => c.User)
+            .WithMany()
+            .HasForeignKey(c => c.UserId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         modelBuilder.Entity<Client>()
             .HasOne(c => c.Trainer)
@@ -64,55 +97,29 @@ public class StudioCRMDbContext : DbContext
             .HasForeignKey(c => c.ActivePackageId)
             .OnDelete(DeleteBehavior.SetNull);
 
-        modelBuilder.Entity<Session>()
-            .HasOne(s => s.Trainer)
-            .WithMany(t => t.Sessions)
-            .HasForeignKey(s => s.TrainerId)
+        modelBuilder.Entity<Client>()
+            .HasOne(c => c.Location)
+            .WithMany(l => l.Clients)
+            .HasForeignKey(c => c.LocationId)
             .OnDelete(DeleteBehavior.Restrict);
 
-        modelBuilder.Entity<Session>()
-            .HasOne(s => s.Client)
-            .WithMany(c => c.Sessions)
-            .HasForeignKey(s => s.ClientId)
-            .OnDelete(DeleteBehavior.Restrict);
+        modelBuilder.Entity<Client>()
+            .HasQueryFilter(c => !c.IsDeleted);
 
-        modelBuilder.Entity<Session>()
-            .HasOne(s => s.Package)
-            .WithMany(p => p.Sessions)
-            .HasForeignKey(s => s.PackageId)
-            .OnDelete(DeleteBehavior.SetNull);
-
-        modelBuilder.Entity<Trainer>()
-            .Property(t => t.HourlyRate)
-            .HasPrecision(10, 2);
+        // =========================
+        // PACKAGES
+        // =========================
 
         modelBuilder.Entity<Package>()
             .Property(p => p.Price)
             .HasPrecision(10, 2);
-        modelBuilder.Entity<RefreshToken>()
-            .HasOne(rt => rt.User)
-            .WithMany(u => u.RefreshTokens)
-            .HasForeignKey(rt => rt.UserId)
-            .OnDelete(DeleteBehavior.Cascade);
-
-        modelBuilder.Entity<RefreshToken>()
-            .HasIndex(rt => rt.Token)
-            .IsUnique();
-
-        modelBuilder.Entity<User>()
-            .HasIndex(u => u.Email)
-            .IsUnique();
-        modelBuilder.Entity<Client>()
-            .HasQueryFilter(c => !c.IsDeleted);
-
-        modelBuilder.Entity<Trainer>()
-            .HasQueryFilter(t => !t.IsDeleted);
 
         modelBuilder.Entity<Package>()
             .HasQueryFilter(p => !p.IsDeleted);
 
-        modelBuilder.Entity<Session>()
-            .HasQueryFilter(s => !s.IsDeleted);
+        // =========================
+        // LOCATIONS
+        // =========================
 
         modelBuilder.Entity<TrainerLocation>()
             .HasKey(tl => new { tl.TrainerId, tl.LocationId });
@@ -129,10 +136,14 @@ public class StudioCRMDbContext : DbContext
             .HasForeignKey(tl => tl.LocationId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<Client>()
-            .HasOne(c => c.Location)
-            .WithMany(l => l.Clients)
-            .HasForeignKey(c => c.LocationId)
+        // =========================
+        // SESSIONS
+        // =========================
+
+        modelBuilder.Entity<Session>()
+            .HasOne(s => s.Trainer)
+            .WithMany(t => t.Sessions)
+            .HasForeignKey(s => s.TrainerId)
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Session>()
@@ -140,6 +151,54 @@ public class StudioCRMDbContext : DbContext
             .WithMany(l => l.Sessions)
             .HasForeignKey(s => s.LocationId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Session>()
+            .HasQueryFilter(s => !s.IsDeleted);
+
+        // =========================
+        // SESSION PARTICIPANTS
+        // =========================
+
+        modelBuilder.Entity<SessionParticipant>()
+            .HasOne(sp => sp.Session)
+            .WithMany(s => s.Participants)
+            .HasForeignKey(sp => sp.SessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<SessionParticipant>()
+            .HasOne(sp => sp.Client)
+            .WithMany()
+            .HasForeignKey(sp => sp.ClientId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<SessionParticipant>()
+            .HasOne(sp => sp.Package)
+            .WithMany()
+            .HasForeignKey(sp => sp.PackageId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<SessionParticipant>()
+            .HasIndex(sp => new { sp.SessionId, sp.ClientId })
+            .IsUnique();
+
+        // =========================
+        // AUTH TOKENS
+        // =========================
+
+        modelBuilder.Entity<RefreshToken>()
+            .HasOne(rt => rt.User)
+            .WithMany(u => u.RefreshTokens)
+            .HasForeignKey(rt => rt.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<RefreshToken>()
+            .HasIndex(rt => rt.Token)
+            .IsUnique();
+
+        // =========================
+        // INVITATIONS
+        // =========================
+
         modelBuilder.Entity<Invitation>()
             .HasOne(i => i.Location)
             .WithMany()
@@ -149,11 +208,11 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Invitation>()
             .HasIndex(i => i.Token)
             .IsUnique();
-        modelBuilder.Entity<Client>()
-            .HasOne(c => c.User)
-            .WithMany()
-            .HasForeignKey(c => c.UserId)
-            .OnDelete(DeleteBehavior.SetNull);
+
+        // =========================
+        // CALENDAR
+        // =========================
+
         modelBuilder.Entity<CalendarIntegration>()
             .HasOne(ci => ci.User)
             .WithMany()

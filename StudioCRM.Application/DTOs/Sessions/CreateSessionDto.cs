@@ -12,15 +12,13 @@ public class CreateSessionDto
 
     public int TrainerId { get; set; }
 
-    public int ClientId { get; set; }
-
-    public int? PackageId { get; set; }
+    public int LocationId { get; set; }
 
     public string? StudioRoom { get; set; }
 
-    public int LocationId { get; set; }
-
     public string Status { get; set; } = "Planned";
 
-    public int? CreatedBy { get; set; }
+    public string? PlannedSessionType { get; set; }
+
+    public List<CreateSessionParticipantDto> Participants { get; set; } = new();
 }
