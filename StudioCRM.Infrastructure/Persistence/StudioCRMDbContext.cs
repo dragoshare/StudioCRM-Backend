@@ -25,7 +25,10 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
     public DbSet<Invitation> Invitations => Set<Invitation>();
-
+    public DbSet<CalendarIntegration> CalendarIntegrations => Set<CalendarIntegration>();
+    public DbSet<CalendarEventLink> CalendarEventLinks => Set<CalendarEventLink>();
+    public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
+    public DbSet<ExternalCalendarEvent> ExternalCalendarEvents => Set<ExternalCalendarEvent>();
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -151,5 +154,56 @@ public class StudioCRMDbContext : DbContext
             .WithMany()
             .HasForeignKey(c => c.UserId)
             .OnDelete(DeleteBehavior.SetNull);
+        modelBuilder.Entity<CalendarIntegration>()
+            .HasOne(ci => ci.User)
+            .WithMany()
+            .HasForeignKey(ci => ci.UserId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CalendarIntegration>()
+            .HasIndex(ci => new { ci.UserId, ci.Provider })
+            .IsUnique();
+
+        modelBuilder.Entity<CalendarEventLink>()
+            .HasOne(cel => cel.Session)
+            .WithMany()
+            .HasForeignKey(cel => cel.SessionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CalendarEventLink>()
+            .HasOne(cel => cel.CalendarIntegration)
+            .WithMany()
+            .HasForeignKey(cel => cel.CalendarIntegrationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CalendarEventLink>()
+            .HasIndex(cel => new { cel.SessionId, cel.Provider })
+            .IsUnique();
+
+        modelBuilder.Entity<CalendarSubscription>()
+            .HasOne(x => x.CalendarIntegration)
+            .WithMany()
+            .HasForeignKey(x => x.CalendarIntegrationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<CalendarSubscription>()
+            .HasIndex(x => x.SubscriptionId)
+            .IsUnique();
+
+        modelBuilder.Entity<ExternalCalendarEvent>()
+            .HasOne(x => x.CalendarIntegration)
+            .WithMany()
+            .HasForeignKey(x => x.CalendarIntegrationId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<ExternalCalendarEvent>()
+            .HasOne(x => x.Session)
+            .WithMany()
+            .HasForeignKey(x => x.SessionId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<ExternalCalendarEvent>()
+            .HasIndex(x => new { x.CalendarIntegrationId, x.ExternalEventId })
+            .IsUnique();
     }
 }

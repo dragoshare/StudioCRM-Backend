@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudioCRM.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260425094854_AddOutlookTwoWaySyncFoundation")]
+    partial class AddOutlookTwoWaySyncFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder

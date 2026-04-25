@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudioCRM.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260424141505_AddOutlookCalendarIntegration")]
+    partial class AddOutlookCalendarIntegration
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -108,48 +111,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.ToTable("CalendarIntegrations");
                 });
 
-            modelBuilder.Entity("StudioCRM.Domain.Entities.CalendarSubscription", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<int>("CalendarIntegrationId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("Resource")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<string>("SubscriptionId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("CalendarIntegrationId");
-
-                    b.HasIndex("SubscriptionId")
-                        .IsUnique();
-
-                    b.ToTable("CalendarSubscriptions");
-                });
-
             modelBuilder.Entity("StudioCRM.Domain.Entities.Client", b =>
                 {
                     b.Property<int>("Id")
@@ -234,63 +195,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasIndex("UserId");
 
                     b.ToTable("Clients");
-                });
-
-            modelBuilder.Entity("StudioCRM.Domain.Entities.ExternalCalendarEvent", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("BodyPreview")
-                        .HasColumnType("text");
-
-                    b.Property<int>("CalendarIntegrationId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("EndAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ExternalEventId")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTime>("ImportedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsConvertedToSession")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("LocationName")
-                        .HasColumnType("text");
-
-                    b.Property<string>("OrganizerEmail")
-                        .HasColumnType("text");
-
-                    b.Property<string>("Provider")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<int?>("SessionId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("StartAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("Subject")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("SessionId");
-
-                    b.HasIndex("CalendarIntegrationId", "ExternalEventId")
-                        .IsUnique();
-
-                    b.ToTable("ExternalCalendarEvents");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.Invitation", b =>
@@ -734,17 +638,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("StudioCRM.Domain.Entities.CalendarSubscription", b =>
-                {
-                    b.HasOne("StudioCRM.Domain.Entities.CalendarIntegration", "CalendarIntegration")
-                        .WithMany()
-                        .HasForeignKey("CalendarIntegrationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("CalendarIntegration");
-                });
-
             modelBuilder.Entity("StudioCRM.Domain.Entities.Client", b =>
                 {
                     b.HasOne("StudioCRM.Domain.Entities.Package", "ActivePackage")
@@ -775,24 +668,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("Trainer");
 
                     b.Navigation("User");
-                });
-
-            modelBuilder.Entity("StudioCRM.Domain.Entities.ExternalCalendarEvent", b =>
-                {
-                    b.HasOne("StudioCRM.Domain.Entities.CalendarIntegration", "CalendarIntegration")
-                        .WithMany()
-                        .HasForeignKey("CalendarIntegrationId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("StudioCRM.Domain.Entities.Session", "Session")
-                        .WithMany()
-                        .HasForeignKey("SessionId")
-                        .OnDelete(DeleteBehavior.SetNull);
-
-                    b.Navigation("CalendarIntegration");
-
-                    b.Navigation("Session");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.Invitation", b =>

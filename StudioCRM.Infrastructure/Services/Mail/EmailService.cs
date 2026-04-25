@@ -1,9 +1,9 @@
 ﻿using Microsoft.Extensions.Options;
 using Resend;
-using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Application.Settings;
 
-namespace StudioCRM.Infrastructure.Services;
+namespace StudioCRM.Infrastructure.Services.Mail;
 
 public class EmailService : IEmailService
 {

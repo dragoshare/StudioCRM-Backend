@@ -1,0 +1,266 @@
+﻿using System.Net.Http.Headers;
+using System.Text;
+using System.Text.Json;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using StudioCRM.Application.Interfaces.Calendar;
+using StudioCRM.Application.Settings;
+using StudioCRM.Domain.Entities;
+using StudioCRM.Infrastructure.Persistence;
+
+namespace StudioCRM.Infrastructure.Services;
+
+public class OutlookCalendarSyncService : IOutlookCalendarSyncService
+{
+    private readonly StudioCRMDbContext _context;
+    private readonly OutlookSettings _settings;
+    private readonly HttpClient _httpClient;
+
+    public OutlookCalendarSyncService(
+        StudioCRMDbContext context,
+        IOptions<OutlookSettings> options,
+        HttpClient httpClient)
+    {
+        _context = context;
+        _settings = options.Value;
+        _httpClient = httpClient;
+    }
+
+    public async Task SyncSessionAsync(int sessionId)
+    {
+        var session = await _context.Sessions
+            .Include(s => s.Trainer)
+                .ThenInclude(t => t.User)
+            .Include(s => s.Client)
+            .Include(s => s.Location)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+
+        if (session is null)
+            throw new InvalidOperationException("Session does not exist.");
+
+        var integration = await _context.CalendarIntegrations
+            .FirstOrDefaultAsync(x =>
+                x.UserId == session.Trainer.UserId &&
+                x.Provider == "Outlook" &&
+                x.IsActive);
+
+        if (integration is null)
+            throw new InvalidOperationException("Trainer does not have active Outlook integration.");
+
+        await EnsureAccessTokenAsync(integration);
+
+        var existingLink = await _context.CalendarEventLinks
+            .FirstOrDefaultAsync(x =>
+                x.SessionId == session.Id &&
+                x.Provider == "Outlook");
+
+        if (existingLink is null)
+        {
+            var externalEventId = await CreateEventAsync(session, integration.AccessToken);
+
+            var link = new CalendarEventLink
+            {
+                SessionId = session.Id,
+                CalendarIntegrationId = integration.Id,
+                Provider = "Outlook",
+                ExternalEventId = externalEventId,
+                SyncedAt = DateTime.UtcNow
+            };
+
+            await _context.CalendarEventLinks.AddAsync(link);
+        }
+        else
+        {
+            await UpdateEventAsync(session, integration.AccessToken, existingLink.ExternalEventId);
+            existingLink.SyncedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task DeleteSessionEventAsync(int sessionId)
+    {
+        var link = await _context.CalendarEventLinks
+            .Include(x => x.CalendarIntegration)
+            .FirstOrDefaultAsync(x =>
+                x.SessionId == sessionId &&
+                x.Provider == "Outlook");
+
+        if (link is null)
+            return;
+
+        var integration = link.CalendarIntegration;
+
+        if (!integration.IsActive)
+            return;
+
+        await EnsureAccessTokenAsync(integration);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"https://graph.microsoft.com/v1.0/me/events/{link.ExternalEventId}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        var response = await _httpClient.SendAsync(request);
+
+        if (response.IsSuccessStatusCode)
+        {
+            _context.CalendarEventLinks.Remove(link);
+            await _context.SaveChangesAsync();
+        }
+        else
+        {
+            var body = await response.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"Microsoft delete event error: {body}");
+        }
+    }
+
+    private async Task<string> CreateEventAsync(Session session, string accessToken)
+    {
+        var payload = BuildGraphEventPayload(session);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://graph.microsoft.com/v1.0/me/events");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", accessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft create event error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+
+        return doc.RootElement.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Graph event id is missing.");
+    }
+
+    private async Task UpdateEventAsync(Session session, string accessToken, string eventId)
+    {
+        var payload = BuildGraphEventPayload(session);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Patch,
+            $"https://graph.microsoft.com/v1.0/me/events/{eventId}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", accessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft update event error: {body}");
+    }
+
+    private object BuildGraphEventPayload(Session session)
+    {
+        var clientName = $"{session.Client.FirstName} {session.Client.LastName}";
+        var trainerName = $"{session.Trainer.User.FirstName} {session.Trainer.User.LastName}";
+        var locationName = session.Location.Name;
+        var room = string.IsNullOrWhiteSpace(session.StudioRoom)
+            ? "Brak sali"
+            : session.StudioRoom;
+
+        return new
+        {
+            subject = $"StudioCRM: {session.Title} — {clientName}",
+            body = new
+            {
+                contentType = "HTML",
+                content = $"""
+                <p><strong>Klient:</strong> {clientName}</p>
+                <p><strong>Trener:</strong> {trainerName}</p>
+                <p><strong>Lokalizacja:</strong> {locationName}</p>
+                <p><strong>Sala:</strong> {room}</p>
+                <p><strong>Status:</strong> {session.Status}</p>
+                <p><strong>Notatka:</strong> {session.Note}</p>
+                """
+            },
+            start = new
+            {
+                dateTime = session.StartAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
+                timeZone = "UTC"
+            },
+            end = new
+            {
+                dateTime = session.EndAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
+                timeZone = "UTC"
+            },
+            location = new
+            {
+                displayName = $"{locationName} / {room}"
+            }
+        };
+    }
+
+    private async Task EnsureAccessTokenAsync(CalendarIntegration integration)
+    {
+        if (integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(2) &&
+            !string.IsNullOrWhiteSpace(integration.AccessToken))
+        {
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(integration.RefreshToken))
+            throw new InvalidOperationException("Outlook refresh token is missing.");
+
+        var tokenUrl =
+            $"https://login.microsoftonline.com/{_settings.TenantId}/oauth2/v2.0/token";
+
+        var form = new Dictionary<string, string>
+        {
+            ["client_id"] = _settings.ClientId,
+            ["client_secret"] = _settings.ClientSecret,
+            ["refresh_token"] = integration.RefreshToken,
+            ["grant_type"] = "refresh_token",
+            ["scope"] = _settings.Scopes
+        };
+
+        var response = await _httpClient.PostAsync(
+            tokenUrl,
+            new FormUrlEncodedContent(form));
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft refresh token error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        integration.AccessToken =
+            root.GetProperty("access_token").GetString() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(integration.AccessToken))
+            throw new InvalidOperationException("Microsoft returned empty access token.");
+
+        if (root.TryGetProperty("refresh_token", out var refresh))
+        {
+            var newRefreshToken = refresh.GetString();
+
+            if (!string.IsNullOrWhiteSpace(newRefreshToken))
+                integration.RefreshToken = newRefreshToken;
+        }
+
+        integration.AccessTokenExpiresAt = DateTime.UtcNow.AddSeconds(
+            root.GetProperty("expires_in").GetInt32() - 60);
+
+        await _context.SaveChangesAsync();
+    }
+}

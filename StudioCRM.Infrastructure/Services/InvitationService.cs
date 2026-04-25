@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;

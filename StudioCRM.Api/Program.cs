@@ -12,6 +12,11 @@ using StudioCRM.Api.Swagger;
 using System.Security.Claims;
 using Resend;
 
+using StudioCRM.Application.Interfaces.Calendar;
+using StudioCRM.Application.Interfaces.Mail;
+using StudioCRM.Infrastructure.Services.Calendar;
+using StudioCRM.Infrastructure.Services.Mail;
+
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -41,6 +46,7 @@ builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
 builder.Services.AddScoped<IInvitationService, InvitationService>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITrainerPortalService, TrainerPortalService>();
+builder.Services.AddScoped<IExternalCalendarEventService, ExternalCalendarEventService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>
@@ -113,6 +119,14 @@ builder.Services.Configure<AppSettings>(
 builder.Services.AddOptions();
 
 builder.Services.AddHttpClient<ResendClient>();
+
+builder.Services.Configure<OutlookSettings>(
+builder.Configuration.GetSection("Outlook"));
+
+builder.Services.AddHttpClient<IOutlookCalendarAuthService, OutlookCalendarAuthService>();
+builder.Services.AddHttpClient<IOutlookCalendarSyncService, OutlookCalendarSyncService>();
+builder.Services.AddHttpClient<IOutlookSubscriptionService, OutlookSubscriptionService>();
+builder.Services.AddHttpClient<IOutlookWebhookService, OutlookWebhookService>();
 
 builder.Services.Configure<ResendClientOptions>(options =>
 {

@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Application.Interfaces;
+﻿namespace StudioCRM.Application.Interfaces.Mail;
 
 public interface IEmailService
 {
