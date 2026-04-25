@@ -1,7 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Calendar;
-using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 
 namespace StudioCRM.Api.Controllers;

@@ -8,26 +8,26 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 
-namespace StudioCRM.Infrastructure.Services;
+namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookSubscriptionService : IOutlookSubscriptionService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
-    private readonly IOutlookCalendarSyncService _syncService;
+    private readonly IOutlookTokenService _tokenService;
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
 
     public OutlookSubscriptionService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
-        IOutlookCalendarSyncService syncService,
+        IOutlookTokenService tokenService,
         HttpClient httpClient,
         IConfiguration configuration)
     {
         _context = context;
         _currentUser = currentUser;
-        _syncService = syncService;
+        _tokenService = tokenService;
         _httpClient = httpClient;
         _configuration = configuration;
     }
@@ -46,7 +46,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
         if (integration is null)
             throw new InvalidOperationException("Outlook is not connected.");
 
-        await EnsureAccessTokenForIntegrationAsync(integration);
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         var webhookUrl = _configuration["Outlook:WebhookUrl"];
 
@@ -86,6 +86,10 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
 
         var subscriptionId = root.GetProperty("id").GetString() ?? string.Empty;
 
+        var expirationDateTime = root.TryGetProperty("expirationDateTime", out var exp)
+            ? DateTime.Parse(exp.GetString() ?? expiresAt.ToString("o")).ToUniversalTime()
+            : expiresAt;
+
         var existing = await _context.CalendarSubscriptions
             .FirstOrDefaultAsync(x =>
                 x.CalendarIntegrationId == integration.Id &&
@@ -105,19 +109,82 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
 
         existing.SubscriptionId = subscriptionId;
         existing.Resource = "me/events";
-        existing.ExpiresAt = expiresAt;
+        existing.ExpiresAt = expirationDateTime;
         existing.IsActive = true;
 
         await _context.SaveChangesAsync();
     }
 
-    private async Task EnsureAccessTokenForIntegrationAsync(CalendarIntegration integration)
+    public async Task RenewExpiringSubscriptionsAsync()
     {
-        if (integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(2))
-            return;
+        var subscriptions = await _context.CalendarSubscriptions
+            .Include(x => x.CalendarIntegration)
+            .Where(x =>
+                x.Provider == "Outlook" &&
+                x.IsActive &&
+                x.ExpiresAt <= DateTime.UtcNow.AddHours(6))
+            .ToListAsync();
 
-        // Na teraz najprościej użyj istniejącego sync service przez pusty mechanizm nie zrobimy.
-        // Jeżeli token wygaśnie, najpierw odpal ręczny sync sesji albo dołożymy publiczny TokenService.
-        throw new InvalidOperationException("Access token expired. Reconnect Outlook or add shared token refresh service.");
+        foreach (var subscription in subscriptions)
+        {
+            try
+            {
+                await RenewSubscriptionAsync(subscription);
+            }
+            catch
+            {
+                subscription.IsActive = false;
+                await _context.SaveChangesAsync();
+            }
+        }
+    }
+
+    private async Task RenewSubscriptionAsync(CalendarSubscription subscription)
+    {
+        var integration = subscription.CalendarIntegration;
+
+        if (!integration.IsActive)
+        {
+            subscription.IsActive = false;
+            await _context.SaveChangesAsync();
+            return;
+        }
+
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
+
+        var newExpiresAt = DateTime.UtcNow.AddHours(48);
+
+        var payload = new
+        {
+            expirationDateTime = newExpiresAt.ToString("o")
+        };
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Patch,
+            $"https://graph.microsoft.com/v1.0/subscriptions/{subscription.SubscriptionId}");
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft renew subscription error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        subscription.ExpiresAt = root.TryGetProperty("expirationDateTime", out var exp)
+            ? DateTime.Parse(exp.GetString() ?? newExpiresAt.ToString("o")).ToUniversalTime()
+            : newExpiresAt;
+
+        subscription.IsActive = true;
+
+        await _context.SaveChangesAsync();
     }
 }

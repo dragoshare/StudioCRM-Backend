@@ -8,7 +8,7 @@ using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 
-namespace StudioCRM.Infrastructure.Services;
+namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 {

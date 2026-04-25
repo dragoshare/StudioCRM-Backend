@@ -3,4 +3,6 @@
 public interface IOutlookSubscriptionService
 {
     Task CreateSubscriptionAsync();
+
+    Task RenewExpiringSubscriptionsAsync();
 }

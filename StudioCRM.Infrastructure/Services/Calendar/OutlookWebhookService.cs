@@ -1,23 +1,30 @@
 ﻿using System.Net.Http.Headers;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 
-namespace StudioCRM.Infrastructure.Services;
+
+namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookWebhookService : IOutlookWebhookService
 {
     private readonly StudioCRMDbContext _context;
     private readonly HttpClient _httpClient;
-
+    private readonly IOutlookTokenService _tokenService;
+    private readonly IConfiguration _configuration;
     public OutlookWebhookService(
-        StudioCRMDbContext context,
-        HttpClient httpClient)
+    StudioCRMDbContext context,
+    HttpClient httpClient,
+    IConfiguration configuration,
+    IOutlookTokenService tokenService)
     {
         _context = context;
         _httpClient = httpClient;
+        _configuration = configuration;
+        _tokenService = tokenService;
     }
 
     public async Task HandleNotificationAsync(string requestBody)
@@ -70,6 +77,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
     private async Task ImportOrUpdateEventAsync(CalendarIntegration integration, string externalEventId)
     {
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
             $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");

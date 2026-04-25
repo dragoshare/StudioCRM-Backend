@@ -11,7 +11,7 @@ using Microsoft.OpenApi.Models;
 using StudioCRM.Api.Swagger;
 using System.Security.Claims;
 using Resend;
-
+using StudioCRM.Api.BackgroundServices;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Infrastructure.Services.Calendar;
@@ -127,6 +127,9 @@ builder.Services.AddHttpClient<IOutlookCalendarAuthService, OutlookCalendarAuthS
 builder.Services.AddHttpClient<IOutlookCalendarSyncService, OutlookCalendarSyncService>();
 builder.Services.AddHttpClient<IOutlookSubscriptionService, OutlookSubscriptionService>();
 builder.Services.AddHttpClient<IOutlookWebhookService, OutlookWebhookService>();
+builder.Services.AddHttpClient<IOutlookTokenService, OutlookTokenService>();
+
+builder.Services.AddHostedService<OutlookSubscriptionRenewalWorker>();
 
 builder.Services.Configure<ResendClientOptions>(options =>
 {
