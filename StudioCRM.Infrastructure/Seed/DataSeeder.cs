@@ -21,9 +21,9 @@ public static class DataSeeder
         await SeedRolesAsync(context);
         await SeedLocationsAsync(context);
         await SeedPackagesAsync(context);
-
         await SeedOwnerAsync(context, passwordHasher);
         await SeedTrainersAsync(context, passwordHasher);
+        await SeedTrainerRatesAsync(context);
         await SeedClientsAsync(context, passwordHasher);
         await SeedSessionsAsync(context);
     }
@@ -35,7 +35,12 @@ public static class DataSeeder
         foreach (var roleName in roles)
         {
             if (!await context.Roles.AnyAsync(r => r.Name == roleName))
-                await context.Roles.AddAsync(new Role { Name = roleName });
+            {
+                await context.Roles.AddAsync(new Role
+                {
+                    Name = roleName
+                });
+            }
         }
 
         await context.SaveChangesAsync();
@@ -81,6 +86,9 @@ public static class DataSeeder
 
         await EnsurePackageAsync(context, "8 treningów 3:1", "Pakiet treningów półpersonalnych dla 3 osób", 640, 8, 35);
         await EnsurePackageAsync(context, "12 treningów 3:1", "Pakiet treningów półpersonalnych dla 3 osób", 900, 12, 45);
+
+        await EnsurePackageAsync(context, "8 treningów 4:1", "Pakiet treningów półpersonalnych dla 4 osób", 560, 8, 35);
+        await EnsurePackageAsync(context, "12 treningów 4:1", "Pakiet treningów półpersonalnych dla 4 osób", 780, 12, 45);
     }
 
     private static async Task EnsurePackageAsync(
@@ -142,7 +150,6 @@ public static class DataSeeder
                 Bio = "Trener siłowy i motoryczny",
                 Phone = "501100100",
                 Experience = 5,
-                Rate = 120m,
                 Locations = new[] { "Niepołomice", "Kłaj" }
             },
             new
@@ -153,7 +160,6 @@ public static class DataSeeder
                 Bio = "Trener przygotowania motorycznego",
                 Phone = "501100101",
                 Experience = 7,
-                Rate = 140m,
                 Locations = new[] { "Niepołomice" }
             },
             new
@@ -164,7 +170,6 @@ public static class DataSeeder
                 Bio = "Trenerka sylwetkowa i funkcjonalna",
                 Phone = "501100102",
                 Experience = 3,
-                Rate = 100m,
                 Locations = new[] { "Kłaj" }
             },
             new
@@ -175,7 +180,6 @@ public static class DataSeeder
                 Bio = "Trener personalny i rehabilitacyjny",
                 Phone = "501100103",
                 Experience = 6,
-                Rate = 130m,
                 Locations = new[] { "Niepołomice", "Kłaj" }
             }
         };
@@ -204,7 +208,6 @@ public static class DataSeeder
                     AvatarUrl = null,
                     Status = "Active",
                     ExperienceYears = seed.Experience,
-                    HourlyRate = seed.Rate,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow,
                     CreatedBy = 1
@@ -234,6 +237,76 @@ public static class DataSeeder
 
             await context.SaveChangesAsync();
         }
+    }
+
+    private static async Task SeedTrainerRatesAsync(StudioCRMDbContext context)
+    {
+        var trainerRates = new Dictionary<string, Dictionary<string, decimal>>
+        {
+            ["trainer@studiocrm.local"] = new()
+            {
+                ["OneToOne"] = 70m,
+                ["TwoToOne"] = 85m,
+                ["ThreeToOne"] = 95m,
+                ["FourToOne"] = 105m
+            },
+            ["adam.trener@studiocrm.local"] = new()
+            {
+                ["OneToOne"] = 80m,
+                ["TwoToOne"] = 95m,
+                ["ThreeToOne"] = 105m,
+                ["FourToOne"] = 115m
+            },
+            ["karolina.trener@studiocrm.local"] = new()
+            {
+                ["OneToOne"] = 60m,
+                ["TwoToOne"] = 75m,
+                ["ThreeToOne"] = 85m,
+                ["FourToOne"] = 95m
+            },
+            ["bartek.trener@studiocrm.local"] = new()
+            {
+                ["OneToOne"] = 75m,
+                ["TwoToOne"] = 90m,
+                ["ThreeToOne"] = 100m,
+                ["FourToOne"] = 110m
+            }
+        };
+
+        foreach (var trainerSeed in trainerRates)
+        {
+            var trainer = await context.Trainers
+                .Include(t => t.User)
+                .FirstOrDefaultAsync(t => t.User.Email == trainerSeed.Key);
+
+            if (trainer is null)
+                continue;
+
+            foreach (var rateSeed in trainerSeed.Value)
+            {
+                var exists = await context.TrainerRates.AnyAsync(r =>
+                    r.TrainerId == trainer.Id &&
+                    r.SessionType == rateSeed.Key &&
+                    r.IsActive);
+
+                if (exists)
+                    continue;
+
+                await context.TrainerRates.AddAsync(new TrainerRate
+                {
+                    TrainerId = trainer.Id,
+                    SessionType = rateSeed.Key,
+                    Rate = rateSeed.Value,
+                    ValidFrom = DateTime.UtcNow.AddMonths(-6),
+                    ValidTo = null,
+                    IsActive = true,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        await context.SaveChangesAsync();
     }
 
     private static async Task SeedClientsAsync(
@@ -384,18 +457,15 @@ public static class DataSeeder
                 if (!selectedClients.Any())
                     continue;
 
-                var startHour = new[] { 7, 8, 9, 10, 15, 16, 17, 18, 19, 20 }[
-                    Random.Shared.Next(10)];
-
+                var startHour = new[] { 7, 8, 9, 10, 15, 16, 17, 18, 19, 20 }[Random.Shared.Next(10)];
                 var start = date.AddHours(startHour);
                 var end = start.AddHours(1);
 
                 var isPast = start < DateTime.UtcNow;
-                var status = isPast
-                    ? RandomPastSessionStatus()
-                    : "Planned";
+                var status = isPast ? RandomPastSessionStatus() : "Planned";
 
                 var plannedType = ResolveSessionType(selectedClients.Count);
+
                 var actualPresentCount = status == "Completed"
                     ? Math.Max(1, selectedClients.Count(c => Random.Shared.Next(1, 101) <= 85))
                     : (int?)null;
@@ -548,7 +618,7 @@ public static class DataSeeder
             1 => "OneToOne",
             2 => "TwoToOne",
             3 => "ThreeToOne",
-            _ => "Group"
+            _ => "FourToOne"
         };
     }
 

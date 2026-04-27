@@ -9,6 +9,5 @@ public class UpdateTrainerDto
     public string? AvatarUrl { get; set; }
     public string Status { get; set; } = "Active";
     public int ExperienceYears { get; set; }
-    public decimal HourlyRate { get; set; }
     public List<int> LocationIds { get; set; } = [];
 }

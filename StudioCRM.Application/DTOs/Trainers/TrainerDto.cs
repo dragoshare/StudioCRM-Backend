@@ -21,7 +21,6 @@ public class TrainerDto
     public int SessionsCount { get; set; }
     public int ActiveClientsCount { get; set; }
 
-    public decimal HourlyRate { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

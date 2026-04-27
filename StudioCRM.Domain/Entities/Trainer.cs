@@ -16,7 +16,8 @@ public class Trainer
 
     public int ExperienceYears { get; set; }
 
-    public decimal HourlyRate { get; set; }
+    public ICollection<TrainerRate> Rates { get; set; } = new List<TrainerRate>();
+    public ICollection<TrainerMonthlySettlement> MonthlySettlements { get; set; } = new List<TrainerMonthlySettlement>();
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

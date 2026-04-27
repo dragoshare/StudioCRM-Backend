@@ -227,7 +227,6 @@ public class InvitationService : IInvitationService
                 UserId = user.Id,
                 Status = "Active",
                 ExperienceYears = 0,
-                HourlyRate = 0,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 CreatedBy = invitation.CreatedBy

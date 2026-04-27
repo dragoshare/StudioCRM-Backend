@@ -32,6 +32,8 @@ public class StudioCRMDbContext : DbContext
     public DbSet<CalendarEventLink> CalendarEventLinks => Set<CalendarEventLink>();
     public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
     public DbSet<ExternalCalendarEvent> ExternalCalendarEvents => Set<ExternalCalendarEvent>();
+    public DbSet<TrainerRate> TrainerRates => Set<TrainerRate>();
+    public DbSet<TrainerMonthlySettlement> TrainerMonthlySettlements => Set<TrainerMonthlySettlement>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -68,9 +70,42 @@ public class StudioCRMDbContext : DbContext
             .HasForeignKey<Trainer>(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<Trainer>()
-            .Property(t => t.HourlyRate)
+        // =========================
+        // TRAINER RATES
+        // =========================
+        modelBuilder.Entity<TrainerRate>()
+            .HasOne(tr => tr.Trainer)
+            .WithMany(t => t.Rates)
+            .HasForeignKey(tr => tr.TrainerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<TrainerRate>()
+            .Property(tr => tr.Rate)
             .HasPrecision(10, 2);
+
+        modelBuilder.Entity<TrainerRate>()
+            .HasIndex(tr => new { tr.TrainerId, tr.SessionType, tr.IsActive });
+
+        // =========================
+        // TRAINER MONTHLY SETTLEMENTS
+        // =========================
+        modelBuilder.Entity<TrainerMonthlySettlement>()
+            .HasOne(s => s.Trainer)
+            .WithMany(t => t.MonthlySettlements)
+            .HasForeignKey(s => s.TrainerId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        modelBuilder.Entity<TrainerMonthlySettlement>()
+            .Property(s => s.TotalAmount)
+            .HasPrecision(10, 2);
+
+        modelBuilder.Entity<TrainerMonthlySettlement>()
+            .Property(s => s.TotalHours)
+            .HasPrecision(10, 2);
+
+        modelBuilder.Entity<TrainerMonthlySettlement>()
+            .HasIndex(s => new { s.TrainerId, s.Year, s.Month })
+            .IsUnique();
 
         modelBuilder.Entity<Trainer>()
             .HasQueryFilter(t => !t.IsDeleted);

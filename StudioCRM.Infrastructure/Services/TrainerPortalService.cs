@@ -1,5 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.TrainerPortal;
+using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Infrastructure.Persistence;
 
@@ -9,13 +10,15 @@ public class TrainerPortalService : ITrainerPortalService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
-
+    private readonly ITrainerSettlementService _settlementService;
     public TrainerPortalService(
-        StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+    StudioCRMDbContext context,
+    ICurrentUserService currentUser,
+    ITrainerSettlementService settlementService)
     {
         _context = context;
         _currentUser = currentUser;
+        _settlementService = settlementService;
     }
 
     public async Task<TrainerPortalMeDto?> GetMeAsync()
@@ -31,7 +34,6 @@ public class TrainerPortalService : ITrainerPortalService
                 Bio = t.Bio,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
-                HourlyRate = t.HourlyRate,
                 LocationIds = t.TrainerLocations.Select(tl => tl.LocationId).ToList(),
                 LocationNames = t.TrainerLocations.Select(tl => tl.Location.Name).ToList()
             })
@@ -206,5 +208,20 @@ public class TrainerPortalService : ITrainerPortalService
             .Where(t => t.UserId == _currentUser.UserId.Value)
             .Select(t => (int?)t.Id)
             .FirstOrDefaultAsync();
+    }
+    public async Task<TrainerMonthlySettlementDto?> GetMyMonthlySettlementAsync(int year, int month)
+    {
+        if (!_currentUser.IsTrainer)
+            throw new UnauthorizedAccessException("Only trainer can access this endpoint.");
+
+        var trainerId = await _context.Trainers
+            .Where(t => t.UserId == _currentUser.UserId)
+            .Select(t => t.Id)
+            .FirstOrDefaultAsync();
+
+        if (trainerId == 0)
+            throw new InvalidOperationException("Trainer not found.");
+
+        return await _settlementService.GetMonthlySettlementAsync(trainerId, year, month);
     }
 }

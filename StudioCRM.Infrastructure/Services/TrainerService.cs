@@ -72,7 +72,6 @@ public class TrainerService : ITrainerService
             AvatarUrl = request.AvatarUrl,
             Status = request.Status,
             ExperienceYears = request.ExperienceYears,
-            HourlyRate = request.HourlyRate,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = request.CreatedBy
@@ -135,7 +134,6 @@ public class TrainerService : ITrainerService
         trainer.AvatarUrl = request.AvatarUrl;
         trainer.Status = request.Status;
         trainer.ExperienceYears = request.ExperienceYears;
-        trainer.HourlyRate = request.HourlyRate;
         trainer.UpdatedAt = DateTime.UtcNow;
 
         var existingTrainerLocations = await _context.TrainerLocations
@@ -219,7 +217,6 @@ public class TrainerService : ITrainerService
                 RatingAverage = 0,
                 SessionsCount = t.Sessions.Count,
                 ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
-                HourlyRate = t.HourlyRate,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 CreatedBy = t.CreatedBy,
@@ -258,7 +255,6 @@ public class TrainerService : ITrainerService
                 RatingAverage = 0,
                 SessionsCount = t.Sessions.Count,
                 ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
-                HourlyRate = t.HourlyRate,
                 CreatedAt = t.CreatedAt,
                 UpdatedAt = t.UpdatedAt,
                 CreatedBy = t.CreatedBy,

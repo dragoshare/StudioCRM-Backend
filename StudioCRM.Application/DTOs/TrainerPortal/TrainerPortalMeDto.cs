@@ -18,8 +18,6 @@ public class TrainerPortalMeDto
 
     public int ExperienceYears { get; set; }
 
-    public decimal HourlyRate { get; set; }
-
     public List<int> LocationIds { get; set; } = new();
 
     public List<string> LocationNames { get; set; } = new();

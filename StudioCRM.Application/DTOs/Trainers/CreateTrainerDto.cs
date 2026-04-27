@@ -14,8 +14,6 @@ public class CreateTrainerDto
     public string Status { get; set; } = "Active";
     public int ExperienceYears { get; set; }
 
-    public decimal HourlyRate { get; set; }
-
     public int? CreatedBy { get; set; }
     public List<int> LocationIds { get; set; } = [];
 }

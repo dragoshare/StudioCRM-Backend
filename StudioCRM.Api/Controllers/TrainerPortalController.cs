@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.TrainerPortal;
+using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Api.Controllers;
@@ -42,6 +43,20 @@ public class TrainerPortalController : ControllerBase
     {
         var result = await _trainerPortalService.GetDashboardAsync();
         if (result is null) return NotFound();
+        return Ok(result);
+    }
+
+    [HttpGet("settlement")]
+    [Authorize(Roles = "Trainer")]
+    public async Task<ActionResult<TrainerMonthlySettlementDto>> GetMySettlement(
+    [FromQuery] int year,
+    [FromQuery] int month)
+    {
+        var result = await _trainerPortalService.GetMyMonthlySettlementAsync(year, month);
+
+        if (result is null)
+            return NotFound();
+
         return Ok(result);
     }
 }
