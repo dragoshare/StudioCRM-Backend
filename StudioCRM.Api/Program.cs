@@ -18,12 +18,11 @@ using StudioCRM.Infrastructure.Services.Calendar;
 using StudioCRM.Infrastructure.Services.Mail;
 using StudioCRM.Application.ClientPackages.Interfaces;
 using StudioCRM.Application.ClientPackages.Services;
-
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionName = builder.Configuration["Database:ConnectionName"] ?? "DefaultConnection";
 
-var connectionString = builder.Configuration.GetConnectionString(connectionName);
 // JWT settings
 builder.Services.Configure<JwtSettings>(
     builder.Configuration.GetSection("Jwt"));
@@ -34,6 +33,10 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
 // Database
+var connectionString = builder.Environment.IsDevelopment()
+    ? builder.Configuration.GetConnectionString("TestConnection")
+    : builder.Configuration.GetConnectionString("DefaultConnection");
+
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
     options.UseNpgsql(connectionString));
 
@@ -53,7 +56,7 @@ builder.Services.AddScoped<IExternalCalendarEventService, ExternalCalendarEventS
 builder.Services.AddScoped<ISessionParticipantService, SessionParticipantService>();
 builder.Services.AddScoped<ITrainerRateService, TrainerRateService>();
 builder.Services.AddScoped<ITrainerSettlementService, TrainerSettlementService>();
-
+builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();

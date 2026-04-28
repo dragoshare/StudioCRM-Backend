@@ -1,8 +1,10 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Api.Controllers;
 
@@ -12,10 +14,17 @@ namespace StudioCRM.Api.Controllers;
 public class ClientPortalController : ControllerBase
 {
     private readonly IClientPortalService _clientPortalService;
+    private readonly IMilestoneService _milestoneService;
+    private readonly StudioCRMDbContext _context;
 
-    public ClientPortalController(IClientPortalService clientPortalService)
+    public ClientPortalController(
+        IClientPortalService clientPortalService,
+        IMilestoneService milestoneService,
+        StudioCRMDbContext context)
     {
         _clientPortalService = clientPortalService;
+        _milestoneService = milestoneService;
+        _context = context;
     }
 
     [HttpGet("me")]
@@ -78,6 +87,7 @@ public class ClientPortalController : ControllerBase
 
         return Ok(result);
     }
+
     [HttpGet("package-settlement")]
     public async Task<ActionResult<ClientPackageSettlementDto>> GetPackageSettlement()
     {
@@ -92,25 +102,60 @@ public class ClientPortalController : ControllerBase
     }
 
     [HttpGet("trainer-contact")]
-    [Authorize(Roles = "Client")]
     public async Task<IActionResult> GetTrainerContact()
     {
-        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        var userId = GetCurrentUserId();
 
-        if (string.IsNullOrWhiteSpace(userIdClaim))
+        if (userId is null)
             return Unauthorized();
 
-        if (!int.TryParse(userIdClaim, out var userId))
-            return Unauthorized();
+        var contact = await _clientPortalService.GetTrainerContactAsync(userId.Value);
 
-        var contact = await _clientPortalService.GetTrainerContactAsync(userId);
-
-        if (contact == null)
+        if (contact is null)
+        {
             return NotFound(new
             {
                 message = "Brak przypisanego trenera dla tego klienta."
             });
+        }
 
         return Ok(contact);
+    }
+
+    [HttpGet("milestones")]
+    public async Task<IActionResult> GetMyMilestones()
+    {
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+            return Unauthorized();
+
+        var client = await _context.Clients
+            .FirstOrDefaultAsync(c => c.UserId == userId.Value);
+
+        if (client is null)
+        {
+            return NotFound(new
+            {
+                message = "Nie znaleziono profilu klienta dla zalogowanego użytkownika."
+            });
+        }
+
+        var milestones = await _milestoneService.GetClientMilestonesAsync(client.Id);
+
+        if (milestones is null)
+            return NotFound();
+
+        return Ok(milestones);
+    }
+
+    private int? GetCurrentUserId()
+    {
+        var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (!int.TryParse(userIdClaim, out var userId))
+            return null;
+
+        return userId;
     }
 }

@@ -46,4 +46,7 @@ public class Client
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
     public bool IsDeleted { get; set; } = false;
     public DateTime? DeletedAt { get; set; }
+    public DateTime? TrainingStartDate { get; set; }
+
+    public ICollection<ClientMilestone> Milestones { get; set; } = new List<ClientMilestone>();
 }

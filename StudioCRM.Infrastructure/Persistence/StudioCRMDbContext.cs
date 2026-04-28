@@ -39,6 +39,9 @@ public class StudioCRMDbContext : DbContext
     public DbSet<TrainerRate> TrainerRates => Set<TrainerRate>();
     public DbSet<TrainerMonthlySettlement> TrainerMonthlySettlements => Set<TrainerMonthlySettlement>();
 
+    public DbSet<MilestoneDefinition> MilestoneDefinitions => Set<MilestoneDefinition>();
+    public DbSet<ClientMilestone> ClientMilestones => Set<ClientMilestone>();
+
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
@@ -390,5 +393,56 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<ExternalCalendarEvent>()
             .HasIndex(x => new { x.CalendarIntegrationId, x.ExternalEventId })
             .IsUnique();
+        // =========================
+        // Milestones
+        // =========================
+
+        modelBuilder.Entity<MilestoneDefinition>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(x => x.RewardName)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(x => x.Description)
+                .HasMaxLength(500);
+
+            entity.HasData(
+                new MilestoneDefinition
+                {
+                    Id = 1,
+                    Name = "3 miesiące treningów",
+                    RequiredMonths = 3,
+                    RewardName = "Mały upominek",
+                    Description = "Nagroda za regularne uczęszczanie przez 3 miesiące.",
+                    IsActive = true
+                },
+                new MilestoneDefinition
+                {
+                    Id = 2,
+                    Name = "6 miesięcy treningów",
+                    RequiredMonths = 6,
+                    RewardName = "Większy upominek",
+                    Description = "Nagroda za regularne uczęszczanie przez 6 miesięcy.",
+                    IsActive = true
+                },
+                new MilestoneDefinition
+                {
+                    Id = 3,
+                    Name = "12 miesięcy treningów",
+                    RequiredMonths = 12,
+                    RewardName = "Koszulka z logo studia",
+                    Description = "Nagroda za rok treningów w studio.",
+                    IsActive = true
+                }
+            );
+        });
     }
+
+
 }

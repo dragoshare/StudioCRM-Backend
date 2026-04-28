@@ -363,6 +363,7 @@ public static class DataSeeder
                     ActivePackageId = package.Id,
                     LocationId = location.Id,
                     Goal = seed.Goal,
+                    TrainingStartDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(30, 200)),
                     Notes = "Klient testowy powiązany z kontem, trenerem, lokalizacją i pakietem.",
                     Status = "Active",
                     ProgressPercent = seed.Progress,
