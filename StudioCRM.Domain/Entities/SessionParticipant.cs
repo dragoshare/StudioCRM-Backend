@@ -1,4 +1,5 @@
-﻿namespace StudioCRM.Domain.Entities;
+﻿using StudioCRM.Domain.Enums;
+namespace StudioCRM.Domain.Entities;
 
 public class SessionParticipant
 {
@@ -28,4 +29,15 @@ public class SessionParticipant
     public Client Client { get; set; } = null!;
 
     public Package? Package { get; set; }
+    public int? ClientPackageId { get; set; }
+    public ClientPackage? ClientPackage { get; set; }
+
+    public decimal? ExpectedUnitPrice { get; set; }
+    public decimal? ActualUnitPrice { get; set; }
+    public decimal? BalanceDifference { get; set; }
+
+    public SessionBillingType? PlannedBillingType { get; set; }
+    public SessionBillingType? ActualBillingType { get; set; }
+
+    public bool IsCountedFromPackage { get; set; }
 }

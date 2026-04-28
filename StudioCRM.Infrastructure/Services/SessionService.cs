@@ -2,6 +2,7 @@
 using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
@@ -37,7 +38,12 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
-        await ValidateSessionRequestAsync(request.TrainerId, request.LocationId, request.StartAt, request.EndAt, request.Participants);
+        await ValidateSessionRequestAsync(
+            request.TrainerId,
+            request.LocationId,
+            request.StartAt,
+            request.EndAt,
+            request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
 
@@ -82,7 +88,12 @@ public class SessionService : ISessionService
         if (session.Status == "Completed")
             throw new InvalidOperationException("Completed session cannot be updated.");
 
-        await ValidateSessionRequestAsync(request.TrainerId, request.LocationId, request.StartAt, request.EndAt, request.Participants);
+        await ValidateSessionRequestAsync(
+            request.TrainerId,
+            request.LocationId,
+            request.StartAt,
+            request.EndAt,
+            request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
 
@@ -149,6 +160,124 @@ public class SessionService : ISessionService
             .ToListAsync();
     }
 
+    public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
+    {
+        var query = BaseQuery();
+
+        if (filter.TrainerId.HasValue)
+            query = query.Where(s => s.TrainerId == filter.TrainerId.Value);
+
+        if (filter.ClientId.HasValue)
+            query = query.Where(s => s.Participants.Any(p => p.ClientId == filter.ClientId.Value));
+
+        if (filter.LocationId.HasValue)
+            query = query.Where(s => s.LocationId == filter.LocationId.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.Status))
+            query = query.Where(s => s.Status == filter.Status);
+
+        if (filter.From.HasValue)
+            query = query.Where(s => s.StartAt >= filter.From.Value);
+
+        if (filter.To.HasValue)
+            query = query.Where(s => s.StartAt <= filter.To.Value);
+
+        return await query
+            .OrderBy(s => s.StartAt)
+            .Select(s => MapSessionDto(s))
+            .ToListAsync();
+    }
+
+    public async Task CountSessionFromPackageAsync(CountSessionFromPackageRequest request)
+    {
+        var participant = await _context.SessionParticipants
+            .Include(p => p.Session)
+            .FirstOrDefaultAsync(p => p.Id == request.SessionParticipantId);
+
+        if (participant is null)
+            throw new InvalidOperationException("Session participant not found.");
+
+        var clientPackage = await _context.ClientPackages
+            .FirstOrDefaultAsync(p => p.Id == request.ClientPackageId);
+
+        if (clientPackage is null)
+            throw new InvalidOperationException("Client package not found.");
+
+        if (participant.ClientId != clientPackage.ClientId)
+            throw new InvalidOperationException("This package does not belong to this client.");
+
+        if (!clientPackage.IsActive)
+            throw new InvalidOperationException("Client package is not active.");
+
+        var usedSessions = await _context.SessionParticipants
+            .CountAsync(p =>
+                p.ClientPackageId == clientPackage.Id &&
+                p.CountsAgainstPackage);
+
+        var isAlreadyCountedThisParticipant =
+            participant.ClientPackageId == clientPackage.Id &&
+            participant.CountsAgainstPackage;
+
+        if (!isAlreadyCountedThisParticipant && usedSessions >= clientPackage.TotalSessions)
+            throw new InvalidOperationException("Client package has no remaining sessions.");
+
+        var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
+        var actualUnitPrice = request.ActualUnitPrice;
+        var balanceDifference = expectedUnitPrice - actualUnitPrice;
+
+        participant.ClientPackageId = clientPackage.Id;
+        participant.CountsAgainstPackage = true;
+        participant.SessionsCharged = 1;
+        participant.PackageId = clientPackage.PackageId;
+
+        participant.PlannedBillingType = clientPackage.ExpectedBillingType;
+        participant.ActualBillingType = request.ActualBillingType;
+        participant.ExpectedUnitPrice = expectedUnitPrice;
+        participant.ActualUnitPrice = actualUnitPrice;
+        participant.BalanceDifference = balanceDifference;
+
+        participant.UpdatedAt = DateTime.UtcNow;
+
+        participant.Session.ActualSessionType = request.ActualBillingType.ToString();
+        participant.Session.ActualParticipantsCount = await _context.SessionParticipants
+            .CountAsync(p => p.SessionId == participant.SessionId);
+        participant.Session.Status = "Completed";
+        participant.Session.CompletedAt ??= DateTime.UtcNow;
+        participant.Session.UpdatedAt = DateTime.UtcNow;
+
+        var existingTransaction = await _context.ClientBalanceTransactions
+            .FirstOrDefaultAsync(t =>
+                t.ClientPackageId == clientPackage.Id &&
+                t.SessionId == participant.SessionId &&
+                t.ClientId == clientPackage.ClientId &&
+                t.Type == BalanceTransactionType.PackageAdjustment);
+
+        if (existingTransaction is not null)
+        {
+            _context.ClientBalanceTransactions.Remove(existingTransaction);
+        }
+
+        if (balanceDifference != 0)
+        {
+            var transaction = new ClientBalanceTransaction
+            {
+                ClientId = clientPackage.ClientId,
+                ClientPackageId = clientPackage.Id,
+                SessionId = participant.SessionId,
+                Amount = balanceDifference,
+                Type = BalanceTransactionType.PackageAdjustment,
+                Description = balanceDifference > 0
+                    ? $"Nadpłata: sesja rozliczona taniej niż pakiet ({request.ActualBillingType} zamiast {clientPackage.ExpectedBillingType})."
+                    : $"Dopłata: sesja rozliczona drożej niż pakiet ({request.ActualBillingType} zamiast {clientPackage.ExpectedBillingType}).",
+                CreatedAt = DateTime.UtcNow
+            };
+
+            await _context.ClientBalanceTransactions.AddAsync(transaction);
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
     private IQueryable<Session> BaseQuery()
     {
         return _context.Sessions
@@ -158,7 +287,9 @@ public class SessionService : ISessionService
             .Include(s => s.Participants)
                 .ThenInclude(p => p.Client)
             .Include(s => s.Participants)
-                .ThenInclude(p => p.Package);
+                .ThenInclude(p => p.Package)
+            .Include(s => s.Participants)
+                .ThenInclude(p => p.ClientPackage);
     }
 
     private async Task ValidateSessionRequestAsync(
@@ -192,7 +323,8 @@ public class SessionService : ISessionService
         {
             if (participant.PackageId.HasValue)
             {
-                var packageExists = await _context.Packages.AnyAsync(p => p.Id == participant.PackageId.Value);
+                var packageExists = await _context.Packages
+                    .AnyAsync(p => p.Id == participant.PackageId.Value);
 
                 if (!packageExists)
                     throw new InvalidOperationException($"Package {participant.PackageId.Value} does not exist.");
@@ -325,32 +457,5 @@ public class SessionService : ISessionService
             3 => "ThreeToOne",
             _ => "Group"
         };
-    }
-    public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
-    {
-        var query = BaseQuery();
-
-        if (filter.TrainerId.HasValue)
-            query = query.Where(s => s.TrainerId == filter.TrainerId.Value);
-
-        if (filter.ClientId.HasValue)
-            query = query.Where(s => s.Participants.Any(p => p.ClientId == filter.ClientId.Value));
-
-        if (filter.LocationId.HasValue)
-            query = query.Where(s => s.LocationId == filter.LocationId.Value);
-
-        if (!string.IsNullOrWhiteSpace(filter.Status))
-            query = query.Where(s => s.Status == filter.Status);
-
-        if (filter.From.HasValue)
-            query = query.Where(s => s.StartAt >= filter.From.Value);
-
-        if (filter.To.HasValue)
-            query = query.Where(s => s.StartAt <= filter.To.Value);
-
-        return await query
-            .OrderBy(s => s.StartAt)
-            .Select(s => MapSessionDto(s))
-            .ToListAsync();
     }
 }

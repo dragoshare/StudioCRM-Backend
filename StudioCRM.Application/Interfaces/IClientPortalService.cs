@@ -1,4 +1,6 @@
-﻿using StudioCRM.Application.DTOs.ClientPortal;
+﻿
+using StudioCRM.Application.ClientPortal;
+using StudioCRM.Application.DTOs.ClientPortal;
 
 namespace StudioCRM.Application.Interfaces;
 
@@ -15,4 +17,7 @@ public interface IClientPortalService
     Task<ClientPortalPaymentDto?> GetPaymentAsync();
 
     Task<ClientPortalTrainerDto?> GetTrainerAsync();
+    Task<ClientPackageSettlementDto> GetPackageSettlementAsync(string userId);
+
+    Task<ClientTrainerContactDto?> GetTrainerContactAsync(int userId);
 }

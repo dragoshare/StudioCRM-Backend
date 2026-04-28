@@ -19,4 +19,5 @@ public interface ISessionService
     Task<bool> RestoreAsync(int id);
 
     Task<List<SessionDto>> GetDeletedAsync();
+    Task CountSessionFromPackageAsync(CountSessionFromPackageRequest request);
 }

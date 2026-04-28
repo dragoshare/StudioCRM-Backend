@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System.Security.Claims;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.Interfaces;
@@ -76,5 +77,40 @@ public class ClientPortalController : ControllerBase
             return NotFound();
 
         return Ok(result);
+    }
+    [HttpGet("package-settlement")]
+    public async Task<ActionResult<ClientPackageSettlementDto>> GetPackageSettlement()
+    {
+        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
+
+        if (string.IsNullOrEmpty(userId))
+            return Unauthorized();
+
+        var result = await _clientPortalService.GetPackageSettlementAsync(userId);
+
+        return Ok(result);
+    }
+
+    [HttpGet("trainer-contact")]
+    [Authorize(Roles = "Client")]
+    public async Task<IActionResult> GetTrainerContact()
+    {
+        var userIdClaim = User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+        if (string.IsNullOrWhiteSpace(userIdClaim))
+            return Unauthorized();
+
+        if (!int.TryParse(userIdClaim, out var userId))
+            return Unauthorized();
+
+        var contact = await _clientPortalService.GetTrainerContactAsync(userId);
+
+        if (contact == null)
+            return NotFound(new
+            {
+                message = "Brak przypisanego trenera dla tego klienta."
+            });
+
+        return Ok(contact);
     }
 }

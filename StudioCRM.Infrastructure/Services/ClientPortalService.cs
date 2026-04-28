@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.ClientPortal;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Infrastructure.Persistence;
@@ -204,6 +205,116 @@ public class ClientPortalService : IClientPortalService
         };
     }
 
+    public async Task<ClientPackageSettlementDto> GetPackageSettlementAsync(string userId)
+    {
+        if (!int.TryParse(userId, out var parsedUserId))
+            throw new InvalidOperationException("Invalid user id.");
+
+        var client = await _context.Clients
+            .FirstOrDefaultAsync(c => c.UserId == parsedUserId);
+
+        if (client is null)
+            throw new InvalidOperationException("Client profile not found for current user.");
+
+        var activePackage = await _context.ClientPackages
+            .Include(cp => cp.Package)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
+
+        var balanceTransactions = await _context.ClientBalanceTransactions
+            .Where(t => t.ClientId == client.Id)
+            .OrderByDescending(t => t.CreatedAt)
+            .Select(t => new ClientBalanceTransactionDto
+            {
+                Id = t.Id,
+                Amount = t.Amount,
+                Type = t.Type.ToString(),
+                Description = t.Description,
+                CreatedAt = t.CreatedAt
+            })
+            .ToListAsync();
+
+        var currentBalance = balanceTransactions.Sum(t => t.Amount);
+
+        if (activePackage is null)
+        {
+            return new ClientPackageSettlementDto
+            {
+                ClientId = client.Id,
+                ClientName = client.FirstName + " " + client.LastName,
+                ActivePackage = null,
+                CurrentBalance = currentBalance,
+                CountedSessions = new List<ClientCountedSessionDto>(),
+                BalanceTransactions = balanceTransactions
+            };
+        }
+
+        var countedSessions = await _context.SessionParticipants
+            .Include(sp => sp.Session)
+                .ThenInclude(s => s.Trainer)
+                    .ThenInclude(t => t.User)
+            .Include(sp => sp.Session)
+                .ThenInclude(s => s.Location)
+            .Where(sp =>
+                sp.ClientId == client.Id &&
+                sp.ClientPackageId == activePackage.Id &&
+                sp.CountsAgainstPackage)
+            .OrderByDescending(sp => sp.Session.StartAt)
+            .Select(sp => new ClientCountedSessionDto
+            {
+                SessionId = sp.SessionId,
+                Date = sp.Session.StartAt,
+                TrainerName = sp.Session.Trainer.User.FirstName + " " + sp.Session.Trainer.User.LastName,
+                LocationName = sp.Session.Location.Name,
+                Status = sp.Session.Status,
+                WasCountedFromPackage = sp.CountsAgainstPackage,
+                PlannedBillingType = sp.PlannedBillingType != null ? sp.PlannedBillingType.ToString()! : string.Empty,
+                ActualBillingType = sp.ActualBillingType != null ? sp.ActualBillingType.ToString()! : string.Empty,
+                ExpectedUnitPrice = sp.ExpectedUnitPrice ?? 0,
+                ActualUnitPrice = sp.ActualUnitPrice ?? 0,
+                BalanceDifference = sp.BalanceDifference ?? 0,
+                Description = sp.BalanceDifference > 0
+                    ? "Sesja rozliczona taniej niż zakładany typ pakietu."
+                    : sp.BalanceDifference < 0
+                        ? "Sesja rozliczona drożej niż zakładany typ pakietu."
+                        : "Sesja rozliczona zgodnie z pakietem."
+            })
+            .ToListAsync();
+
+        var usedSessions = countedSessions.Count;
+        var remainingSessions = Math.Max(0, activePackage.TotalSessions - usedSessions);
+
+        return new ClientPackageSettlementDto
+        {
+            ClientId = client.Id,
+            ClientName = client.FirstName + " " + client.LastName,
+            CurrentBalance = currentBalance,
+            BalanceTransactions = balanceTransactions,
+            CountedSessions = countedSessions,
+            ActivePackage = new ClientActivePackageDto
+            {
+                ClientPackageId = activePackage.Id,
+                PackageId = activePackage.PackageId,
+                PackageName = activePackage.Name,
+                TotalSessions = activePackage.TotalSessions,
+                UsedSessions = usedSessions,
+                RemainingSessions = remainingSessions,
+                PackagePrice = activePackage.TotalPrice,
+                ExpectedUnitPrice = activePackage.ExpectedUnitPrice,
+                ExpectedBillingType = activePackage.ExpectedBillingType.ToString(),
+                PaymentStatus = activePackage.PaymentStatus.ToString(),
+                IsPaid = activePackage.PaymentStatus.ToString() == "Paid",
+                IsOverdue =
+                    activePackage.PaymentStatus.ToString() == "Overdue" ||
+                    activePackage.PaymentDueDate < DateTime.UtcNow &&
+                    activePackage.PaymentStatus.ToString() != "Paid",
+                PurchaseDate = activePackage.PurchaseDate,
+                ValidUntil = activePackage.ValidUntil
+            }
+        };
+    }
+
     public async Task<ClientPortalPaymentDto?> GetPaymentAsync()
     {
         var client = await GetCurrentClientQuery()
@@ -288,5 +399,29 @@ public class ClientPortalService : IClientPortalService
         };
 
         return $"Dziś jest {dayName}, życzymy udanego treningu!";
+    }
+    public async Task<ClientTrainerContactDto?> GetTrainerContactAsync(int userId)
+    {
+        var client = await _context.Clients
+            .Include(c => c.Trainer)
+                .ThenInclude(t => t.User)
+            .FirstOrDefaultAsync(c => c.UserId == userId);
+
+        if (client == null || client.Trainer == null)
+            return null;
+
+        var trainer = client.Trainer;
+        var trainerUser = trainer.User;
+
+        return new ClientTrainerContactDto
+        {
+            TrainerId = trainer.Id,
+            FullName = $"{trainerUser.FirstName} {trainerUser.LastName}".Trim(),
+            Email = trainerUser.Email,
+            Phone = trainer.Phone,
+            Bio = trainer.Bio,
+            AvatarUrl = trainer.AvatarUrl,
+            ExperienceYears = trainer.ExperienceYears
+        };
     }
 }

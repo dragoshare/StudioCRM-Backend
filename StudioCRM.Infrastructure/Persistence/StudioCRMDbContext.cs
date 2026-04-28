@@ -17,6 +17,9 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Trainer> Trainers => Set<Trainer>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Package> Packages => Set<Package>();
+    public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
+    public DbSet<ClientBalanceTransaction> ClientBalanceTransactions => Set<ClientBalanceTransaction>();
+
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
 
@@ -32,6 +35,7 @@ public class StudioCRMDbContext : DbContext
     public DbSet<CalendarEventLink> CalendarEventLinks => Set<CalendarEventLink>();
     public DbSet<CalendarSubscription> CalendarSubscriptions => Set<CalendarSubscription>();
     public DbSet<ExternalCalendarEvent> ExternalCalendarEvents => Set<ExternalCalendarEvent>();
+
     public DbSet<TrainerRate> TrainerRates => Set<TrainerRate>();
     public DbSet<TrainerMonthlySettlement> TrainerMonthlySettlements => Set<TrainerMonthlySettlement>();
 
@@ -70,9 +74,13 @@ public class StudioCRMDbContext : DbContext
             .HasForeignKey<Trainer>(t => t.UserId)
             .OnDelete(DeleteBehavior.Cascade);
 
+        modelBuilder.Entity<Trainer>()
+            .HasQueryFilter(t => !t.IsDeleted);
+
         // =========================
         // TRAINER RATES
         // =========================
+
         modelBuilder.Entity<TrainerRate>()
             .HasOne(tr => tr.Trainer)
             .WithMany(t => t.Rates)
@@ -85,10 +93,16 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<TrainerRate>()
             .HasIndex(tr => new { tr.TrainerId, tr.SessionType, tr.IsActive });
+        modelBuilder.Entity<Client>()
+            .HasOne(c => c.Trainer)
+            .WithMany()
+            .HasForeignKey(c => c.TrainerId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // =========================
         // TRAINER MONTHLY SETTLEMENTS
         // =========================
+
         modelBuilder.Entity<TrainerMonthlySettlement>()
             .HasOne(s => s.Trainer)
             .WithMany(t => t.MonthlySettlements)
@@ -106,9 +120,6 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<TrainerMonthlySettlement>()
             .HasIndex(s => new { s.TrainerId, s.Year, s.Month })
             .IsUnique();
-
-        modelBuilder.Entity<Trainer>()
-            .HasQueryFilter(t => !t.IsDeleted);
 
         // =========================
         // CLIENTS
@@ -153,6 +164,71 @@ public class StudioCRMDbContext : DbContext
             .HasQueryFilter(p => !p.IsDeleted);
 
         // =========================
+        // CLIENT PACKAGES
+        // =========================
+
+        modelBuilder.Entity<ClientPackage>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .IsRequired()
+                .HasMaxLength(150);
+
+            entity.Property(x => x.TotalPrice)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.ExpectedUnitPrice)
+                .HasPrecision(18, 2);
+
+            entity.HasOne(x => x.Client)
+                .WithMany()
+                .HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Package)
+                .WithMany()
+                .HasForeignKey(x => x.PackageId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => new { x.ClientId, x.IsActive });
+        });
+
+        // =========================
+        // CLIENT BALANCE TRANSACTIONS
+        // =========================
+
+        modelBuilder.Entity<ClientBalanceTransaction>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Amount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.Description)
+                .HasMaxLength(500);
+
+            entity.HasOne(x => x.Client)
+                .WithMany()
+                .HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClientPackage)
+                .WithMany()
+                .HasForeignKey(x => x.ClientPackageId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Session)
+                .WithMany()
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.ClientId);
+            entity.HasIndex(x => x.ClientPackageId);
+            entity.HasIndex(x => x.SessionId);
+        });
+
+        // =========================
         // LOCATIONS
         // =========================
 
@@ -194,27 +270,42 @@ public class StudioCRMDbContext : DbContext
         // SESSION PARTICIPANTS
         // =========================
 
-        modelBuilder.Entity<SessionParticipant>()
-            .HasOne(sp => sp.Session)
-            .WithMany(s => s.Participants)
-            .HasForeignKey(sp => sp.SessionId)
-            .OnDelete(DeleteBehavior.Cascade);
+        modelBuilder.Entity<SessionParticipant>(entity =>
+        {
+            entity.HasOne(sp => sp.Session)
+                .WithMany(s => s.Participants)
+                .HasForeignKey(sp => sp.SessionId)
+                .OnDelete(DeleteBehavior.Cascade);
 
-        modelBuilder.Entity<SessionParticipant>()
-            .HasOne(sp => sp.Client)
-            .WithMany()
-            .HasForeignKey(sp => sp.ClientId)
-            .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(sp => sp.Client)
+                .WithMany()
+                .HasForeignKey(sp => sp.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
 
-        modelBuilder.Entity<SessionParticipant>()
-            .HasOne(sp => sp.Package)
-            .WithMany()
-            .HasForeignKey(sp => sp.PackageId)
-            .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(sp => sp.Package)
+                .WithMany()
+                .HasForeignKey(sp => sp.PackageId)
+                .OnDelete(DeleteBehavior.SetNull);
 
-        modelBuilder.Entity<SessionParticipant>()
-            .HasIndex(sp => new { sp.SessionId, sp.ClientId })
-            .IsUnique();
+            entity.HasOne(sp => sp.ClientPackage)
+                .WithMany()
+                .HasForeignKey(sp => sp.ClientPackageId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.Property(sp => sp.ExpectedUnitPrice)
+                .HasPrecision(18, 2);
+
+            entity.Property(sp => sp.ActualUnitPrice)
+                .HasPrecision(18, 2);
+
+            entity.Property(sp => sp.BalanceDifference)
+                .HasPrecision(18, 2);
+
+            entity.HasIndex(sp => new { sp.SessionId, sp.ClientId })
+                .IsUnique();
+
+            entity.HasIndex(sp => sp.ClientPackageId);
+        });
 
         // =========================
         // AUTH TOKENS

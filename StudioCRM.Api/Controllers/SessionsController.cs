@@ -80,4 +80,12 @@ public class SessionsController : ControllerBase
     {
         return Ok(await _sessionService.GetDeletedAsync());
     }
+
+    [Authorize(Roles = "Owner,Trainer")]
+    [HttpPost("participants/count-from-package")]
+    public async Task<IActionResult> CountFromPackage(CountSessionFromPackageRequest request)
+    {
+        await _sessionService.CountSessionFromPackageAsync(request);
+        return NoContent();
+    }
 }
