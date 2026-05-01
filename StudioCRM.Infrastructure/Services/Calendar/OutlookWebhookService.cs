@@ -6,7 +6,6 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 
-
 namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookWebhookService : IOutlookWebhookService
@@ -15,11 +14,12 @@ public class OutlookWebhookService : IOutlookWebhookService
     private readonly HttpClient _httpClient;
     private readonly IOutlookTokenService _tokenService;
     private readonly IConfiguration _configuration;
+
     public OutlookWebhookService(
-    StudioCRMDbContext context,
-    HttpClient httpClient,
-    IConfiguration configuration,
-    IOutlookTokenService tokenService)
+        StudioCRMDbContext context,
+        HttpClient httpClient,
+        IConfiguration configuration,
+        IOutlookTokenService tokenService)
     {
         _context = context;
         _httpClient = httpClient;
@@ -57,7 +57,6 @@ public class OutlookWebhookService : IOutlookWebhookService
             if (string.IsNullOrWhiteSpace(resource))
                 continue;
 
-            // resource najczęściej wygląda np. users/{id}/events/{eventId} albo me/events/{eventId}
             var externalEventId = resource.Split('/').LastOrDefault();
 
             if (string.IsNullOrWhiteSpace(externalEventId))
@@ -78,9 +77,10 @@ public class OutlookWebhookService : IOutlookWebhookService
     private async Task ImportOrUpdateEventAsync(CalendarIntegration integration, string externalEventId)
     {
         await _tokenService.EnsureValidAccessTokenAsync(integration);
+
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
@@ -125,15 +125,90 @@ public class OutlookWebhookService : IOutlookWebhookService
             : null;
 
         existing.OrganizerEmail = root.TryGetProperty("organizer", out var organizer) &&
-                                  organizer.TryGetProperty("emailAddress", out var emailAddress) &&
-                                  emailAddress.TryGetProperty("address", out var address)
-            ? address.GetString()
+                                  organizer.TryGetProperty("emailAddress", out var organizerEmailAddress) &&
+                                  organizerEmailAddress.TryGetProperty("address", out var organizerAddress)
+            ? organizerAddress.GetString()
             : null;
 
         existing.StartAt = ReadGraphDateTime(root, "start");
         existing.EndAt = ReadGraphDateTime(root, "end");
 
+        var attendeeEmails = ReadAttendeeEmails(root);
+        existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
+
+        existing.LocationEmail = await ResolveLocationEmailAsync(attendeeEmails, existing.LocationName);
+
+        existing.SeriesMasterId = root.TryGetProperty("seriesMasterId", out var seriesMasterId)
+            ? seriesMasterId.GetString()
+            : null;
+
+        existing.IsRecurring = root.TryGetProperty("type", out var type) &&
+                               !string.Equals(type.GetString(), "singleInstance", StringComparison.OrdinalIgnoreCase);
+
+        existing.ImportedAt = DateTime.UtcNow;
+
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<string?> ResolveLocationEmailAsync(List<string> attendeeEmails, string? locationName)
+    {
+        var locationEmails = await _context.Locations
+            .Where(l => l.IsActive && l.CalendarEmail != null)
+            .Select(l => l.CalendarEmail!)
+            .ToListAsync();
+
+        var normalizedLocationEmails = locationEmails
+            .Select(x => x.Trim().ToLowerInvariant())
+            .ToList();
+
+        var locationFromAttendees = attendeeEmails
+            .Select(x => x.Trim().ToLowerInvariant())
+            .FirstOrDefault(x => normalizedLocationEmails.Contains(x));
+
+        if (!string.IsNullOrWhiteSpace(locationFromAttendees))
+            return locationFromAttendees;
+
+        if (string.IsNullOrWhiteSpace(locationName))
+            return null;
+
+        var normalizedLocationName = locationName.Trim().ToLowerInvariant();
+
+        var location = await _context.Locations
+            .FirstOrDefaultAsync(l =>
+                l.IsActive &&
+                (
+                    normalizedLocationName.Contains(l.Name.ToLower()) ||
+                    l.Name.ToLower().Contains(normalizedLocationName)
+                ));
+
+        return location?.CalendarEmail;
+    }
+
+    private static List<string> ReadAttendeeEmails(JsonElement root)
+    {
+        var emails = new List<string>();
+
+        if (!root.TryGetProperty("attendees", out var attendees) ||
+            attendees.ValueKind != JsonValueKind.Array)
+        {
+            return emails;
+        }
+
+        foreach (var attendee in attendees.EnumerateArray())
+        {
+            if (!attendee.TryGetProperty("emailAddress", out var emailAddress))
+                continue;
+
+            if (!emailAddress.TryGetProperty("address", out var address))
+                continue;
+
+            var email = address.GetString();
+
+            if (!string.IsNullOrWhiteSpace(email))
+                emails.Add(email.Trim().ToLowerInvariant());
+        }
+
+        return emails.Distinct().ToList();
     }
 
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)
