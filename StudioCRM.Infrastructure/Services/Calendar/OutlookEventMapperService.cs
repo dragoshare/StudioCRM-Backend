@@ -22,17 +22,18 @@ public class OutlookEventMapperService
 
         var organizerEmail = NormalizeEmail(evt.OrganizerEmail);
         var locationEmail = NormalizeEmail(evt.LocationEmail);
+        var locationName = NormalizeText(evt.LocationName);
 
         var calendarIntegration = await _context.CalendarIntegrations
             .FirstOrDefaultAsync(x => x.Id == evt.CalendarIntegrationId);
 
         if (calendarIntegration == null)
         {
-            warnings.Add("Brak integracji kalendarza");
+            warnings.Add("Brak integracji kalendarza.");
+            await SaveWarningsAsync(evt, warnings);
             return (null, warnings);
         }
 
-        // 🔹 TRAINER
         var trainer = await _context.Trainers
             .Include(t => t.User)
             .FirstOrDefaultAsync(t => t.User.Email.ToLower() == organizerEmail);
@@ -47,28 +48,26 @@ public class OutlookEventMapperService
         if (trainer == null)
         {
             warnings.Add($"Nie rozpoznano trenera: {evt.OrganizerEmail}");
+            await SaveWarningsAsync(evt, warnings);
             return (null, warnings);
         }
 
-        // 🔹 LOCATION
-        var location = await _context.Locations
-            .FirstOrDefaultAsync(l =>
-                l.CalendarEmail != null &&
-                l.CalendarEmail.ToLower() == locationEmail);
+        var location = await FindLocationAsync(locationEmail, locationName);
 
         if (location == null)
         {
-            warnings.Add($"Nie rozpoznano lokalizacji: {evt.LocationEmail}");
+            warnings.Add($"Nie rozpoznano lokalizacji: {evt.LocationEmail ?? evt.LocationName}");
+            await SaveWarningsAsync(evt, warnings);
             return (null, warnings);
         }
 
-        // 🔹 ATTENDEES
         var attendeeEmails = ReadAttendeeEmails(evt.AttendeesJson)
             .Select(NormalizeEmail)
             .Where(e =>
                 !string.IsNullOrWhiteSpace(e) &&
                 e != organizerEmail &&
-                e != locationEmail)
+                e != locationEmail &&
+                e != NormalizeEmail(trainer.User.Email))
             .Distinct()
             .ToList();
 
@@ -77,7 +76,9 @@ public class OutlookEventMapperService
         foreach (var email in attendeeEmails)
         {
             var client = await _context.Clients
-                .FirstOrDefaultAsync(c => c.Email.ToLower() == email);
+                .FirstOrDefaultAsync(c =>
+                    c.Email.ToLower() == email &&
+                    !c.IsDeleted);
 
             if (client == null)
             {
@@ -88,25 +89,23 @@ public class OutlookEventMapperService
             clients.Add(client);
         }
 
-        // 🔹 DUPLIKAT
-        var exists = await _context.CalendarEventLinks
-            .AnyAsync(x =>
-                x.ExternalEventId == evt.ExternalEventId &&
-                x.Provider == evt.Provider);
+        var existingLink = await _context.CalendarEventLinks
+            .Include(x => x.Session)
+            .FirstOrDefaultAsync(x =>
+                x.Provider == evt.Provider &&
+                x.ExternalEventId == evt.ExternalEventId);
 
-        if (exists || evt.IsConvertedToSession)
+        if (existingLink != null || evt.IsConvertedToSession)
         {
-            warnings.Add("Event już zmapowany");
-            return (evt.Session, warnings);
+            warnings.Add("Event jest już połączony z sesją CRM.");
+            await SaveWarningsAsync(evt, warnings);
+
+            return (existingLink?.Session ?? evt.Session, warnings);
         }
 
-        // 🔹 SESSION
         var session = new Session
         {
-            Title = string.IsNullOrWhiteSpace(evt.Subject)
-                ? BuildTitle(clients)
-                : evt.Subject,
-
+            Title = BuildSessionTitle(evt.Subject, clients),
             Note = evt.BodyPreview,
             StartAt = evt.StartAt,
             EndAt = evt.EndAt,
@@ -119,13 +118,18 @@ public class OutlookEventMapperService
             CreatedBy = trainer.UserId
         };
 
-        _context.Sessions.Add(session);
+        await _context.Sessions.AddAsync(session);
         await _context.SaveChangesAsync();
 
-        // 🔹 PARTICIPANTS
         foreach (var client in clients)
         {
-            _context.SessionParticipants.Add(new SessionParticipant
+            var alreadyAdded = await _context.SessionParticipants
+                .AnyAsync(p => p.SessionId == session.Id && p.ClientId == client.Id);
+
+            if (alreadyAdded)
+                continue;
+
+            await _context.SessionParticipants.AddAsync(new SessionParticipant
             {
                 SessionId = session.Id,
                 ClientId = client.Id,
@@ -138,8 +142,7 @@ public class OutlookEventMapperService
             });
         }
 
-        // 🔹 LINK
-        _context.CalendarEventLinks.Add(new CalendarEventLink
+        await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
         {
             SessionId = session.Id,
             CalendarIntegrationId = evt.CalendarIntegrationId,
@@ -153,50 +156,104 @@ public class OutlookEventMapperService
 
         await _context.SaveChangesAsync();
 
-        // 🔹 LIMIT SALI
-        var peopleCount = await CountPeople(location.Id, evt.StartAt, evt.EndAt);
+        var roomPeopleCount = await CountPeopleInRoomForTimeRangeAsync(
+            location.Id,
+            evt.StartAt,
+            evt.EndAt);
 
-        if (peopleCount > RoomPeopleLimit)
+        if (roomPeopleCount > RoomPeopleLimit)
         {
-            warnings.Add($"Limit sali przekroczony: {peopleCount}/8");
+            warnings.Add($"Limit sali przekroczony: {roomPeopleCount}/{RoomPeopleLimit}");
         }
 
-        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
-        await _context.SaveChangesAsync();
+        await SaveWarningsAsync(evt, warnings);
 
         return (session, warnings);
     }
 
-    private async Task<int> CountPeople(int locationId, DateTime start, DateTime end)
+    private async Task<Location?> FindLocationAsync(string locationEmail, string locationName)
     {
-        var sessions = await _context.Sessions
-            .Where(s =>
-                s.LocationId == locationId &&
-                s.StartAt < end &&
-                s.EndAt > start)
+        if (!string.IsNullOrWhiteSpace(locationEmail))
+        {
+            var byEmail = await _context.Locations
+                .FirstOrDefaultAsync(l =>
+                    l.IsActive &&
+                    l.CalendarEmail != null &&
+                    l.CalendarEmail.ToLower() == locationEmail);
+
+            if (byEmail != null)
+                return byEmail;
+        }
+
+        if (string.IsNullOrWhiteSpace(locationName))
+            return null;
+
+        var locations = await _context.Locations
+            .Where(l => l.IsActive)
             .ToListAsync();
 
-        var sessionIds = sessions.Select(s => s.Id).ToList();
+        return locations.FirstOrDefault(l =>
+        {
+            var crmLocationName = NormalizeText(l.Name);
+            var crmCalendarEmail = NormalizeText(l.CalendarEmail);
 
-        var clients = await _context.SessionParticipants
-            .CountAsync(p => sessionIds.Contains(p.SessionId));
+            return
+                locationName == crmLocationName ||
+                locationName.Contains(crmLocationName) ||
+                crmLocationName.Contains(locationName) ||
+                (!string.IsNullOrWhiteSpace(crmCalendarEmail) &&
+                 locationName.Contains(crmCalendarEmail));
+        });
+    }
 
-        var trainers = sessions
+    private async Task<int> CountPeopleInRoomForTimeRangeAsync(
+        int locationId,
+        DateTime startAt,
+        DateTime endAt)
+    {
+        var overlappingSessions = await _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.LocationId == locationId &&
+                s.StartAt < endAt &&
+                s.EndAt > startAt)
+            .Select(s => new
+            {
+                s.Id,
+                s.TrainerId
+            })
+            .ToListAsync();
+
+        var overlappingSessionIds = overlappingSessions
+            .Select(s => s.Id)
+            .ToList();
+
+        var clientsCount = await _context.SessionParticipants
+            .Where(p => overlappingSessionIds.Contains(p.SessionId))
+            .CountAsync();
+
+        var trainersCount = overlappingSessions
             .Select(s => s.TrainerId)
             .Distinct()
             .Count();
 
-        return clients + trainers;
+        return clientsCount + trainersCount;
     }
 
-    private static List<string> ReadAttendeeEmails(string? json)
+    private async Task SaveWarningsAsync(ExternalCalendarEvent evt, List<string> warnings)
     {
-        if (string.IsNullOrWhiteSpace(json))
+        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+        await _context.SaveChangesAsync();
+    }
+
+    private static List<string> ReadAttendeeEmails(string? attendeesJson)
+    {
+        if (string.IsNullOrWhiteSpace(attendeesJson))
             return new List<string>();
 
         try
         {
-            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+            return JsonSerializer.Deserialize<List<string>>(attendeesJson) ?? new List<string>();
         }
         catch
         {
@@ -206,16 +263,31 @@ public class OutlookEventMapperService
 
     private static string NormalizeEmail(string? email)
     {
-        return (email ?? "").Trim().ToLower();
+        return (email ?? string.Empty).Trim().ToLowerInvariant();
     }
 
-    private static string BuildTitle(List<Client> clients)
+    private static string NormalizeText(string? value)
     {
+        return (value ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static string BuildSessionTitle(string? outlookSubject, List<Client> clients)
+    {
+        if (!string.IsNullOrWhiteSpace(outlookSubject))
+            return outlookSubject;
+
         if (clients.Count == 0)
             return "Trening";
 
         return string.Join(", ", clients.Select(c =>
-            $"{c.FirstName} {(string.IsNullOrEmpty(c.LastName) ? "" : c.LastName[0] + ".")}"
-        ));
+        {
+            var firstName = c.FirstName;
+
+            var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
+                ? string.Empty
+                : $"{c.LastName[0]}.";
+
+            return $"{firstName} {lastInitial}".Trim();
+        }));
     }
 }
