@@ -1,4 +1,5 @@
 ﻿using System.Net.Http.Headers;
+using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -135,7 +136,6 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var attendeeEmails = ReadAttendeeEmails(root);
         existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
-
         existing.LocationEmail = await ResolveLocationEmailAsync(attendeeEmails, existing.LocationName);
 
         existing.SeriesMasterId = root.TryGetProperty("seriesMasterId", out var seriesMasterId)
@@ -148,12 +148,175 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.ImportedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
-        
-        if (!existing.IsConvertedToSession)
+
+        if (existing.SessionId != null)
+        {
+            await UpdateSessionFromOutlookAsync(existing);
+        }
+        else if (!existing.IsConvertedToSession)
         {
             var mapper = new OutlookEventMapperService(_context);
-            await mapper.MapToSessionAsync(existing);
+            var (session, _) = await mapper.MapToSessionAsync(existing);
+
+            if (session != null)
+            {
+                await UpdateOutlookEventTitleAsync(
+                    integration,
+                    externalEventId,
+                    session.Title);
+            }
         }
+    }
+
+    private async Task UpdateSessionFromOutlookAsync(ExternalCalendarEvent evt)
+    {
+        var session = await _context.Sessions
+            .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
+
+        if (session == null)
+            return;
+
+        session.StartAt = evt.StartAt;
+        session.EndAt = evt.EndAt;
+
+        var location = await FindLocationFromOutlookAsync(evt);
+
+        if (location != null)
+        {
+            session.LocationId = location.Id;
+            session.StudioRoom = location.Name;
+        }
+
+        await SyncSessionParticipantsFromOutlookAsync(session, evt);
+
+        session.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task SyncSessionParticipantsFromOutlookAsync(Session session, ExternalCalendarEvent evt)
+    {
+        var attendeeEmails = ReadAttendeeEmailsFromJson(evt.AttendeesJson)
+            .Select(x => x.Trim().ToLowerInvariant())
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+
+        var locationEmails = await _context.Locations
+            .Where(l => l.CalendarEmail != null)
+            .Select(l => l.CalendarEmail!.ToLower())
+            .ToListAsync();
+
+        var organizerEmail = (evt.OrganizerEmail ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+
+        attendeeEmails = attendeeEmails
+            .Where(email =>
+                email != organizerEmail &&
+                !locationEmails.Contains(email))
+            .ToList();
+
+        var clients = await _context.Clients
+            .Where(c =>
+                !c.IsDeleted &&
+                attendeeEmails.Contains(c.Email.ToLower()))
+            .ToListAsync();
+
+        var desiredClientIds = clients
+            .Select(c => c.Id)
+            .ToHashSet();
+
+        var currentParticipants = await _context.SessionParticipants
+            .Where(p => p.SessionId == session.Id)
+            .ToListAsync();
+
+        var currentClientIds = currentParticipants
+            .Select(p => p.ClientId)
+            .ToHashSet();
+
+        var clientsToAdd = clients
+            .Where(c => !currentClientIds.Contains(c.Id))
+            .ToList();
+
+        foreach (var client in clientsToAdd)
+        {
+            await _context.SessionParticipants.AddAsync(new SessionParticipant
+            {
+                SessionId = session.Id,
+                ClientId = client.Id,
+                PackageId = client.ActivePackageId,
+                AttendanceStatus = "Planned",
+                CountsAgainstPackage = true,
+                SessionsCharged = 1,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        var participantsToRemove = currentParticipants
+            .Where(p => !desiredClientIds.Contains(p.ClientId))
+            .ToList();
+
+        _context.SessionParticipants.RemoveRange(participantsToRemove);
+    }
+
+    private async Task<Location?> FindLocationFromOutlookAsync(ExternalCalendarEvent evt)
+    {
+        var locationEmail = (evt.LocationEmail ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+
+        if (!string.IsNullOrWhiteSpace(locationEmail))
+        {
+            var byEmail = await _context.Locations
+                .FirstOrDefaultAsync(l =>
+                    l.IsActive &&
+                    l.CalendarEmail != null &&
+                    l.CalendarEmail.ToLower() == locationEmail);
+
+            if (byEmail != null)
+                return byEmail;
+        }
+
+        var locationName = (evt.LocationName ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(locationName))
+            return null;
+
+        return await _context.Locations
+            .FirstOrDefaultAsync(l =>
+                l.IsActive &&
+                (
+                    locationName.Contains(l.Name.ToLower()) ||
+                    l.Name.ToLower().Contains(locationName)
+                ));
+    }
+
+    private async Task UpdateOutlookEventTitleAsync(
+        CalendarIntegration integration,
+        string externalEventId,
+        string newTitle)
+    {
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Patch,
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                subject = newTitle
+            }),
+            Encoding.UTF8,
+            "application/json");
+
+        await _httpClient.SendAsync(request);
     }
 
     private async Task<string?> ResolveLocationEmailAsync(List<string> attendeeEmails, string? locationName)
@@ -217,6 +380,21 @@ public class OutlookWebhookService : IOutlookWebhookService
         return emails.Distinct().ToList();
     }
 
+    private static List<string> ReadAttendeeEmailsFromJson(string? attendeesJson)
+    {
+        if (string.IsNullOrWhiteSpace(attendeesJson))
+            return new List<string>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(attendeesJson) ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)
     {
         var existing = await _context.ExternalCalendarEvents
@@ -228,6 +406,19 @@ public class OutlookWebhookService : IOutlookWebhookService
             return;
 
         existing.Subject = "[DELETED] " + existing.Subject;
+
+        if (existing.SessionId != null)
+        {
+            var session = await _context.Sessions
+                .FirstOrDefaultAsync(s => s.Id == existing.SessionId);
+
+            if (session != null)
+            {
+                session.Status = "Cancelled";
+                session.UpdatedAt = DateTime.UtcNow;
+            }
+        }
+
         await _context.SaveChangesAsync();
     }
 
