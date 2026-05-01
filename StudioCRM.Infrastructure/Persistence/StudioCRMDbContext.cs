@@ -393,6 +393,9 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<ExternalCalendarEvent>()
             .HasIndex(x => new { x.CalendarIntegrationId, x.ExternalEventId })
             .IsUnique();
+        modelBuilder.Entity<Location>()
+            .HasIndex(l => l.CalendarEmail)
+            .IsUnique(false);
         // =========================
         // Milestones
         // =========================

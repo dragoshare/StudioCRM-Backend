@@ -50,78 +50,23 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         if (!_currentUser.UserId.HasValue)
             throw new InvalidOperationException("User is not authenticated.");
 
-        var importedEvent = await _context.ExternalCalendarEvents
+        var evt = await _context.ExternalCalendarEvents
             .Include(x => x.CalendarIntegration)
+            .Include(x => x.Session)
             .FirstOrDefaultAsync(x =>
                 x.Id == importedEventId &&
                 x.CalendarIntegration.UserId == _currentUser.UserId.Value);
 
-        if (importedEvent is null)
-            throw new InvalidOperationException("Imported event does not exist.");
+        if (evt is null)
+            throw new InvalidOperationException("Event nie istnieje.");
 
-        if (importedEvent.IsConvertedToSession)
-            throw new InvalidOperationException("Imported event already converted.");
+        var mapper = new OutlookEventMapperService(_context);
 
-        var trainer = await _context.Trainers
-            .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+        var result = await mapper.MapToSessionAsync(evt);
 
-        if (trainer is null)
-            throw new InvalidOperationException("Current user is not trainer.");
+        if (result.Session == null)
+            throw new InvalidOperationException(string.Join(" | ", result.Warnings));
 
-        var clientExists = await _context.Clients.AnyAsync(c => c.Id == request.ClientId);
-        if (!clientExists)
-            throw new InvalidOperationException("Client does not exist.");
-
-        var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
-        if (!locationExists)
-            throw new InvalidOperationException("Location does not exist.");
-
-        var session = new Session
-        {
-            Title = importedEvent.Subject,
-            Note = importedEvent.BodyPreview,
-            StartAt = importedEvent.StartAt,
-            EndAt = importedEvent.EndAt,
-            TrainerId = trainer.Id,
-            LocationId = request.LocationId,
-            StudioRoom = request.StudioRoom,
-            Status = request.Status,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserId
-        };
-
-        await _context.Sessions.AddAsync(session);
-        await _context.SaveChangesAsync();
-
-        await _context.SessionParticipants.AddAsync(new SessionParticipant
-        {
-            SessionId = session.Id,
-            ClientId = request.ClientId,
-            PackageId = request.PackageId,
-            AttendanceStatus = "Planned",
-            CountsAgainstPackage = true,
-            SessionsCharged = 1,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        });
-
-        await _context.SaveChangesAsync();
-
-        importedEvent.IsConvertedToSession = true;
-        importedEvent.SessionId = session.Id;
-
-        await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
-        {
-            SessionId = session.Id,
-            CalendarIntegrationId = importedEvent.CalendarIntegrationId,
-            Provider = "Outlook",
-            ExternalEventId = importedEvent.ExternalEventId,
-            SyncedAt = DateTime.UtcNow
-        });
-
-        await _context.SaveChangesAsync();
-
-        return session.Id;
+        return result.Session.Id;
     }
 }

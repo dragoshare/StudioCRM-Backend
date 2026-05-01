@@ -20,7 +20,21 @@ public class ExternalCalendarEvent
 
     public string? LocationName { get; set; }
 
+    // NOWE — mail zasobu/sali z Outlooka, np. klaj_studio@...
+    public string? LocationEmail { get; set; }
+
     public string? OrganizerEmail { get; set; }
+
+    // NOWE — JSON z mailami uczestników Outlooka
+    public string? AttendeesJson { get; set; }
+
+    // NOWE — warningi mapowania, np. nierozpoznany klient / limit sali
+    public string? MappingWarningsJson { get; set; }
+
+    // NOWE — cykliczne eventy Outlooka
+    public string? SeriesMasterId { get; set; }
+
+    public bool IsRecurring { get; set; } = false;
 
     public bool IsConvertedToSession { get; set; } = false;
 

@@ -1,4 +1,4 @@
-﻿using StudioCRM.Application.Milestones;
+﻿using StudioCRM.Application.DTOs.Milestones;
 
 namespace StudioCRM.Application.Interfaces;
 

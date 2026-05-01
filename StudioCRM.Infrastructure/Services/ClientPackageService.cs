@@ -1,8 +1,8 @@
 ﻿using StudioCRM.Application.DTOs.ClientPackages;
-using StudioCRM.Application.ClientPackages.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Application.ClientPackages.Services;
 

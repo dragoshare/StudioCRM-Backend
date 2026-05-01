@@ -1,5 +1,5 @@
 ﻿using StudioCRM.Application.DTOs.ClientPackages;
-namespace StudioCRM.Application.ClientPackages.Interfaces;
+namespace StudioCRM.Application.Interfaces;
 
 public interface IClientPackageService
 {

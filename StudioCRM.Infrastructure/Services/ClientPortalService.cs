@@ -1,5 +1,4 @@
 ﻿using Microsoft.EntityFrameworkCore;
-using StudioCRM.Application.ClientPortal;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Infrastructure.Persistence;

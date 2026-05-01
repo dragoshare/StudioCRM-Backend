@@ -1,6 +1,6 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.DTOs.Milestones;
 using StudioCRM.Application.Interfaces;
-using StudioCRM.Application.Milestones;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
 

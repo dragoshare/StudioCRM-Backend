@@ -16,11 +16,11 @@ public class OutlookController : ControllerBase
     private readonly IExternalCalendarEventService _externalEventService;
 
     public OutlookController(
-    IOutlookCalendarAuthService authService,
-    IOutlookCalendarSyncService syncService,
-    IOutlookSubscriptionService subscriptionService,
-    IOutlookWebhookService webhookService,
-    IExternalCalendarEventService externalEventService)
+        IOutlookCalendarAuthService authService,
+        IOutlookCalendarSyncService syncService,
+        IOutlookSubscriptionService subscriptionService,
+        IOutlookWebhookService webhookService,
+        IExternalCalendarEventService externalEventService)
     {
         _authService = authService;
         _syncService = syncService;
@@ -96,9 +96,17 @@ public class OutlookController : ControllerBase
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> DeleteSessionEvent(int sessionId)
     {
-        await _syncService.DeleteSessionEventAsync(sessionId);
-        return NoContent();
+        try
+        {
+            await _syncService.DeleteSessionEventAsync(sessionId);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
+
     [HttpPost("subscription/create")]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> CreateSubscription()
@@ -116,36 +124,45 @@ public class OutlookController : ControllerBase
 
     [HttpPost("webhook")]
     [AllowAnonymous]
-    public async Task<IActionResult> Webhook([FromQuery] string? validationToken)
+    [IgnoreAntiforgeryToken]
+    public async Task<IActionResult> Webhook()
     {
-        if (!string.IsNullOrWhiteSpace(validationToken))
-            return Content(validationToken, "text/plain");
+        if (Request.Query.TryGetValue("validationToken", out var token))
+        {
+            return Content(token.ToString(), "text/plain");
+        }
 
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
 
         await _webhookService.HandleNotificationAsync(body);
 
-        return Accepted();
+        return Ok();
     }
 
     [HttpGet("imported-events")]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> GetImportedEvents()
     {
-        return Ok(await _externalEventService.GetImportedEventsAsync());
+        var events = await _externalEventService.GetImportedEventsAsync();
+        return Ok(events);
     }
 
     [HttpPost("imported-events/{id:int}/convert-to-session")]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> ConvertImportedEvent(
         int id,
-        ConvertExternalEventToSessionDto request)
+        [FromBody] ConvertExternalEventToSessionDto request)
     {
         try
         {
             var sessionId = await _externalEventService.ConvertToSessionAsync(id, request);
-            return Ok(new { sessionId });
+
+            return Ok(new
+            {
+                sessionId,
+                message = "Imported Outlook event converted to CRM session."
+            });
         }
         catch (InvalidOperationException ex)
         {

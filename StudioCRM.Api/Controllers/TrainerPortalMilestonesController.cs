@@ -1,9 +1,8 @@
 ﻿using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-
+using StudioCRM.Application.DTOs.Milestones;
 using StudioCRM.Application.Interfaces;
-using StudioCRM.Application.Milestones;
 
 namespace StudioCRM.Api.Controllers;
 

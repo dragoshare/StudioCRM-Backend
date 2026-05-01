@@ -1,4 +1,5 @@
-﻿using Microsoft.AspNetCore.Identity;
+﻿using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
@@ -26,6 +27,7 @@ public static class DataSeeder
         await SeedTrainerRatesAsync(context);
         await SeedClientsAsync(context, passwordHasher);
         await SeedSessionsAsync(context);
+        await SeedOutlookMappingTestDataAsync(context);
     }
 
     private static async Task SeedRolesAsync(StudioCRMDbContext context)
@@ -48,15 +50,27 @@ public static class DataSeeder
 
     private static async Task SeedLocationsAsync(StudioCRMDbContext context)
     {
-        await EnsureLocationAsync(context, "Niepołomice", "Niepołomice", "ul. Bocheńska 12");
-        await EnsureLocationAsync(context, "Kłaj", "Kłaj", "ul. Sportowa 4");
+        await EnsureLocationAsync(
+            context,
+            "Niepołomice",
+            "Niepołomice",
+            "ul. Bocheńska 12",
+            "niepolomice8_studio@bsworkout.pl");
+
+        await EnsureLocationAsync(
+            context,
+            "Kłaj",
+            "Kłaj",
+            "ul. Sportowa 4",
+            "klaj237_studio@bsworkout.pl");
     }
 
     private static async Task EnsureLocationAsync(
         StudioCRMDbContext context,
         string name,
         string city,
-        string address)
+        string address,
+        string calendarEmail)
     {
         var location = await context.Locations.FirstOrDefaultAsync(l => l.Name == name);
 
@@ -67,12 +81,20 @@ public static class DataSeeder
                 Name = name,
                 City = city,
                 Address = address,
+                CalendarEmail = calendarEmail,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             });
-
-            await context.SaveChangesAsync();
         }
+        else
+        {
+            location.City = city;
+            location.Address = address;
+            location.CalendarEmail = calendarEmail;
+            location.IsActive = true;
+        }
+
+        await context.SaveChangesAsync();
     }
 
     private static async Task SeedPackagesAsync(StudioCRMDbContext context)
@@ -144,7 +166,7 @@ public static class DataSeeder
         {
             new
             {
-                Email = "trainer@studiocrm.local",
+                Email = "sgorzula@bsworkout.pl",
                 FirstName = "Jan",
                 LastName = "Kowalski",
                 Bio = "Trener siłowy i motoryczny",
@@ -526,6 +548,233 @@ public static class DataSeeder
                 await context.SaveChangesAsync();
             }
         }
+    }
+
+    private static async Task SeedOutlookMappingTestDataAsync(StudioCRMDbContext context)
+    {
+        var trainerUser = await context.Users
+            .FirstOrDefaultAsync(u => u.Email == "trainer@studiocrm.local");
+
+        if (trainerUser is null)
+            return;
+
+        var integration = await context.CalendarIntegrations
+            .FirstOrDefaultAsync(x =>
+                x.UserId == trainerUser.Id &&
+                x.Provider == "Outlook");
+
+        if (integration is null)
+        {
+            integration = new CalendarIntegration
+            {
+                UserId = trainerUser.Id,
+                Provider = "Outlook",
+                ExternalUserId = "seed-outlook-user-trainer",
+                Email = "trainer@studiocrm.local",
+                AccessToken = "seed-access-token",
+                RefreshToken = "seed-refresh-token",
+                AccessTokenExpiresAt = DateTime.UtcNow.AddDays(7),
+                IsActive = true,
+                ConnectedAt = DateTime.UtcNow,
+                DisconnectedAt = null
+            };
+
+            await context.CalendarIntegrations.AddAsync(integration);
+            await context.SaveChangesAsync();
+        }
+        else
+        {
+            integration.IsActive = true;
+            integration.DisconnectedAt = null;
+            integration.AccessTokenExpiresAt = DateTime.UtcNow.AddDays(7);
+            await context.SaveChangesAsync();
+        }
+
+        var tomorrow = DateTime.UtcNow.Date.AddDays(1);
+        var limitTestDay = DateTime.UtcNow.Date.AddDays(60);
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-klaj-basic",
+            "Test Outlook Kłaj - poprawne mapowanie",
+            tomorrow.AddHours(17),
+            tomorrow.AddHours(18),
+            "Kłaj_Studio",
+            "klaj237_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "kasia.wojcik@test.pl",
+                "michal.lis@test.pl"
+            });
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-niepolomice-basic",
+            "Test Outlook Niepołomice - poprawne mapowanie",
+            tomorrow.AddHours(18),
+            tomorrow.AddHours(19),
+            "Niepołomice_Studio",
+            "niepolomice8_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "anna.nowak@test.pl",
+                "piotr.zielinski@test.pl"
+            });
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-unknown-client",
+            "Test Outlook - nierozpoznany klient",
+            tomorrow.AddDays(1).AddHours(17),
+            tomorrow.AddDays(1).AddHours(18),
+            "Kłaj_Studio",
+            "klaj237_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "kasia.wojcik@test.pl",
+                "nieznany.klient@test.pl"
+            });
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-unknown-location",
+            "Test Outlook - nierozpoznana lokalizacja",
+            tomorrow.AddDays(1).AddHours(19),
+            tomorrow.AddDays(1).AddHours(20),
+            "Nieznana sala",
+            "unknown_room@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "anna.nowak@test.pl"
+            });
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-recurring-instance",
+            "Test Outlook - wystąpienie cykliczne",
+            tomorrow.AddDays(2).AddHours(16),
+            tomorrow.AddDays(2).AddHours(17),
+            "Kłaj_Studio",
+            "klaj237_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "ewa.krol@test.pl",
+                "tomasz.wrona@test.pl"
+            },
+            seriesMasterId: "seed-series-master-klaj-001",
+            isRecurring: true);
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-limit-1",
+            "Test limitu Kłaj 1",
+            limitTestDay.AddHours(17),
+            limitTestDay.AddHours(18),
+            "Kłaj_Studio",
+            "klaj237_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "kasia.wojcik@test.pl",
+                "michal.lis@test.pl",
+                "ewa.krol@test.pl",
+                "tomasz.wrona@test.pl"
+            });
+
+        await EnsureExternalCalendarEventAsync(
+            context,
+            integration.Id,
+            "seed-outlook-limit-2",
+            "Test limitu Kłaj 2",
+            limitTestDay.AddHours(17).AddMinutes(30),
+            limitTestDay.AddHours(18).AddMinutes(30),
+            "Kłaj_Studio",
+            "klaj237_studio@bsworkout.pl",
+            "trainer@studiocrm.local",
+            new[]
+            {
+                "rafal.sikora@test.pl",
+                "dominik.sobczak@test.pl",
+                "kasia.wojcik@test.pl",
+                "michal.lis@test.pl"
+            });
+    }
+
+    private static async Task EnsureExternalCalendarEventAsync(
+        StudioCRMDbContext context,
+        int calendarIntegrationId,
+        string externalEventId,
+        string subject,
+        DateTime startAt,
+        DateTime endAt,
+        string locationName,
+        string locationEmail,
+        string organizerEmail,
+        string[] attendees,
+        string? seriesMasterId = null,
+        bool isRecurring = false)
+    {
+        var existing = await context.ExternalCalendarEvents
+            .FirstOrDefaultAsync(x =>
+                x.Provider == "Outlook" &&
+                x.ExternalEventId == externalEventId);
+
+        if (existing is not null)
+        {
+            if (!existing.IsConvertedToSession)
+            {
+                existing.CalendarIntegrationId = calendarIntegrationId;
+                existing.Subject = subject;
+                existing.BodyPreview = "SEED: Testowy event Outlook do mapowania CRM.";
+                existing.StartAt = startAt;
+                existing.EndAt = endAt;
+                existing.LocationName = locationName;
+                existing.LocationEmail = locationEmail;
+                existing.OrganizerEmail = organizerEmail;
+                existing.AttendeesJson = JsonSerializer.Serialize(attendees);
+                existing.MappingWarningsJson = null;
+                existing.SeriesMasterId = seriesMasterId;
+                existing.IsRecurring = isRecurring;
+                existing.ImportedAt = DateTime.UtcNow;
+            }
+
+            await context.SaveChangesAsync();
+            return;
+        }
+
+        await context.ExternalCalendarEvents.AddAsync(new ExternalCalendarEvent
+        {
+            CalendarIntegrationId = calendarIntegrationId,
+            Provider = "Outlook",
+            ExternalEventId = externalEventId,
+            Subject = subject,
+            BodyPreview = "SEED: Testowy event Outlook do mapowania CRM.",
+            StartAt = startAt,
+            EndAt = endAt,
+            LocationName = locationName,
+            LocationEmail = locationEmail,
+            OrganizerEmail = organizerEmail,
+            AttendeesJson = JsonSerializer.Serialize(attendees),
+            MappingWarningsJson = null,
+            SeriesMasterId = seriesMasterId,
+            IsRecurring = isRecurring,
+            IsConvertedToSession = false,
+            SessionId = null,
+            ImportedAt = DateTime.UtcNow
+        });
+
+        await context.SaveChangesAsync();
     }
 
     private static async Task<User> EnsureUserAsync(

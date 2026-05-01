@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Application.Milestones;
+﻿namespace StudioCRM.Application.DTOs.Milestones;
 
 public class ClaimMilestoneRewardRequest
 {

@@ -1,6 +1,4 @@
-﻿
-using StudioCRM.Application.ClientPortal;
-using StudioCRM.Application.DTOs.ClientPortal;
+﻿using StudioCRM.Application.DTOs.ClientPortal;
 
 namespace StudioCRM.Application.Interfaces;
 

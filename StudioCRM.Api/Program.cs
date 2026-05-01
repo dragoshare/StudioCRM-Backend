@@ -16,9 +16,7 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Infrastructure.Services.Calendar;
 using StudioCRM.Infrastructure.Services.Mail;
-using StudioCRM.Application.ClientPackages.Interfaces;
 using StudioCRM.Application.ClientPackages.Services;
-using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 var connectionName = builder.Configuration["Database:ConnectionName"] ?? "DefaultConnection";

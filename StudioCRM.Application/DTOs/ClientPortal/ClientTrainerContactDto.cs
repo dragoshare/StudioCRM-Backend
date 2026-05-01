@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Application.ClientPortal;
+﻿namespace StudioCRM.Application.DTOs.ClientPortal;
 
 public class ClientTrainerContactDto
 {
