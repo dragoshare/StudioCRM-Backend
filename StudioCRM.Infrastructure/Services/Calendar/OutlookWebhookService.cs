@@ -148,6 +148,12 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.ImportedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+        
+        if (!existing.IsConvertedToSession)
+        {
+            var mapper = new OutlookEventMapperService(_context);
+            await mapper.MapToSessionAsync(existing);
+        }
     }
 
     private async Task<string?> ResolveLocationEmailAsync(List<string> attendeeEmails, string? locationName)

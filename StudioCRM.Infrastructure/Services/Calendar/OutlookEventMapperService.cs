@@ -105,7 +105,7 @@ public class OutlookEventMapperService
 
         var session = new Session
         {
-            Title = BuildSessionTitle(evt.Subject, clients),
+            Title = BuildSessionTitle(clients),
             Note = evt.BodyPreview,
             StartAt = evt.StartAt,
             EndAt = evt.EndAt,
@@ -271,21 +271,18 @@ public class OutlookEventMapperService
         return (value ?? string.Empty).Trim().ToLowerInvariant();
     }
 
-    private static string BuildSessionTitle(string? outlookSubject, List<Client> clients)
+    private static string BuildSessionTitle(List<Client> clients)
     {
-        if (!string.IsNullOrWhiteSpace(outlookSubject))
-            return outlookSubject;
-
         if (clients.Count == 0)
             return "Trening";
 
-        return string.Join(", ", clients.Select(c =>
+        return string.Join(" + ", clients.Select(c =>
         {
             var firstName = c.FirstName;
 
             var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
                 ? string.Empty
-                : $"{c.LastName[0]}.";
+                : $"{c.LastName[0]}";
 
             return $"{firstName} {lastInitial}".Trim();
         }));
