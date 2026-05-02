@@ -9,6 +9,8 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class SessionService : ISessionService
 {
+    private const int RoomPeopleLimit = 8;
+
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
 
@@ -22,18 +24,22 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetAllAsync()
     {
-        return await BaseQuery()
+        var sessions = await BaseQuery()
             .OrderBy(s => s.StartAt)
-            .Select(s => MapSessionDto(s))
             .ToListAsync();
+
+        return await MapSessionDtosAsync(sessions);
     }
 
     public async Task<SessionDto?> GetByIdAsync(int id)
     {
-        return await BaseQuery()
-            .Where(s => s.Id == id)
-            .Select(s => MapSessionDto(s))
-            .FirstOrDefaultAsync();
+        var session = await BaseQuery()
+            .FirstOrDefaultAsync(s => s.Id == id);
+
+        if (session is null)
+            return null;
+
+        return await MapSessionDtoAsync(session);
     }
 
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
@@ -152,12 +158,13 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetDeletedAsync()
     {
-        return await BaseQuery()
+        var sessions = await BaseQuery()
             .IgnoreQueryFilters()
             .Where(s => s.Status == "Deleted")
             .OrderByDescending(s => s.UpdatedAt)
-            .Select(s => MapSessionDto(s))
             .ToListAsync();
+
+        return await MapSessionDtosAsync(sessions);
     }
 
     public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
@@ -182,10 +189,11 @@ public class SessionService : ISessionService
         if (filter.To.HasValue)
             query = query.Where(s => s.StartAt <= filter.To.Value);
 
-        return await query
+        var sessions = await query
             .OrderBy(s => s.StartAt)
-            .Select(s => MapSessionDto(s))
             .ToListAsync();
+
+        return await MapSessionDtosAsync(sessions);
     }
 
     public async Task CountSessionFromPackageAsync(CountSessionFromPackageRequest request)
@@ -376,12 +384,29 @@ public class SessionService : ISessionService
         await _context.SaveChangesAsync();
     }
 
-    private static SessionDto MapSessionDto(Session s)
+    private async Task<List<SessionDto>> MapSessionDtosAsync(List<Session> sessions)
+    {
+        var result = new List<SessionDto>();
+
+        foreach (var session in sessions)
+        {
+            result.Add(await MapSessionDtoAsync(session));
+        }
+
+        return result;
+    }
+
+    private async Task<SessionDto> MapSessionDtoAsync(Session s)
     {
         var participants = s.Participants
             .OrderBy(p => p.Client.FirstName)
             .ThenBy(p => p.Client.LastName)
             .ToList();
+
+        var roomParticipantsCount = await CountPeopleInRoomForTimeRangeAsync(
+            s.LocationId,
+            s.StartAt,
+            s.EndAt);
 
         return new SessionDto
         {
@@ -402,6 +427,9 @@ public class SessionService : ISessionService
             CompletedAt = s.CompletedAt,
             ParticipantsCount = participants.Count,
             ClientsDisplayName = BuildSessionTitle(participants.Select(p => p.Client).ToList()),
+            RoomParticipantsCount = roomParticipantsCount,
+            RoomLimit = RoomPeopleLimit,
+            IsRoomLimitExceeded = roomParticipantsCount > RoomPeopleLimit,
             Participants = participants.Select(p => new SessionParticipantListDto
             {
                 Id = p.Id,
@@ -418,6 +446,41 @@ public class SessionService : ISessionService
             UpdatedAt = s.UpdatedAt,
             CreatedBy = s.CreatedBy
         };
+    }
+
+    private async Task<int> CountPeopleInRoomForTimeRangeAsync(
+        int locationId,
+        DateTime startAt,
+        DateTime endAt)
+    {
+        var overlappingSessions = await _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.Status != "Cancelled" &&
+                s.LocationId == locationId &&
+                s.StartAt < endAt &&
+                s.EndAt > startAt)
+            .Select(s => new
+            {
+                s.Id,
+                s.TrainerId
+            })
+            .ToListAsync();
+
+        var overlappingSessionIds = overlappingSessions
+            .Select(s => s.Id)
+            .ToList();
+
+        var clientsCount = await _context.SessionParticipants
+            .Where(p => overlappingSessionIds.Contains(p.SessionId))
+            .CountAsync();
+
+        var trainersCount = overlappingSessions
+            .Select(s => s.TrainerId)
+            .Distinct()
+            .Count();
+
+        return clientsCount + trainersCount;
     }
 
     private static string BuildSessionTitle(List<Client> clients)

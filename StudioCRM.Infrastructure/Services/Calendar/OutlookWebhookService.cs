@@ -151,7 +151,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         if (existing.SessionId != null)
         {
-            await UpdateSessionFromOutlookAsync(existing);
+            await UpdateSessionFromOutlookAsync(integration, existing, externalEventId);
         }
         else if (!existing.IsConvertedToSession)
         {
@@ -168,7 +168,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         }
     }
 
-    private async Task UpdateSessionFromOutlookAsync(ExternalCalendarEvent evt)
+    private async Task UpdateSessionFromOutlookAsync(
+        CalendarIntegration integration,
+        ExternalCalendarEvent evt,
+        string externalEventId)
     {
         var session = await _context.Sessions
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
@@ -189,9 +192,17 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
+        var newTitle = await BuildSessionTitleFromParticipantsAsync(session.Id);
+
+        session.Title = newTitle;
         session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await UpdateOutlookEventTitleAsync(
+            integration,
+            externalEventId,
+            newTitle);
     }
 
     private async Task SyncSessionParticipantsFromOutlookAsync(Session session, ExternalCalendarEvent evt)
@@ -259,6 +270,29 @@ public class OutlookWebhookService : IOutlookWebhookService
             .ToList();
 
         _context.SessionParticipants.RemoveRange(participantsToRemove);
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task<string> BuildSessionTitleFromParticipantsAsync(int sessionId)
+    {
+        var clients = await _context.SessionParticipants
+            .Where(p => p.SessionId == sessionId)
+            .Include(p => p.Client)
+            .Select(p => p.Client)
+            .ToListAsync();
+
+        if (clients.Count == 0)
+            return "Trening";
+
+        return string.Join(" + ", clients.Select(c =>
+        {
+            var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
+                ? string.Empty
+                : $"{c.LastName[0]}";
+
+            return $"{c.FirstName} {lastInitial}".Trim();
+        }));
     }
 
     private async Task<Location?> FindLocationFromOutlookAsync(ExternalCalendarEvent evt)
@@ -306,7 +340,8 @@ public class OutlookWebhookService : IOutlookWebhookService
             HttpMethod.Patch,
             $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
 
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
         request.Content = new StringContent(
             JsonSerializer.Serialize(new

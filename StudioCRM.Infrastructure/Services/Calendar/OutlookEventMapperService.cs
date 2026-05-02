@@ -121,14 +121,8 @@ public class OutlookEventMapperService
         await _context.Sessions.AddAsync(session);
         await _context.SaveChangesAsync();
 
-        foreach (var client in clients)
+        foreach (var client in clients.DistinctBy(c => c.Id))
         {
-            var alreadyAdded = await _context.SessionParticipants
-                .AnyAsync(p => p.SessionId == session.Id && p.ClientId == client.Id);
-
-            if (alreadyAdded)
-                continue;
-
             await _context.SessionParticipants.AddAsync(new SessionParticipant
             {
                 SessionId = session.Id,
@@ -214,6 +208,7 @@ public class OutlookEventMapperService
         var overlappingSessions = await _context.Sessions
             .Where(s =>
                 !s.IsDeleted &&
+                s.Status != "Cancelled" &&
                 s.LocationId == locationId &&
                 s.StartAt < endAt &&
                 s.EndAt > startAt)
@@ -242,7 +237,7 @@ public class OutlookEventMapperService
 
     private async Task SaveWarningsAsync(ExternalCalendarEvent evt, List<string> warnings)
     {
-        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings.Distinct().ToList());
         await _context.SaveChangesAsync();
     }
 
@@ -276,15 +271,17 @@ public class OutlookEventMapperService
         if (clients.Count == 0)
             return "Trening";
 
-        return string.Join(" + ", clients.Select(c =>
-        {
-            var firstName = c.FirstName;
+        return string.Join(" + ", clients
+            .DistinctBy(c => c.Id)
+            .Select(c =>
+            {
+                var firstName = c.FirstName;
 
-            var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
-                ? string.Empty
-                : $"{c.LastName[0]}";
+                var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
+                    ? string.Empty
+                    : $"{c.LastName[0]}";
 
-            return $"{firstName} {lastInitial}".Trim();
-        }));
+                return $"{firstName} {lastInitial}".Trim();
+            }));
     }
 }

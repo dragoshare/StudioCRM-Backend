@@ -21,4 +21,5 @@ public class ExternalCalendarEventDto
     public int? SessionId { get; set; }
 
     public DateTime ImportedAt { get; set; }
+    public List<string> Warnings { get; set; } = new();
 }
