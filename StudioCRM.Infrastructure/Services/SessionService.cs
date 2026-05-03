@@ -4,7 +4,7 @@ using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
-
+using StudioCRM.Application.Common;
 namespace StudioCRM.Infrastructure.Services;
 
 public class SessionService : ISessionService
@@ -54,7 +54,7 @@ public class SessionService : ISessionService
         var clients = await GetClientsForParticipantsAsync(request.Participants);
 
         var title = string.IsNullOrWhiteSpace(request.Title)
-            ? BuildSessionTitle(clients)
+            ? SessionTitleBuilder.Build(clients)
             : request.Title;
 
         var session = new Session
@@ -104,7 +104,7 @@ public class SessionService : ISessionService
         var clients = await GetClientsForParticipantsAsync(request.Participants);
 
         session.Title = string.IsNullOrWhiteSpace(request.Title)
-            ? BuildSessionTitle(clients)
+            ? SessionTitleBuilder.Build(clients)
             : request.Title;
 
         session.Note = request.Note;
@@ -426,7 +426,7 @@ public class SessionService : ISessionService
             ActualParticipantsCount = s.ActualParticipantsCount,
             CompletedAt = s.CompletedAt,
             ParticipantsCount = participants.Count,
-            ClientsDisplayName = BuildSessionTitle(participants.Select(p => p.Client).ToList()),
+            ClientsDisplayName = SessionTitleBuilder.Build(participants.Select(p => p.Client).ToList()),
             RoomParticipantsCount = roomParticipantsCount,
             RoomLimit = RoomPeopleLimit,
             IsRoomLimitExceeded = roomParticipantsCount > RoomPeopleLimit,
@@ -483,33 +483,7 @@ public class SessionService : ISessionService
         return clientsCount + trainersCount;
     }
 
-    private static string BuildSessionTitle(List<Client> clients)
-    {
-        var ordered = clients
-            .OrderBy(c => c.FirstName)
-            .ThenBy(c => c.LastName)
-            .ToList();
-
-        if (ordered.Count == 0)
-            return "Sesja";
-
-        if (ordered.Count == 1)
-            return ShortClientName(ordered[0]);
-
-        if (ordered.Count == 2)
-            return $"{ShortClientName(ordered[0])} + {ShortClientName(ordered[1])}";
-
-        return $"{ShortClientName(ordered[0])} + {ordered.Count - 1} os.";
-    }
-
-    private static string ShortClientName(Client client)
-    {
-        var initial = string.IsNullOrWhiteSpace(client.LastName)
-            ? string.Empty
-            : client.LastName[0].ToString();
-
-        return $"{client.FirstName} {initial}".Trim();
-    }
+    
 
     private static string ResolveSessionType(int count)
     {

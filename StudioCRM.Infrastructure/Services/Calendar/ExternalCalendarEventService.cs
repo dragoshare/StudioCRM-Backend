@@ -4,8 +4,9 @@ using StudioCRM.Application.DTOs.Calendar;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
+using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
-
+using StudioCRM.Application.Common;
 namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class ExternalCalendarEventService : IExternalCalendarEventService
@@ -221,7 +222,6 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         if (client is null)
             throw new InvalidOperationException("Client not found.");
 
-        // czy ktoś już ma ten mail
         var emailTaken = await _context.Clients
             .AnyAsync(c =>
                 c.Id != clientId &&
@@ -236,5 +236,80 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         client.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        // 🔥 AUTO REMAP
+        var events = await _context.ExternalCalendarEvents
+            .Where(e =>
+                e.AttendeesJson != null &&
+                e.AttendeesJson.ToLower().Contains(normalizedEmail))
+            .ToListAsync();
+
+        foreach (var evt in events)
+        {
+            if (evt.SessionId == null)
+                continue;
+
+            var session = await _context.Sessions
+                .Include(s => s.Participants)
+                .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
+
+            if (session == null)
+                continue;
+
+            var alreadyExists = session.Participants
+                .Any(p => p.ClientId == clientId);
+
+            if (!alreadyExists)
+            {
+                await _context.SessionParticipants.AddAsync(new SessionParticipant
+                {
+                    SessionId = session.Id,
+                    ClientId = clientId,
+                    PackageId = client.ActivePackageId,
+                    AttendanceStatus = "Planned",
+                    CountsAgainstPackage = true,
+                    SessionsCharged = 1,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            // 🔥 UPDATE TYTUŁU
+            var clients = await _context.Clients
+                .Where(c => session.Participants.Select(p => p.ClientId).Contains(c.Id))
+                .ToListAsync();
+
+            session.Title = SessionTitleBuilder.Build(clients);
+            session.UpdatedAt = DateTime.UtcNow;
+
+            // 🔥 USUŃ WARNING
+            var warnings = ReadWarnings(evt.MappingWarningsJson);
+            warnings = warnings
+                .Where(w => !w.Contains(normalizedEmail))
+                .ToList();
+
+            evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+        }
+
+        await _context.SaveChangesAsync();
     }
+    public async Task IgnoreIssueAsync(int externalEventId, string message)
+    {
+        var evt = await _context.ExternalCalendarEvents
+            .FirstOrDefaultAsync(x => x.Id == externalEventId);
+
+        if (evt == null)
+            throw new InvalidOperationException("Event not found.");
+
+        var warnings = ReadWarnings(evt.MappingWarningsJson);
+
+        warnings = warnings
+            .Where(w => w != message)
+            .ToList();
+
+        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+
+        await _context.SaveChangesAsync();
+    }
+    
 }

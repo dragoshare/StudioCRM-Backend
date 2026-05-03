@@ -134,6 +134,27 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.StartAt = ReadGraphDateTime(root, "start");
         existing.EndAt = ReadGraphDateTime(root, "end");
 
+        // 🔥 IGNORE PRIVATE EVENTS (NO CRM LOCATION)
+        var locationEmail = root.TryGetProperty("location", out var locationObj) &&
+                    locationObj.TryGetProperty("emailAddress", out var emailObj)
+        ? emailObj.GetString()?.ToLower()
+        : null;
+
+        var isKnownLocation = await _context.Locations
+            .AnyAsync(l =>
+                l.IsActive &&
+                (
+                    (locationEmail != null && l.CalendarEmail != null && l.CalendarEmail.ToLower() == locationEmail)
+                    ||
+                    (existing.LocationName != null && existing.LocationName.ToLower().Contains(l.Name.ToLower()))
+                )
+            );
+
+        if (!isKnownLocation)
+        {
+            // NIE zapisujemy eventu → prywatny / poza CRM
+            return;
+        }
         var attendeeEmails = ReadAttendeeEmails(root);
         existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
         existing.LocationEmail = await ResolveLocationEmailAsync(attendeeEmails, existing.LocationName);

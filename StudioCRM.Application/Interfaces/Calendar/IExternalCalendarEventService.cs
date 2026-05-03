@@ -13,4 +13,5 @@ public interface IExternalCalendarEventService
     Task SendInviteFromIssueAsync(string email);
 
     Task LinkClientFromIssueAsync(int clientId, string email);
+    Task IgnoreIssueAsync(int externalEventId, string message);
 }

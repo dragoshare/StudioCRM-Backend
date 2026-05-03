@@ -213,4 +213,21 @@ public class OutlookController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+    [HttpPost("issues/ignore")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> IgnoreIssue([FromBody] IgnoreOutlookIssueDto request)
+    {
+        try
+        {
+            await _externalEventService.IgnoreIssueAsync(
+                request.ExternalCalendarEventId,
+                request.Message);
+
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
 }
