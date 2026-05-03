@@ -101,10 +101,8 @@ public class OutlookWebhookService : IOutlookWebhookService
             ? seriesMasterIdElement.GetString()
             : null;
 
-        var isSeriesMaster = string.Equals(
-            type.GetString(),
-            "seriesMaster",
-            StringComparison.OrdinalIgnoreCase);
+        var isSeriesMaster = root.TryGetProperty("type", out var typeForMaster) &&
+                             string.Equals(typeForMaster.GetString(), "seriesMaster", StringComparison.OrdinalIgnoreCase);
 
         if (isSeriesMaster)
         {
@@ -163,9 +161,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             resolvedLocationEmail);
 
         if (!isKnownLocation)
-        {
             return;
-        }
 
         var existing = await _context.ExternalCalendarEvents
             .FirstOrDefaultAsync(x =>
@@ -202,7 +198,11 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         if (existing.SessionId != null)
         {
-            await UpdateSessionFromOutlookAsync(integration, existing, externalEventId);
+            await UpdateSessionFromOutlookAsync(
+                integration,
+                existing,
+                externalEventId,
+                subjectValue);
         }
         else if (!existing.IsConvertedToSession)
         {
@@ -211,10 +211,11 @@ public class OutlookWebhookService : IOutlookWebhookService
 
             if (session != null)
             {
-                await UpdateOutlookEventTitleAsync(
+                await UpdateOutlookEventTitleIfNeededAsync(
                     integration,
                     externalEventId,
-                    session.Title);
+                    currentOutlookTitle: subjectValue,
+                    newTitle: session.Title);
             }
         }
     }
@@ -261,7 +262,8 @@ public class OutlookWebhookService : IOutlookWebhookService
     private async Task UpdateSessionFromOutlookAsync(
         CalendarIntegration integration,
         ExternalCalendarEvent evt,
-        string externalEventId)
+        string externalEventId,
+        string currentOutlookTitle)
     {
         var session = await _context.Sessions
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
@@ -292,9 +294,10 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         await _context.SaveChangesAsync();
 
-        await UpdateOutlookEventTitleAsync(
+        await UpdateOutlookEventTitleIfNeededAsync(
             integration,
             externalEventId,
+            currentOutlookTitle,
             newTitle);
     }
 
@@ -448,11 +451,18 @@ public class OutlookWebhookService : IOutlookWebhookService
                 ));
     }
 
-    private async Task UpdateOutlookEventTitleAsync(
+    private async Task UpdateOutlookEventTitleIfNeededAsync(
         CalendarIntegration integration,
         string externalEventId,
+        string currentOutlookTitle,
         string newTitle)
     {
+        if (string.IsNullOrWhiteSpace(newTitle))
+            return;
+
+        if (AreTitlesEqual(currentOutlookTitle, newTitle))
+            return;
+
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         using var request = new HttpRequestMessage(
@@ -471,6 +481,14 @@ public class OutlookWebhookService : IOutlookWebhookService
             "application/json");
 
         await _httpClient.SendAsync(request);
+    }
+
+    private static bool AreTitlesEqual(string? currentTitle, string? newTitle)
+    {
+        var current = (currentTitle ?? string.Empty).Trim();
+        var next = (newTitle ?? string.Empty).Trim();
+
+        return string.Equals(current, next, StringComparison.OrdinalIgnoreCase);
     }
 
     private async Task<string?> ResolveLocationEmailAsync(
