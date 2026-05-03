@@ -6,5 +6,11 @@ public interface IExternalCalendarEventService
 {
     Task<List<ExternalCalendarEventDto>> GetImportedEventsAsync();
 
+    Task<List<OutlookMappingIssueDto>> GetIssuesAsync();
+
     Task<int> ConvertToSessionAsync(int importedEventId, ConvertExternalEventToSessionDto request);
+
+    Task SendInviteFromIssueAsync(string email);
+
+    Task LinkClientFromIssueAsync(int clientId, string email);
 }

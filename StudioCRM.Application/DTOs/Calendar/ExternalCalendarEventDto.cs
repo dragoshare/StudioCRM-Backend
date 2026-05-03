@@ -14,12 +14,19 @@ public class ExternalCalendarEventDto
 
     public string? LocationName { get; set; }
 
+    public string? LocationEmail { get; set; }
+
     public string? OrganizerEmail { get; set; }
 
     public bool IsConvertedToSession { get; set; }
 
     public int? SessionId { get; set; }
 
+    public bool IsRecurring { get; set; }
+
+    public string? SeriesMasterId { get; set; }
+
     public DateTime ImportedAt { get; set; }
+
     public List<string> Warnings { get; set; } = new();
 }

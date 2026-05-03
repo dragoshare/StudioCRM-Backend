@@ -122,15 +122,21 @@ public class OutlookController : ControllerBase
         }
     }
 
+    [HttpPost("subscription/renew")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> RenewSubscriptions()
+    {
+        await _subscriptionService.RenewExpiringSubscriptionsAsync();
+        return NoContent();
+    }
+
     [HttpPost("webhook")]
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
     public async Task<IActionResult> Webhook()
     {
         if (Request.Query.TryGetValue("validationToken", out var token))
-        {
             return Content(token.ToString(), "text/plain");
-        }
 
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
@@ -144,8 +150,14 @@ public class OutlookController : ControllerBase
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> GetImportedEvents()
     {
-        var events = await _externalEventService.GetImportedEventsAsync();
-        return Ok(events);
+        return Ok(await _externalEventService.GetImportedEventsAsync());
+    }
+
+    [HttpGet("issues")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> GetIssues()
+    {
+        return Ok(await _externalEventService.GetIssuesAsync());
     }
 
     [HttpPost("imported-events/{id:int}/convert-to-session")]
@@ -163,6 +175,38 @@ public class OutlookController : ControllerBase
                 sessionId,
                 message = "Imported Outlook event converted to CRM session."
             });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("issues/send-invite")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> SendInvite([FromBody] SendInviteFromOutlookIssueDto request)
+    {
+        try
+        {
+            await _externalEventService.SendInviteFromIssueAsync(request.Email);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+    [HttpPost("issues/link-client")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> LinkClient([FromBody] LinkClientFromIssueDto request)
+    {
+        try
+        {
+            await _externalEventService.LinkClientFromIssueAsync(
+                request.ClientId,
+                request.Email);
+
+            return NoContent();
         }
         catch (InvalidOperationException ex)
         {
