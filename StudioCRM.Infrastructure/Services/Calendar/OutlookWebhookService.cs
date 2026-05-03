@@ -94,6 +94,35 @@ public class OutlookWebhookService : IOutlookWebhookService
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
 
+        var isRecurring = root.TryGetProperty("type", out var type) &&
+                          !string.Equals(type.GetString(), "singleInstance", StringComparison.OrdinalIgnoreCase);
+
+        var seriesMasterId = root.TryGetProperty("seriesMasterId", out var seriesMasterIdElement)
+            ? seriesMasterIdElement.GetString()
+            : null;
+
+        var isSeriesMaster = string.Equals(
+            type.GetString(),
+            "seriesMaster",
+            StringComparison.OrdinalIgnoreCase);
+
+        if (isSeriesMaster)
+        {
+            var instances = await GetEventInstancesAsync(
+                integration,
+                externalEventId,
+                DateTime.UtcNow.AddDays(-14),
+                DateTime.UtcNow.AddMonths(3));
+
+            foreach (var instanceId in instances)
+            {
+                if (!string.IsNullOrWhiteSpace(instanceId) && instanceId != externalEventId)
+                    await ImportOrUpdateEventAsync(integration, instanceId);
+            }
+
+            return;
+        }
+
         var subjectValue = root.TryGetProperty("subject", out var subject)
             ? subject.GetString() ?? string.Empty
             : string.Empty;
@@ -135,7 +164,6 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         if (!isKnownLocation)
         {
-            // Event prywatny / poza salą CRM — ignorujemy całkowicie.
             return;
         }
 
@@ -166,14 +194,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.EndAt = endAtValue;
         existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
         existing.CategoriesJson = JsonSerializer.Serialize(categories);
-
-        existing.SeriesMasterId = root.TryGetProperty("seriesMasterId", out var seriesMasterId)
-            ? seriesMasterId.GetString()
-            : null;
-
-        existing.IsRecurring = root.TryGetProperty("type", out var type) &&
-                               !string.Equals(type.GetString(), "singleInstance", StringComparison.OrdinalIgnoreCase);
-
+        existing.SeriesMasterId = seriesMasterId;
+        existing.IsRecurring = isRecurring;
         existing.ImportedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -195,6 +217,45 @@ public class OutlookWebhookService : IOutlookWebhookService
                     session.Title);
             }
         }
+    }
+
+    private async Task<List<string>> GetEventInstancesAsync(
+        CalendarIntegration integration,
+        string eventId,
+        DateTime start,
+        DateTime end)
+    {
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
+
+        var url =
+            $"https://graph.microsoft.com/v1.0/me/events/{eventId}/instances" +
+            $"?startDateTime={Uri.EscapeDataString(start.ToString("o"))}" +
+            $"&endDateTime={Uri.EscapeDataString(end.ToString("o"))}" +
+            "&$select=id";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+            return new List<string>();
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        using var doc = JsonDocument.Parse(body);
+
+        if (!doc.RootElement.TryGetProperty("value", out var value))
+            return new List<string>();
+
+        return value.EnumerateArray()
+            .Select(x => x.TryGetProperty("id", out var id) ? id.GetString() : null)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Select(x => x!)
+            .Distinct()
+            .ToList();
     }
 
     private async Task UpdateSessionFromOutlookAsync(
