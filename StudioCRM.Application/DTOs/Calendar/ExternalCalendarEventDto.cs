@@ -29,4 +29,5 @@ public class ExternalCalendarEventDto
     public DateTime ImportedAt { get; set; }
 
     public List<string> Warnings { get; set; } = new();
+    public List<string> Categories { get; set; } = new();
 }

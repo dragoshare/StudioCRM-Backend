@@ -46,4 +46,7 @@ public class SessionDto
     public int RoomParticipantsCount { get; set; }
     public int RoomLimit { get; set; } = 8;
     public bool IsRoomLimitExceeded { get; set; }
+    public List<string> OutlookCategories { get; set; } = new();
+
+    public string? PrimaryOutlookCategory { get; set; }
 }

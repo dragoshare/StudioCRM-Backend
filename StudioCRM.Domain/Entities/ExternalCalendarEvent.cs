@@ -45,5 +45,6 @@ public class ExternalCalendarEvent
     public CalendarIntegration CalendarIntegration { get; set; } = null!;
 
     public Session? Session { get; set; }
-   
+    public string? CategoriesJson { get; set; }
+
 }

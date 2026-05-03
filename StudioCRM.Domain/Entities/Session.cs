@@ -40,4 +40,7 @@ public class Session
     public Location Location { get; set; } = null!;
 
     public ICollection<SessionParticipant> Participants { get; set; } = new List<SessionParticipant>();
+    public string? OutlookCategoriesJson { get; set; }
+
+    public string? PrimaryOutlookCategory { get; set; }
 }

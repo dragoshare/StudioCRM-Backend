@@ -113,6 +113,10 @@ public class OutlookEventMapperService
             LocationId = location.Id,
             StudioRoom = location.Name,
             Status = "Planned",
+
+            OutlookCategoriesJson = evt.CategoriesJson,
+            PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson),
+
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = trainer.UserId
@@ -256,6 +260,22 @@ public class OutlookEventMapperService
         }
     }
 
+    private static string? GetPrimaryCategory(string? categoriesJson)
+    {
+        if (string.IsNullOrWhiteSpace(categoriesJson))
+            return null;
+
+        try
+        {
+            var categories = JsonSerializer.Deserialize<List<string>>(categoriesJson);
+            return categories?.FirstOrDefault();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
     private static string NormalizeEmail(string? email)
     {
         return (email ?? string.Empty).Trim().ToLowerInvariant();
@@ -273,6 +293,8 @@ public class OutlookEventMapperService
 
         return string.Join(" + ", clients
             .DistinctBy(c => c.Id)
+            .OrderBy(c => c.FirstName)
+            .ThenBy(c => c.LastName)
             .Select(c =>
             {
                 var firstName = c.FirstName;

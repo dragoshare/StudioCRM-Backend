@@ -81,7 +81,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId");
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
@@ -93,6 +93,51 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
+
+        var subjectValue = root.TryGetProperty("subject", out var subject)
+            ? subject.GetString() ?? string.Empty
+            : string.Empty;
+
+        var bodyPreviewValue = root.TryGetProperty("bodyPreview", out var preview)
+            ? preview.GetString()
+            : null;
+
+        var locationNameValue = root.TryGetProperty("location", out var location) &&
+                                location.TryGetProperty("displayName", out var displayName)
+            ? displayName.GetString()
+            : null;
+
+        var locationEmailValue = root.TryGetProperty("location", out var locationObj) &&
+                                 locationObj.TryGetProperty("emailAddress", out var emailObj)
+            ? emailObj.GetString()?.Trim().ToLowerInvariant()
+            : null;
+
+        var organizerEmailValue = root.TryGetProperty("organizer", out var organizer) &&
+                                  organizer.TryGetProperty("emailAddress", out var organizerEmailAddress) &&
+                                  organizerEmailAddress.TryGetProperty("address", out var organizerAddress)
+            ? organizerAddress.GetString()
+            : null;
+
+        var startAtValue = ReadGraphDateTime(root, "start");
+        var endAtValue = ReadGraphDateTime(root, "end");
+
+        var attendeeEmails = ReadAttendeeEmails(root);
+        var categories = ReadCategories(root);
+
+        var resolvedLocationEmail = await ResolveLocationEmailAsync(
+            attendeeEmails,
+            locationNameValue,
+            locationEmailValue);
+
+        var isKnownLocation = await IsKnownCrmLocationAsync(
+            locationNameValue,
+            resolvedLocationEmail);
+
+        if (!isKnownLocation)
+        {
+            // Event prywatny / poza salą CRM — ignorujemy całkowicie.
+            return;
+        }
 
         var existing = await _context.ExternalCalendarEvents
             .FirstOrDefaultAsync(x =>
@@ -112,52 +157,15 @@ public class OutlookWebhookService : IOutlookWebhookService
             await _context.ExternalCalendarEvents.AddAsync(existing);
         }
 
-        existing.Subject = root.TryGetProperty("subject", out var subject)
-            ? subject.GetString() ?? string.Empty
-            : string.Empty;
-
-        existing.BodyPreview = root.TryGetProperty("bodyPreview", out var preview)
-            ? preview.GetString()
-            : null;
-
-        existing.LocationName = root.TryGetProperty("location", out var location) &&
-                                location.TryGetProperty("displayName", out var displayName)
-            ? displayName.GetString()
-            : null;
-
-        existing.OrganizerEmail = root.TryGetProperty("organizer", out var organizer) &&
-                                  organizer.TryGetProperty("emailAddress", out var organizerEmailAddress) &&
-                                  organizerEmailAddress.TryGetProperty("address", out var organizerAddress)
-            ? organizerAddress.GetString()
-            : null;
-
-        existing.StartAt = ReadGraphDateTime(root, "start");
-        existing.EndAt = ReadGraphDateTime(root, "end");
-
-        // 🔥 IGNORE PRIVATE EVENTS (NO CRM LOCATION)
-        var locationEmail = root.TryGetProperty("location", out var locationObj) &&
-                    locationObj.TryGetProperty("emailAddress", out var emailObj)
-        ? emailObj.GetString()?.ToLower()
-        : null;
-
-        var isKnownLocation = await _context.Locations
-            .AnyAsync(l =>
-                l.IsActive &&
-                (
-                    (locationEmail != null && l.CalendarEmail != null && l.CalendarEmail.ToLower() == locationEmail)
-                    ||
-                    (existing.LocationName != null && existing.LocationName.ToLower().Contains(l.Name.ToLower()))
-                )
-            );
-
-        if (!isKnownLocation)
-        {
-            // NIE zapisujemy eventu → prywatny / poza CRM
-            return;
-        }
-        var attendeeEmails = ReadAttendeeEmails(root);
+        existing.Subject = subjectValue;
+        existing.BodyPreview = bodyPreviewValue;
+        existing.LocationName = locationNameValue;
+        existing.LocationEmail = resolvedLocationEmail;
+        existing.OrganizerEmail = organizerEmailValue;
+        existing.StartAt = startAtValue;
+        existing.EndAt = endAtValue;
         existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
-        existing.LocationEmail = await ResolveLocationEmailAsync(attendeeEmails, existing.LocationName);
+        existing.CategoriesJson = JsonSerializer.Serialize(categories);
 
         existing.SeriesMasterId = root.TryGetProperty("seriesMasterId", out var seriesMasterId)
             ? seriesMasterId.GetString()
@@ -210,6 +218,9 @@ public class OutlookWebhookService : IOutlookWebhookService
             session.LocationId = location.Id;
             session.StudioRoom = location.Name;
         }
+
+        session.OutlookCategoriesJson = evt.CategoriesJson;
+        session.PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson);
 
         await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
@@ -306,14 +317,17 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (clients.Count == 0)
             return "Trening";
 
-        return string.Join(" + ", clients.Select(c =>
-        {
-            var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
-                ? string.Empty
-                : $"{c.LastName[0]}";
+        return string.Join(" + ", clients
+            .OrderBy(c => c.FirstName)
+            .ThenBy(c => c.LastName)
+            .Select(c =>
+            {
+                var lastInitial = string.IsNullOrWhiteSpace(c.LastName)
+                    ? string.Empty
+                    : $"{c.LastName[0]}";
 
-            return $"{c.FirstName} {lastInitial}".Trim();
-        }));
+                return $"{c.FirstName} {lastInitial}".Trim();
+            }));
     }
 
     private async Task<Location?> FindLocationFromOutlookAsync(ExternalCalendarEvent evt)
@@ -350,6 +364,29 @@ public class OutlookWebhookService : IOutlookWebhookService
                 ));
     }
 
+    private async Task<bool> IsKnownCrmLocationAsync(string? locationName, string? locationEmail)
+    {
+        var normalizedLocationName = (locationName ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+
+        var normalizedLocationEmail = (locationEmail ?? string.Empty)
+            .Trim()
+            .ToLowerInvariant();
+
+        return await _context.Locations
+            .AnyAsync(l =>
+                l.IsActive &&
+                (
+                    (!string.IsNullOrWhiteSpace(normalizedLocationEmail) &&
+                     l.CalendarEmail != null &&
+                     l.CalendarEmail.ToLower() == normalizedLocationEmail)
+                    ||
+                    (!string.IsNullOrWhiteSpace(normalizedLocationName) &&
+                     normalizedLocationName.Contains(l.Name.ToLower()))
+                ));
+    }
+
     private async Task UpdateOutlookEventTitleAsync(
         CalendarIntegration integration,
         string externalEventId,
@@ -375,8 +412,24 @@ public class OutlookWebhookService : IOutlookWebhookService
         await _httpClient.SendAsync(request);
     }
 
-    private async Task<string?> ResolveLocationEmailAsync(List<string> attendeeEmails, string? locationName)
+    private async Task<string?> ResolveLocationEmailAsync(
+        List<string> attendeeEmails,
+        string? locationName,
+        string? locationEmailFromGraph)
     {
+        if (!string.IsNullOrWhiteSpace(locationEmailFromGraph))
+        {
+            var normalizedGraphLocationEmail = locationEmailFromGraph.Trim().ToLowerInvariant();
+
+            var exists = await _context.Locations.AnyAsync(l =>
+                l.IsActive &&
+                l.CalendarEmail != null &&
+                l.CalendarEmail.ToLower() == normalizedGraphLocationEmail);
+
+            if (exists)
+                return normalizedGraphLocationEmail;
+        }
+
         var locationEmails = await _context.Locations
             .Where(l => l.IsActive && l.CalendarEmail != null)
             .Select(l => l.CalendarEmail!)
@@ -436,6 +489,27 @@ public class OutlookWebhookService : IOutlookWebhookService
         return emails.Distinct().ToList();
     }
 
+    private static List<string> ReadCategories(JsonElement root)
+    {
+        var categories = new List<string>();
+
+        if (!root.TryGetProperty("categories", out var categoriesElement) ||
+            categoriesElement.ValueKind != JsonValueKind.Array)
+        {
+            return categories;
+        }
+
+        foreach (var category in categoriesElement.EnumerateArray())
+        {
+            var value = category.GetString();
+
+            if (!string.IsNullOrWhiteSpace(value))
+                categories.Add(value.Trim());
+        }
+
+        return categories.Distinct().ToList();
+    }
+
     private static List<string> ReadAttendeeEmailsFromJson(string? attendeesJson)
     {
         if (string.IsNullOrWhiteSpace(attendeesJson))
@@ -448,6 +522,23 @@ public class OutlookWebhookService : IOutlookWebhookService
         catch
         {
             return new List<string>();
+        }
+    }
+
+    private static string? GetPrimaryCategory(string? categoriesJson)
+    {
+        if (string.IsNullOrWhiteSpace(categoriesJson))
+            return null;
+
+        try
+        {
+            var categories = JsonSerializer.Deserialize<List<string>>(categoriesJson);
+
+            return categories?.FirstOrDefault();
+        }
+        catch
+        {
+            return null;
         }
     }
 

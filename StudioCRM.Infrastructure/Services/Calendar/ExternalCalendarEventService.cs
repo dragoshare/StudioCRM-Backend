@@ -1,12 +1,13 @@
 ﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.Calendar;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
-using StudioCRM.Application.Common;
+
 namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class ExternalCalendarEventService : IExternalCalendarEventService
@@ -51,6 +52,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             IsRecurring = x.IsRecurring,
             SeriesMasterId = x.SeriesMasterId,
             ImportedAt = x.ImportedAt,
+            Categories = ReadStringList(x.CategoriesJson),
             Warnings = ReadWarnings(x.MappingWarningsJson)
         }).ToList();
     }
@@ -147,11 +149,11 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         if (existingUser)
             throw new InvalidOperationException("User with this email already exists.");
 
-        var existingPendingInvitation = await _context.Invitations
-    .AnyAsync(i => i.Email.ToLower() == normalizedEmail);
+        var existingInvitation = await _context.Invitations
+            .AnyAsync(i => i.Email.ToLower() == normalizedEmail);
 
-        if (existingPendingInvitation)
-            throw new InvalidOperationException("Pending invitation already exists for this email.");
+        if (existingInvitation)
+            throw new InvalidOperationException("Invitation already exists for this email.");
 
         var request = new CreateInvitationDto
         {
@@ -162,6 +164,111 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         await _invitationService.CreateAsync(request);
     }
 
+    public async Task LinkClientFromIssueAsync(int clientId, string email)
+    {
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Email is required.");
+
+        var normalizedEmail = email.Trim().ToLowerInvariant();
+
+        var client = await _context.Clients
+            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted);
+
+        if (client is null)
+            throw new InvalidOperationException("Client not found.");
+
+        var emailTaken = await _context.Clients
+            .AnyAsync(c =>
+                c.Id != clientId &&
+                c.Email != null &&
+                c.Email.ToLower() == normalizedEmail &&
+                !c.IsDeleted);
+
+        if (emailTaken)
+            throw new InvalidOperationException("Another client already has this email.");
+
+        client.Email = normalizedEmail;
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        var events = await _context.ExternalCalendarEvents
+            .Where(e =>
+                e.AttendeesJson != null &&
+                e.AttendeesJson.ToLower().Contains(normalizedEmail))
+            .ToListAsync();
+
+        foreach (var evt in events)
+        {
+            if (evt.SessionId == null)
+                continue;
+
+            var session = await _context.Sessions
+                .Include(s => s.Participants)
+                .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
+
+            if (session == null)
+                continue;
+
+            var alreadyExists = session.Participants.Any(p => p.ClientId == clientId);
+
+            if (!alreadyExists)
+            {
+                await _context.SessionParticipants.AddAsync(new SessionParticipant
+                {
+                    SessionId = session.Id,
+                    ClientId = clientId,
+                    PackageId = client.ActivePackageId,
+                    AttendanceStatus = "Planned",
+                    CountsAgainstPackage = true,
+                    SessionsCharged = 1,
+                    CreatedAt = DateTime.UtcNow,
+                    UpdatedAt = DateTime.UtcNow
+                });
+            }
+
+            var sessionClients = await _context.SessionParticipants
+                .Where(p => p.SessionId == session.Id)
+                .Include(p => p.Client)
+                .Select(p => p.Client)
+                .ToListAsync();
+
+            if (!sessionClients.Any(c => c.Id == client.Id))
+                sessionClients.Add(client);
+
+            session.Title = SessionTitleBuilder.Build(sessionClients);
+            session.UpdatedAt = DateTime.UtcNow;
+
+            var warnings = ReadWarnings(evt.MappingWarningsJson);
+            warnings = warnings
+                .Where(w => !w.Contains(normalizedEmail, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+        }
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task IgnoreIssueAsync(int externalEventId, string message)
+    {
+        var evt = await _context.ExternalCalendarEvents
+            .FirstOrDefaultAsync(x => x.Id == externalEventId);
+
+        if (evt == null)
+            throw new InvalidOperationException("Event not found.");
+
+        var warnings = ReadWarnings(evt.MappingWarningsJson);
+
+        warnings = warnings
+            .Where(w => w != message)
+            .ToList();
+
+        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+
+        await _context.SaveChangesAsync();
+    }
+
     private static List<string> ReadWarnings(string? warningsJson)
     {
         if (string.IsNullOrWhiteSpace(warningsJson))
@@ -170,6 +277,21 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         try
         {
             return JsonSerializer.Deserialize<List<string>>(warningsJson) ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
+    }
+
+    private static List<string> ReadStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<string>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
         }
         catch
         {
@@ -209,107 +331,4 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             ? null
             : candidate;
     }
-    public async Task LinkClientFromIssueAsync(int clientId, string email)
-    {
-        if (string.IsNullOrWhiteSpace(email))
-            throw new InvalidOperationException("Email is required.");
-
-        var normalizedEmail = email.Trim().ToLowerInvariant();
-
-        var client = await _context.Clients
-            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted);
-
-        if (client is null)
-            throw new InvalidOperationException("Client not found.");
-
-        var emailTaken = await _context.Clients
-            .AnyAsync(c =>
-                c.Id != clientId &&
-                c.Email != null &&
-                c.Email.ToLower() == normalizedEmail &&
-                !c.IsDeleted);
-
-        if (emailTaken)
-            throw new InvalidOperationException("Another client already has this email.");
-
-        client.Email = normalizedEmail;
-        client.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        // 🔥 AUTO REMAP
-        var events = await _context.ExternalCalendarEvents
-            .Where(e =>
-                e.AttendeesJson != null &&
-                e.AttendeesJson.ToLower().Contains(normalizedEmail))
-            .ToListAsync();
-
-        foreach (var evt in events)
-        {
-            if (evt.SessionId == null)
-                continue;
-
-            var session = await _context.Sessions
-                .Include(s => s.Participants)
-                .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
-
-            if (session == null)
-                continue;
-
-            var alreadyExists = session.Participants
-                .Any(p => p.ClientId == clientId);
-
-            if (!alreadyExists)
-            {
-                await _context.SessionParticipants.AddAsync(new SessionParticipant
-                {
-                    SessionId = session.Id,
-                    ClientId = clientId,
-                    PackageId = client.ActivePackageId,
-                    AttendanceStatus = "Planned",
-                    CountsAgainstPackage = true,
-                    SessionsCharged = 1,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
-            }
-
-            // 🔥 UPDATE TYTUŁU
-            var clients = await _context.Clients
-                .Where(c => session.Participants.Select(p => p.ClientId).Contains(c.Id))
-                .ToListAsync();
-
-            session.Title = SessionTitleBuilder.Build(clients);
-            session.UpdatedAt = DateTime.UtcNow;
-
-            // 🔥 USUŃ WARNING
-            var warnings = ReadWarnings(evt.MappingWarningsJson);
-            warnings = warnings
-                .Where(w => !w.Contains(normalizedEmail))
-                .ToList();
-
-            evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
-        }
-
-        await _context.SaveChangesAsync();
-    }
-    public async Task IgnoreIssueAsync(int externalEventId, string message)
-    {
-        var evt = await _context.ExternalCalendarEvents
-            .FirstOrDefaultAsync(x => x.Id == externalEventId);
-
-        if (evt == null)
-            throw new InvalidOperationException("Event not found.");
-
-        var warnings = ReadWarnings(evt.MappingWarningsJson);
-
-        warnings = warnings
-            .Where(w => w != message)
-            .ToList();
-
-        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
-
-        await _context.SaveChangesAsync();
-    }
-    
 }
