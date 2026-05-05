@@ -53,6 +53,8 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
         if (string.IsNullOrWhiteSpace(webhookUrl))
             throw new InvalidOperationException("Outlook webhook URL is not configured.");
 
+        await DeleteActiveMicrosoftSubscriptionsForIntegrationAsync(integration);
+
         var expiresAt = DateTime.UtcNow.AddHours(48);
 
         var payload = new
@@ -133,7 +135,9 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             }
             catch
             {
-                subscription.IsActive = false;
+                // Nie wyłączamy od razu subskrypcji przy chwilowym błędzie Microsoft/Render.
+                // Jeśli faktycznie wygasła, create/renew ręczny albo worker spróbuje ponownie.
+                subscription.IsActive = subscription.ExpiresAt > DateTime.UtcNow;
                 await _context.SaveChangesAsync();
             }
         }
@@ -184,6 +188,40 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             : newExpiresAt;
 
         subscription.IsActive = true;
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task DeleteActiveMicrosoftSubscriptionsForIntegrationAsync(CalendarIntegration integration)
+    {
+        var activeSubscriptions = await _context.CalendarSubscriptions
+            .Where(x =>
+                x.CalendarIntegrationId == integration.Id &&
+                x.Provider == "Outlook" &&
+                x.IsActive &&
+                !string.IsNullOrWhiteSpace(x.SubscriptionId))
+            .ToListAsync();
+
+        foreach (var subscription in activeSubscriptions)
+        {
+            try
+            {
+                using var request = new HttpRequestMessage(
+                    HttpMethod.Delete,
+                    $"https://graph.microsoft.com/v1.0/subscriptions/{subscription.SubscriptionId}");
+
+                request.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+                await _httpClient.SendAsync(request);
+            }
+            catch
+            {
+                // Nie blokujemy tworzenia nowej subskrypcji, jeśli stara już nie istnieje po stronie Microsoft.
+            }
+
+            subscription.IsActive = false;
+        }
 
         await _context.SaveChangesAsync();
     }
