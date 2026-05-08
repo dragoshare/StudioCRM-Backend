@@ -124,7 +124,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             .Where(x =>
                 x.Provider == "Outlook" &&
                 x.IsActive &&
-                x.ExpiresAt <= DateTime.UtcNow.AddHours(6))
+                x.ExpiresAt <= DateTime.UtcNow.AddHours(24))
             .ToListAsync();
 
         foreach (var subscription in subscriptions)

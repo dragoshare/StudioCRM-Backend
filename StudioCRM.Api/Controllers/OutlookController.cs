@@ -247,4 +247,16 @@ public class OutlookController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+    [AllowAnonymous]
+    [HttpGet("subscription/keepalive")]
+    public async Task<IActionResult> KeepAlive()
+    {
+        await _subscriptionService.RenewExpiringSubscriptionsAsync();
+
+        return Ok(new
+        {
+            message = "Outlook subscriptions checked",
+            utcNow = DateTime.UtcNow
+        });
+    }
 }
