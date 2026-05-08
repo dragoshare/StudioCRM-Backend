@@ -56,6 +56,7 @@ builder.Services.AddScoped<ITrainerRateService, TrainerRateService>();
 builder.Services.AddScoped<ITrainerSettlementService, TrainerSettlementService>();
 builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
+builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>

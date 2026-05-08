@@ -14,19 +14,22 @@ public class OutlookController : ControllerBase
     private readonly IOutlookSubscriptionService _subscriptionService;
     private readonly IOutlookWebhookService _webhookService;
     private readonly IExternalCalendarEventService _externalEventService;
+    private readonly IOutlookContactService _outlookContactService;
 
     public OutlookController(
         IOutlookCalendarAuthService authService,
         IOutlookCalendarSyncService syncService,
         IOutlookSubscriptionService subscriptionService,
         IOutlookWebhookService webhookService,
-        IExternalCalendarEventService externalEventService)
+        IExternalCalendarEventService externalEventService,
+        IOutlookContactService outlookContactService)
     {
         _authService = authService;
         _syncService = syncService;
         _subscriptionService = subscriptionService;
         _webhookService = webhookService;
         _externalEventService = externalEventService;
+        _outlookContactService = outlookContactService;
     }
 
     [HttpGet("connect-url")]
@@ -223,6 +226,20 @@ public class OutlookController : ControllerBase
                 request.ExternalCalendarEventId,
                 request.Message);
 
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+    [HttpPost("contacts/sync-clients")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<IActionResult> SyncClientsToOutlookContacts()
+    {
+        try
+        {
+            await _outlookContactService.SyncClientsAsync();
             return NoContent();
         }
         catch (InvalidOperationException ex)
