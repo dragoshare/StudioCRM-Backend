@@ -17,9 +17,13 @@ using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Infrastructure.Services.Calendar;
 using StudioCRM.Infrastructure.Services.Mail;
 using StudioCRM.Application.ClientPackages.Services;
+using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
-var connectionName = builder.Configuration["Database:ConnectionName"] ?? "DefaultConnection";
+var defaultConnectionName = builder.Environment.IsDevelopment()
+    ? "TestConnection"
+    : "DefaultConnection";
+var connectionName = builder.Configuration["Database:ConnectionName"] ?? defaultConnectionName;
 
 // JWT settings
 builder.Services.Configure<JwtSettings>(
@@ -31,9 +35,8 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
 // Database
-var connectionString = builder.Environment.IsDevelopment()
-    ? builder.Configuration.GetConnectionString("TestConnection")
-    : builder.Configuration.GetConnectionString("DefaultConnection");
+var connectionString = builder.Configuration.GetConnectionString(connectionName)
+    ?? throw new InvalidOperationException($"Connection string '{connectionName}' is not configured.");
 
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
     options.UseNpgsql(connectionString));
@@ -56,6 +59,8 @@ builder.Services.AddScoped<ITrainerRateService, TrainerRateService>();
 builder.Services.AddScoped<ITrainerSettlementService, TrainerSettlementService>();
 builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
+builder.Services.AddScoped<IClientPaymentService, ClientPaymentService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
@@ -152,6 +157,26 @@ builder.Services.AddScoped<IEmailService, EmailService>();
 
 var app = builder.Build();
 
+app.UseExceptionHandler(errorApp =>
+{
+    errorApp.Run(async context =>
+    {
+        var exceptionFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+
+        context.Response.ContentType = "application/json";
+        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+
+        var message = app.Environment.IsDevelopment()
+            ? exceptionFeature?.Error.Message
+            : "Unexpected server error.";
+
+        await context.Response.WriteAsync(JsonSerializer.Serialize(new
+        {
+            message
+        }));
+    });
+});
+
 // Swagger
 
     app.UseSwagger();
@@ -169,6 +194,9 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<StudioCRMDbContext>();
-    await DataSeeder.SeedAsync(dbContext);
+    var seedDemoData = builder.Configuration.GetValue<bool?>("Seed:DemoData")
+        ?? app.Environment.IsDevelopment();
+
+    await DataSeeder.SeedAsync(dbContext, seedDemoData);
 }
 app.Run();

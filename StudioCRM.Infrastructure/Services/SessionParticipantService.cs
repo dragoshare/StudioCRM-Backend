@@ -2,6 +2,7 @@
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
@@ -162,6 +163,28 @@ public class SessionParticipantService : ISessionParticipantService
             participant.CountsAgainstPackage = participantRequest.CountsAgainstPackage;
             participant.SessionsCharged = participantRequest.SessionsCharged;
             participant.Note = participantRequest.Note;
+
+            if (participantRequest.CountsAgainstPackage)
+            {
+                var activeClientPackage = await _context.ClientPackages
+                    .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                    .OrderByDescending(cp => cp.PurchaseDate)
+                    .FirstOrDefaultAsync();
+
+                if (activeClientPackage is not null)
+                {
+                    participant.PackageId = activeClientPackage.PackageId;
+                    participant.ClientPackageId = activeClientPackage.Id;
+                    participant.PlannedBillingType ??= activeClientPackage.ExpectedBillingType;
+                    participant.ExpectedUnitPrice ??= activeClientPackage.ExpectedUnitPrice;
+
+                    if (Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))
+                    {
+                        participant.ActualBillingType = actualBillingType;
+                    }
+                }
+            }
+
             participant.UpdatedAt = DateTime.UtcNow;
         }
 

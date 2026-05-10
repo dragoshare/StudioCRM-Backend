@@ -7,7 +7,7 @@ using StudioCRM.Application.Interfaces;
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/auth")]
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
@@ -15,6 +15,21 @@ public class AuthController : ControllerBase
     public AuthController(IAuthService authService)
     {
         _authService = authService;
+    }
+
+    [Authorize(Roles = "Owner")]
+    [HttpPost("register")]
+    public async Task<IActionResult> Register([FromBody] RegisterDto request)
+    {
+        try
+        {
+            var result = await _authService.RegisterAsync(request);
+            return CreatedAtAction(nameof(Me), new { id = result.UserId }, result);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [AllowAnonymous]
@@ -28,14 +43,6 @@ public class AuthController : ControllerBase
             return Unauthorized(new { message = "Invalid email or password." });
         }
 
-        return Ok(result);
-    }
-
-    [AllowAnonymous]
-    [HttpPost("register")]
-    public async Task<IActionResult> Register([FromBody] RegisterDto request)
-    {
-        var result = await _authService.RegisterAsync(request);
         return Ok(result);
     }
 

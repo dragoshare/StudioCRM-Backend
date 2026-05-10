@@ -188,6 +188,10 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("Goal")
                         .HasColumnType("text");
 
+                    b.Property<string>("GoogleDriveFolderId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
@@ -196,6 +200,9 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<int>("LocationId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("NextPackageId")
                         .HasColumnType("integer");
 
                     b.Property<DateTime?>("NextSessionAt")
@@ -210,12 +217,41 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("ProgressPercent")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("RenewalCancellationRequestedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RenewalCancellationRequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RenewalCancelledAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RenewalCancelledByUserId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Status")
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("SubscriptionAutoRenewEnabled")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("boolean")
+                        .HasDefaultValue(true);
+
                     b.Property<int?>("TrainerId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("TrainingPlanFileId")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("TrainingPlanFileName")
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("TrainingPlanUrl")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
 
                     b.Property<DateTime?>("TrainingStartDate")
                         .HasColumnType("timestamp with time zone");
@@ -282,6 +318,51 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.ToTable("ClientBalanceTransactions");
                 });
 
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ClientEmailChangeRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CurrentEmail")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<string>("RequestedEmail")
+                        .IsRequired()
+                        .HasMaxLength(250)
+                        .HasColumnType("character varying(250)");
+
+                    b.Property<DateTime?>("ReviewedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ReviewedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "Status");
+
+                    b.ToTable("ClientEmailChangeRequests");
+                });
+
             modelBuilder.Entity("StudioCRM.Domain.Entities.ClientMilestone", b =>
                 {
                     b.Property<int>("Id")
@@ -330,8 +411,32 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<DateTime?>("ActivatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ActivatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ActivationMode")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
+
+                    b.Property<decimal>("AmountPaid")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<decimal>("BalanceApplied")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
                     b.Property<int>("ClientId")
                         .HasColumnType("integer");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
 
                     b.Property<int>("ExpectedBillingType")
                         .HasColumnType("integer");
@@ -343,10 +448,17 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<bool>("IsActive")
                         .HasColumnType("boolean");
 
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasMaxLength(150)
                         .HasColumnType("character varying(150)");
+
+                    b.Property<decimal>("OriginalPrice")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
 
                     b.Property<int>("PackageId")
                         .HasColumnType("integer");
@@ -360,8 +472,26 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("PaymentStatus")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("PreviousClientPackageId")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("PurchaseDate")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("RenewalSource")
+                        .IsRequired()
+                        .ValueGeneratedOnAdd()
+                        .HasMaxLength(50)
+                        .HasColumnType("character varying(50)")
+                        .HasDefaultValue("Manual");
+
+                    b.Property<int?>("RequestedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SessionsPerWeek")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer")
+                        .HasDefaultValue(1);
 
                     b.Property<decimal>("TotalPrice")
                         .HasPrecision(18, 2)
@@ -370,16 +500,102 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("TotalSessions")
                         .HasColumnType("integer");
 
+                    b.Property<int>("UsedSessions")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("ValidUntil")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("ClientId")
+                        .IsUnique()
+                        .HasDatabaseName("IX_ClientPackages_OneActivePerClient")
+                        .HasFilter("\"IsActive\" = TRUE");
+
+                    b.HasIndex("LocationId");
 
                     b.HasIndex("PackageId");
 
                     b.HasIndex("ClientId", "IsActive");
 
                     b.ToTable("ClientPackages");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ClientPayment", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<decimal>("Amount")
+                        .HasPrecision(18, 2)
+                        .HasColumnType("numeric(18,2)");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("ClientPackageId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ConfirmedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ConfirmedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Currency")
+                        .IsRequired()
+                        .HasMaxLength(3)
+                        .HasColumnType("character varying(3)");
+
+                    b.Property<string>("ExternalPaymentId")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<int>("Method")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Note")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<DateTime>("PaymentDate")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("RejectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("RejectedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("RejectionReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<int>("Source")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("ClientPackageId");
+
+                    b.HasIndex("Status");
+
+                    b.ToTable("ClientPayments");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.ExternalCalendarEvent", b =>
@@ -613,6 +829,9 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("BillingType")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -638,6 +857,9 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
 
+                    b.Property<int?>("LocationId")
+                        .HasColumnType("integer");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -649,10 +871,15 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("SessionsLimit")
                         .HasColumnType("integer");
 
+                    b.Property<int>("SessionsPerWeek")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("LocationId", "BillingType", "SessionsPerWeek", "SessionsLimit");
 
                     b.ToTable("Packages");
                 });
@@ -1194,7 +1421,7 @@ namespace StudioCRM.Infrastructure.Migrations
                         .IsRequired();
 
                     b.HasOne("StudioCRM.Domain.Entities.ClientPackage", "ClientPackage")
-                        .WithMany()
+                        .WithMany("BalanceTransactions")
                         .HasForeignKey("ClientPackageId")
                         .OnDelete(DeleteBehavior.Restrict);
 
@@ -1208,6 +1435,17 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("ClientPackage");
 
                     b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ClientEmailChangeRequest", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.ClientMilestone", b =>
@@ -1243,6 +1481,11 @@ namespace StudioCRM.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
 
+                    b.HasOne("StudioCRM.Domain.Entities.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
                     b.HasOne("StudioCRM.Domain.Entities.Package", "Package")
                         .WithMany()
                         .HasForeignKey("PackageId")
@@ -1251,7 +1494,27 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     b.Navigation("Client");
 
+                    b.Navigation("Location");
+
                     b.Navigation("Package");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ClientPayment", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.ClientPackage", "ClientPackage")
+                        .WithMany("Payments")
+                        .HasForeignKey("ClientPackageId")
+                        .OnDelete(DeleteBehavior.Restrict);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientPackage");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.ExternalCalendarEvent", b =>
@@ -1279,6 +1542,16 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasForeignKey("LocationId")
                         .OnDelete(DeleteBehavior.Restrict)
                         .IsRequired();
+
+                    b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.Package", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.Location", "Location")
+                        .WithMany()
+                        .HasForeignKey("LocationId")
+                        .OnDelete(DeleteBehavior.Restrict);
 
                     b.Navigation("Location");
                 });
@@ -1441,6 +1714,13 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("Milestones");
 
                     b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ClientPackage", b =>
+                {
+                    b.Navigation("BalanceTransactions");
+
+                    b.Navigation("Payments");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.Location", b =>

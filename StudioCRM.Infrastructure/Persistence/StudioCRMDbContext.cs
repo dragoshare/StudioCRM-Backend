@@ -19,6 +19,8 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
     public DbSet<ClientBalanceTransaction> ClientBalanceTransactions => Set<ClientBalanceTransaction>();
+    public DbSet<ClientPayment> ClientPayments => Set<ClientPayment>();
+    public DbSet<ClientEmailChangeRequest> ClientEmailChangeRequests => Set<ClientEmailChangeRequest>();
 
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
@@ -153,6 +155,26 @@ public class StudioCRMDbContext : DbContext
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Client>()
+            .Property(c => c.GoogleDriveFolderId)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<Client>()
+            .Property(c => c.TrainingPlanFileId)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<Client>()
+            .Property(c => c.TrainingPlanFileName)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<Client>()
+            .Property(c => c.TrainingPlanUrl)
+            .HasMaxLength(1000);
+
+        modelBuilder.Entity<Client>()
+            .Property(c => c.SubscriptionAutoRenewEnabled)
+            .HasDefaultValue(true);
+
+        modelBuilder.Entity<Client>()
             .HasQueryFilter(c => !c.IsDeleted);
 
         // =========================
@@ -162,6 +184,15 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Package>()
             .Property(p => p.Price)
             .HasPrecision(10, 2);
+
+        modelBuilder.Entity<Package>()
+            .HasOne(p => p.Location)
+            .WithMany()
+            .HasForeignKey(p => p.LocationId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Package>()
+            .HasIndex(p => new { p.LocationId, p.BillingType, p.SessionsPerWeek, p.SessionsLimit });
 
         modelBuilder.Entity<Package>()
             .HasQueryFilter(p => !p.IsDeleted);
@@ -181,8 +212,31 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.TotalPrice)
                 .HasPrecision(18, 2);
 
+            entity.Property(x => x.OriginalPrice)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.BalanceApplied)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.SessionsPerWeek)
+                .HasDefaultValue(1);
+
+            entity.Property(x => x.AmountPaid)
+                .HasPrecision(18, 2);
+
             entity.Property(x => x.ExpectedUnitPrice)
                 .HasPrecision(18, 2);
+
+            entity.Property(x => x.Currency)
+                .IsRequired()
+                .HasMaxLength(3);
+
+            entity.Property(x => x.ActivationMode)
+                .HasDefaultValue(StudioCRM.Domain.Enums.ClientPackageActivationMode.Immediately);
+
+            entity.Property(x => x.RenewalSource)
+                .HasMaxLength(50)
+                .HasDefaultValue("Manual");
 
             entity.HasOne(x => x.Client)
                 .WithMany()
@@ -194,7 +248,79 @@ public class StudioCRMDbContext : DbContext
                 .HasForeignKey(x => x.PackageId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(x => x.Location)
+                .WithMany()
+                .HasForeignKey(x => x.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(x => new { x.ClientId, x.IsActive });
+            entity.HasIndex(x => x.ClientId)
+                .IsUnique()
+                .HasFilter("\"IsActive\" = TRUE")
+                .HasDatabaseName("IX_ClientPackages_OneActivePerClient");
+        });
+
+        modelBuilder.Entity<ClientEmailChangeRequest>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.CurrentEmail)
+                .IsRequired()
+                .HasMaxLength(250);
+
+            entity.Property(x => x.RequestedEmail)
+                .IsRequired()
+                .HasMaxLength(250);
+
+            entity.Property(x => x.Status)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.HasOne(x => x.Client)
+                .WithMany()
+                .HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(x => new { x.ClientId, x.Status });
+        });
+
+        // =========================
+        // CLIENT PAYMENTS
+        // =========================
+
+        modelBuilder.Entity<ClientPayment>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Amount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.Currency)
+                .IsRequired()
+                .HasMaxLength(3);
+
+            entity.Property(x => x.Note)
+                .HasMaxLength(500);
+
+            entity.Property(x => x.RejectionReason)
+                .HasMaxLength(500);
+
+            entity.Property(x => x.ExternalPaymentId)
+                .HasMaxLength(200);
+
+            entity.HasOne(x => x.Client)
+                .WithMany()
+                .HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.ClientPackage)
+                .WithMany(x => x.Payments)
+                .HasForeignKey(x => x.ClientPackageId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => x.ClientId);
+            entity.HasIndex(x => x.ClientPackageId);
+            entity.HasIndex(x => x.Status);
         });
 
         // =========================
@@ -217,7 +343,7 @@ public class StudioCRMDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasOne(x => x.ClientPackage)
-                .WithMany()
+                .WithMany(x => x.BalanceTransactions)
                 .HasForeignKey(x => x.ClientPackageId)
                 .OnDelete(DeleteBehavior.Restrict);
 
@@ -446,6 +572,7 @@ public class StudioCRMDbContext : DbContext
             );
         });
     }
+
 
 
 }

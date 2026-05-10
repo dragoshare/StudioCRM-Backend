@@ -1,29 +1,66 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StudioCRM.Application.DTOs.Billing;
+using StudioCRM.Application.DTOs.Clients;
+using StudioCRM.Application.DTOs.ClientPackages;
+using StudioCRM.Application.DTOs.Invitations;
+using StudioCRM.Application.DTOs.Profiles;
+using StudioCRM.Application.DTOs.SessionParticipants;
+using StudioCRM.Application.DTOs.Sessions;
+using StudioCRM.Application.DTOs.Subscriptions;
 using StudioCRM.Application.DTOs.TrainerPortal;
 using StudioCRM.Application.DTOs.TrainerSettlements;
+using StudioCRM.Application.DTOs.TrainingPlans;
 using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/trainer-portal")]
 [Authorize(Roles = "Trainer")]
 public class TrainerPortalController : ControllerBase
 {
     private readonly ITrainerPortalService _trainerPortalService;
+    private readonly IClientPaymentService _clientPaymentService;
+    private readonly IClientPackageService _clientPackageService;
+    private readonly ISubscriptionService _subscriptionService;
+    private readonly IInvitationService _invitationService;
+    private readonly ISessionParticipantService _sessionParticipantService;
+    private readonly ISessionService _sessionService;
 
-    public TrainerPortalController(ITrainerPortalService trainerPortalService)
+    public TrainerPortalController(
+        ITrainerPortalService trainerPortalService,
+        IClientPaymentService clientPaymentService,
+        IClientPackageService clientPackageService,
+        ISubscriptionService subscriptionService,
+        IInvitationService invitationService,
+        ISessionParticipantService sessionParticipantService,
+        ISessionService sessionService)
     {
         _trainerPortalService = trainerPortalService;
+        _clientPaymentService = clientPaymentService;
+        _clientPackageService = clientPackageService;
+        _subscriptionService = subscriptionService;
+        _invitationService = invitationService;
+        _sessionParticipantService = sessionParticipantService;
+        _sessionService = sessionService;
     }
 
     [HttpGet("me")]
     public async Task<ActionResult<TrainerPortalMeDto>> GetMe()
     {
         var result = await _trainerPortalService.GetMeAsync();
-        if (result is null) return NotFound();
-        return Ok(result);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPatch("me")]
+    public async Task<ActionResult<TrainerPortalMeDto>> UpdateMe(UpdateTrainerPortalProfileRequest request)
+    {
+        return await HandleAsync<TrainerPortalMeDto>(async () =>
+        {
+            var result = await _trainerPortalService.UpdateMeAsync(request);
+            return result is null ? NotFound() : Ok(result);
+        });
     }
 
     [HttpGet("clients")]
@@ -32,25 +69,211 @@ public class TrainerPortalController : ControllerBase
         return Ok(await _trainerPortalService.GetClientsAsync());
     }
 
+    [HttpGet("clients/{clientId:int}")]
+    public async Task<ActionResult<ClientDto>> GetClient(int clientId)
+    {
+        var result = await _trainerPortalService.GetClientAsync(clientId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPatch("clients/{clientId:int}")]
+    public async Task<ActionResult<ClientDto>> UpdateClient(int clientId, UpdateClientDto request)
+    {
+        return await HandleAsync<ClientDto>(async () =>
+        {
+            var result = await _trainerPortalService.UpdateClientAsync(clientId, request);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpPost("clients/{clientId:int}/deactivate")]
+    public async Task<IActionResult> DeactivateClient(int clientId)
+    {
+        var result = await _trainerPortalService.DeactivateClientAsync(clientId);
+        return result ? NoContent() : NotFound();
+    }
+
+    [HttpPost("client-invites")]
+    public async Task<ActionResult<InvitationDto>> CreateClientInvite(CreateInvitationDto request)
+    {
+        return await HandleAsync<InvitationDto>(async () =>
+        {
+            request.Role = "Client";
+            var result = await _invitationService.CreateAsync(request);
+            return CreatedAtAction(nameof(CreateClientInvite), new { id = result.Id }, result);
+        });
+    }
+
+    [HttpGet("clients/{clientId:int}/billing")]
+    public async Task<ActionResult<ClientBillingSummaryDto>> GetClientBilling(int clientId)
+    {
+        return await HandleAsync<ClientBillingSummaryDto>(async () =>
+            Ok(await _clientPaymentService.GetClientSummaryAsync(clientId)));
+    }
+
+    [HttpGet("clients/{clientId:int}/subscription")]
+    public async Task<ActionResult<SubscriptionDto>> GetClientSubscription(int clientId)
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.GetClientSubscriptionAsync(clientId)));
+    }
+
+    [HttpPut("clients/{clientId:int}/subscription/next-package")]
+    public async Task<ActionResult<SubscriptionDto>> SetClientNextPackage(
+        int clientId,
+        SetNextPackageRequest request)
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.SetNextPackageAsync(clientId, request)));
+    }
+
+    [HttpPost("clients/{clientId:int}/subscription/cancel")]
+    public async Task<ActionResult<SubscriptionDto>> CancelClientRenewal(int clientId)
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.CancelRenewalAsync(clientId)));
+    }
+
+    [HttpPost("clients/{clientId:int}/subscription/resume")]
+    public async Task<ActionResult<SubscriptionDto>> ResumeClientRenewal(int clientId)
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.ResumeRenewalAsync(clientId)));
+    }
+
+    [HttpGet("clients/{clientId:int}/subscription/current-cycle/usage")]
+    public async Task<ActionResult<SubscriptionUsageDto>> GetClientSubscriptionUsage(int clientId)
+    {
+        return await HandleAsync<SubscriptionUsageDto>(async () =>
+            Ok(await _subscriptionService.GetClientUsageAsync(clientId)));
+    }
+
+    [HttpGet("clients/{clientId:int}/training-plan")]
+    public async Task<ActionResult<TrainingPlanDto>> GetClientTrainingPlan(int clientId)
+    {
+        return await HandleAsync<TrainingPlanDto>(async () =>
+            Ok(await _subscriptionService.GetClientTrainingPlanAsync(clientId)));
+    }
+
+    [HttpPut("clients/{clientId:int}/training-plan")]
+    public async Task<ActionResult<TrainingPlanDto>> UpdateClientTrainingPlan(
+        int clientId,
+        UpdateTrainingPlanRequest request)
+    {
+        return await HandleAsync<TrainingPlanDto>(async () =>
+            Ok(await _subscriptionService.UpdateTrainingPlanAsync(clientId, request)));
+    }
+
+    [HttpPost("clients/{clientId:int}/packages")]
+    public async Task<ActionResult<object>> CreateClientPackage(
+        int clientId,
+        CreateClientPackageRequest request)
+    {
+        return await HandleAsync<object>(async () =>
+        {
+            request.ClientId = clientId;
+            var id = await _clientPackageService.CreateAsync(request);
+            return CreatedAtAction(nameof(GetClientBilling), new { clientId }, new { id });
+        });
+    }
+
+    [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/activate")]
+    public async Task<IActionResult> ActivateClientPackage(int clientId, int clientPackageId)
+    {
+        try
+        {
+            var activated = await _clientPackageService.ActivateAsync(clientId, clientPackageId);
+            return activated ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("clients/{clientId:int}/payments")]
+    public async Task<ActionResult<ClientPaymentDto>> CreateClientPayment(
+        int clientId,
+        CreateClientPaymentRequest request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+        {
+            request.ClientId = clientId;
+            var payment = await _clientPaymentService.CreatePaymentAsStaffAsync(request);
+            return CreatedAtAction(nameof(GetClientBilling), new { clientId = payment.ClientId }, payment);
+        });
+    }
+
+    [HttpGet("payments/pending")]
+    public async Task<ActionResult<List<ClientPaymentDto>>> GetPendingPayments()
+    {
+        return await HandleAsync<List<ClientPaymentDto>>(async () =>
+            Ok(await _clientPaymentService.GetPendingConfirmationsAsync()));
+    }
+
+    [HttpPost("payments/{paymentId:int}/confirm")]
+    public async Task<ActionResult<ClientPaymentDto>> ConfirmPayment(int paymentId)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.ConfirmAsync(paymentId)));
+    }
+
+    [HttpPost("payments/{paymentId:int}/reject")]
+    public async Task<ActionResult<ClientPaymentDto>> RejectPayment(
+        int paymentId,
+        RejectClientPaymentRequest request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.RejectAsync(paymentId, request)));
+    }
+
     [HttpGet("sessions")]
     public async Task<ActionResult<List<TrainerPortalSessionDto>>> GetSessions()
     {
         return Ok(await _trainerPortalService.GetSessionsAsync());
     }
 
+    [HttpPost("sessions/{sessionId:int}/complete")]
+    public async Task<IActionResult> CompleteSession(
+        int sessionId,
+        CompleteSessionDto request)
+    {
+        try
+        {
+            var result = await _sessionParticipantService.CompleteSessionAsync(sessionId, request);
+            return result ? Ok(new { message = "Session completed successfully." }) : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpPost("sessions/participants/count-from-package")]
+    public async Task<IActionResult> CountFromPackage(CountSessionFromPackageRequest request)
+    {
+        try
+        {
+            await _sessionService.CountSessionFromPackageAsync(request);
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("dashboard")]
     public async Task<ActionResult<TrainerPortalDashboardDto>> GetDashboard()
     {
         var result = await _trainerPortalService.GetDashboardAsync();
-        if (result is null) return NotFound();
-        return Ok(result);
+        return result is null ? NotFound() : Ok(result);
     }
 
     [HttpGet("settlement")]
-    [Authorize(Roles = "Trainer")]
     public async Task<ActionResult<TrainerMonthlySettlementDto>> GetMySettlement(
-    [FromQuery] int year,
-    [FromQuery] int month)
+        [FromQuery] int year,
+        [FromQuery] int month)
     {
         var result = await _trainerPortalService.GetMyMonthlySettlementAsync(year, month);
 
@@ -58,5 +281,17 @@ public class TrainerPortalController : ControllerBase
             return NotFound();
 
         return Ok(result);
+    }
+
+    private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

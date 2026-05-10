@@ -13,13 +13,16 @@ public class SessionService : ISessionService
 
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISubscriptionService _subscriptionService;
 
     public SessionService(
         StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ISubscriptionService subscriptionService)
     {
         _context = context;
         _currentUser = currentUser;
+        _subscriptionService = subscriptionService;
     }
 
     public async Task<List<SessionDto>> GetAllAsync()
@@ -230,7 +233,9 @@ public class SessionService : ISessionService
             throw new InvalidOperationException("Client package has no remaining sessions.");
 
         var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
-        var actualUnitPrice = request.ActualUnitPrice;
+        var actualUnitPrice = request.ActualUnitPrice.HasValue
+            ? NormalizeUnitPrice(request.ActualUnitPrice.Value)
+            : await ResolveActualUnitPriceAsync(clientPackage, participant.Session.LocationId, request.ActualBillingType);
         var balanceDifference = expectedUnitPrice - actualUnitPrice;
 
         participant.ClientPackageId = clientPackage.Id;
@@ -283,7 +288,57 @@ public class SessionService : ISessionService
             await _context.ClientBalanceTransactions.AddAsync(transaction);
         }
 
+        clientPackage.UsedSessions = usedSessions + (isAlreadyCountedThisParticipant ? 0 : 1);
+
+        if (clientPackage.UsedSessions >= clientPackage.TotalSessions)
+            await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackage.Id);
+
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<decimal> ResolveActualUnitPriceAsync(
+        ClientPackage clientPackage,
+        int sessionLocationId,
+        SessionBillingType actualBillingType)
+    {
+        var sessionsPerWeek = ResolveSessionsPerWeek(clientPackage);
+        var locationId = clientPackage.LocationId ?? sessionLocationId;
+
+        var pricePackage = await _context.Packages
+            .Where(p =>
+                p.IsActive &&
+                p.BillingType == actualBillingType &&
+                p.SessionsPerWeek == sessionsPerWeek &&
+                p.SessionsLimit == clientPackage.TotalSessions &&
+                (p.LocationId == locationId || p.LocationId == null))
+            .OrderByDescending(p => p.LocationId == locationId)
+            .FirstOrDefaultAsync();
+
+        if (pricePackage is null)
+        {
+            throw new InvalidOperationException(
+                $"No price package found for {actualBillingType}, {sessionsPerWeek} sessions per week and location {locationId}.");
+        }
+
+        if (pricePackage.SessionsLimit <= 0)
+            throw new InvalidOperationException("Matched price package sessions limit must be greater than zero.");
+
+        return NormalizeUnitPrice(pricePackage.Price / pricePackage.SessionsLimit);
+    }
+
+    private static int ResolveSessionsPerWeek(ClientPackage clientPackage)
+    {
+        return clientPackage.SessionsPerWeek > 0
+            ? clientPackage.SessionsPerWeek
+            : Math.Max(1, (int)Math.Ceiling(clientPackage.TotalSessions / 4m));
+    }
+
+    private static decimal NormalizeUnitPrice(decimal amount)
+    {
+        if (amount <= 0)
+            throw new InvalidOperationException("Actual unit price must be greater than zero.");
+
+        return decimal.Round(amount, 2);
     }
 
     private IQueryable<Session> BaseQuery()

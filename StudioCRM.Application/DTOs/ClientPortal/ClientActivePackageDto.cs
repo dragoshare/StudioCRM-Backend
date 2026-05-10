@@ -8,6 +8,7 @@ public class ClientActivePackageDto
     public string PackageName { get; set; } = string.Empty;
 
     public int TotalSessions { get; set; }
+    public int SessionsPerWeek { get; set; }
     public int UsedSessions { get; set; }
     public int RemainingSessions { get; set; }
 
@@ -15,6 +16,8 @@ public class ClientActivePackageDto
     public decimal ExpectedUnitPrice { get; set; }
 
     public string ExpectedBillingType { get; set; } = string.Empty;
+    public int? LocationId { get; set; }
+    public string? LocationName { get; set; }
 
     public string PaymentStatus { get; set; } = string.Empty;
     public bool IsPaid { get; set; }

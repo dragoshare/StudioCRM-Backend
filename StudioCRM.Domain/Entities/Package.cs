@@ -1,4 +1,6 @@
-﻿namespace StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
+
+namespace StudioCRM.Domain.Entities;
 
 public class Package
 {
@@ -14,7 +16,15 @@ public class Package
 
     public int SessionsLimit { get; set; }
 
+    public int SessionsPerWeek { get; set; } = 1;
+
     public int DurationDays { get; set; }
+
+    public SessionBillingType BillingType { get; set; } = SessionBillingType.OneToOne;
+
+    public int? LocationId { get; set; }
+
+    public Location? Location { get; set; }
 
     public bool IsActive { get; set; } = true;
 
@@ -27,6 +37,8 @@ public class Package
     public ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+
     public bool IsDeleted { get; set; } = false;
+
     public DateTime? DeletedAt { get; set; }
 }

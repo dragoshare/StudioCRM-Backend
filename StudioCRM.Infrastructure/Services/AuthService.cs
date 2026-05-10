@@ -29,6 +29,155 @@ public class AuthService : IAuthService
         _passwordHasher = new PasswordHasher<User>();
     }
 
+    public async Task<CreatedAccountDto> RegisterAsync(RegisterDto request)
+    {
+        var email = request.Email.Trim();
+        var roleName = NormalizeManualRegistrationRole(request.Role);
+
+        if (string.IsNullOrWhiteSpace(email))
+        {
+            throw new InvalidOperationException("Email is required.");
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+        {
+            throw new InvalidOperationException("Password is required.");
+        }
+
+        if (!request.LocationId.HasValue)
+        {
+            throw new InvalidOperationException("LocationId is required.");
+        }
+
+        var existingUser = await _context.Users
+            .AnyAsync(u => u.Email == email);
+
+        if (existingUser)
+        {
+            throw new InvalidOperationException("User with this email already exists.");
+        }
+
+        var locationExists = await _context.Locations
+            .AnyAsync(l => l.Id == request.LocationId.Value);
+
+        if (!locationExists)
+        {
+            throw new InvalidOperationException("Location does not exist.");
+        }
+
+        var role = await _context.Roles
+            .FirstOrDefaultAsync(r => r.Name == roleName);
+
+        if (role is null)
+        {
+            throw new InvalidOperationException($"{roleName} role does not exist.");
+        }
+
+        Trainer? assignedTrainer = null;
+
+        if (roleName == "Client" && request.TrainerId.HasValue)
+        {
+            assignedTrainer = await _context.Trainers
+                .Include(t => t.TrainerLocations)
+                .FirstOrDefaultAsync(t => t.Id == request.TrainerId.Value && !t.IsDeleted);
+
+            if (assignedTrainer is null)
+            {
+                throw new InvalidOperationException("Trainer does not exist.");
+            }
+
+            var trainerHasLocation = assignedTrainer.TrainerLocations
+                .Any(tl => tl.LocationId == request.LocationId.Value);
+
+            if (!trainerHasLocation)
+            {
+                throw new InvalidOperationException("Trainer is not assigned to this location.");
+            }
+        }
+
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Email = email,
+            FirstName = request.FirstName.Trim(),
+            LastName = request.LastName.Trim(),
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+
+        await _context.Users.AddAsync(user);
+        await _context.SaveChangesAsync();
+
+        await _context.UserRoles.AddAsync(new UserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id
+        });
+
+        int? clientId = null;
+        int? trainerId = null;
+
+        if (roleName == "Trainer")
+        {
+            var trainer = new Trainer
+            {
+                UserId = user.Id,
+                Status = "Active",
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            await _context.Trainers.AddAsync(trainer);
+            await _context.SaveChangesAsync();
+
+            await _context.TrainerLocations.AddAsync(new TrainerLocation
+            {
+                TrainerId = trainer.Id,
+                LocationId = request.LocationId.Value
+            });
+
+            trainerId = trainer.Id;
+        }
+        else
+        {
+            var client = new Client
+            {
+                UserId = user.Id,
+                TrainerId = assignedTrainer?.Id,
+                LocationId = request.LocationId.Value,
+                FirstName = user.FirstName,
+                LastName = user.LastName,
+                Email = user.Email,
+                ProgressPercent = 0,
+                BillingStatus = "Pending",
+                Status = "New",
+                SubscriptionAutoRenewEnabled = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            await _context.Clients.AddAsync(client);
+            await _context.SaveChangesAsync();
+
+            clientId = client.Id;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return new CreatedAccountDto
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            Role = roleName,
+            ClientId = clientId,
+            TrainerId = trainerId,
+            LocationId = request.LocationId
+        };
+    }
+
     public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto request)
     {
         var user = await _context.Users
@@ -65,61 +214,6 @@ public class AuthService : IAuthService
         });
 
         await _context.SaveChangesAsync();
-
-        return BuildAuthResponse(user, refreshToken);
-    }
-
-    public async Task<AuthResponseDto> RegisterAsync(RegisterDto request)
-    {
-        var exists = await _context.Users.AnyAsync(u => u.Email == request.Email);
-        if (exists)
-        {
-            throw new InvalidOperationException("User with this email already exists.");
-        }
-
-        var clientRole = await _context.Roles.FirstOrDefaultAsync(r => r.Name == "Client");
-        if (clientRole is null)
-        {
-            throw new InvalidOperationException("Client role does not exist.");
-        }
-
-        var user = new User
-        {
-            Email = request.Email,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
-
-        await _context.Users.AddAsync(user);
-        await _context.SaveChangesAsync();
-
-        await _context.UserRoles.AddAsync(new UserRole
-        {
-            UserId = user.Id,
-            RoleId = clientRole.Id
-        });
-
-        var refreshToken = GenerateRefreshToken();
-
-        await _context.RefreshTokens.AddAsync(new RefreshToken
-        {
-            UserId = user.Id,
-            Token = refreshToken,
-            ExpiresAt = DateTime.UtcNow.AddDays(7),
-            CreatedAt = DateTime.UtcNow
-        });
-
-        await _context.SaveChangesAsync();
-
-        user = await _context.Users
-            .Include(u => u.UserRoles)
-                .ThenInclude(ur => ur.Role)
-            .FirstAsync(u => u.Id == user.Id);
 
         return BuildAuthResponse(user, refreshToken);
     }
@@ -263,5 +357,15 @@ public class AuthService : IAuthService
     {
         var randomBytes = RandomNumberGenerator.GetBytes(64);
         return Convert.ToBase64String(randomBytes);
+    }
+
+    private static string NormalizeManualRegistrationRole(string? role)
+    {
+        return role?.Trim().ToLowerInvariant() switch
+        {
+            "trainer" => "Trainer",
+            "client" => "Client",
+            _ => throw new InvalidOperationException("Manual account creation supports only Client or Trainer roles.")
+        };
     }
 }

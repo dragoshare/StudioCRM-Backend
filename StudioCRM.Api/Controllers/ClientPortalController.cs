@@ -2,28 +2,39 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.ClientPortal;
+using StudioCRM.Application.DTOs.Packages;
+using StudioCRM.Application.DTOs.Profiles;
+using StudioCRM.Application.DTOs.Subscriptions;
+using StudioCRM.Application.DTOs.TrainingPlans;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/client-portal")]
 [Authorize(Roles = "Client")]
 public class ClientPortalController : ControllerBase
 {
     private readonly IClientPortalService _clientPortalService;
+    private readonly IClientPaymentService _clientPaymentService;
     private readonly IMilestoneService _milestoneService;
+    private readonly ISubscriptionService _subscriptionService;
     private readonly StudioCRMDbContext _context;
 
     public ClientPortalController(
-        IClientPortalService clientPortalService,
-        IMilestoneService milestoneService,
-        StudioCRMDbContext context)
+    IClientPortalService clientPortalService,
+    IClientPaymentService clientPaymentService,
+    IMilestoneService milestoneService,
+    ISubscriptionService subscriptionService,
+    StudioCRMDbContext context)
     {
         _clientPortalService = clientPortalService;
+        _clientPaymentService = clientPaymentService;
         _milestoneService = milestoneService;
+        _subscriptionService = subscriptionService;
         _context = context;
     }
 
@@ -36,6 +47,30 @@ public class ClientPortalController : ControllerBase
             return NotFound();
 
         return Ok(result);
+    }
+
+    [HttpPatch("me")]
+    public async Task<ActionResult<ClientPortalMeDto>> UpdateMe(UpdateClientPortalProfileRequest request)
+    {
+        return await HandleAsync<ClientPortalMeDto>(async () =>
+        {
+            var result = await _clientPortalService.UpdateMeAsync(request);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpPost("email-change-requests")]
+    public async Task<IActionResult> RequestEmailChange(RequestEmailChangeDto request)
+    {
+        try
+        {
+            await _clientPortalService.RequestEmailChangeAsync(request);
+            return Accepted();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("dashboard")]
@@ -66,6 +101,52 @@ public class ClientPortalController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("subscription")]
+    public async Task<ActionResult<SubscriptionDto>> GetSubscription()
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.GetCurrentClientSubscriptionAsync()));
+    }
+
+    [HttpPost("subscription/cancel-request")]
+    public async Task<ActionResult<SubscriptionDto>> RequestCancelSubscription()
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.RequestCancelRenewalAsClientAsync()));
+    }
+
+    [HttpDelete("subscription/cancel-request")]
+    public async Task<ActionResult<SubscriptionDto>> WithdrawCancelSubscriptionRequest()
+    {
+        return await HandleAsync<SubscriptionDto>(async () =>
+            Ok(await _subscriptionService.WithdrawCancelRenewalRequestAsClientAsync()));
+    }
+
+    [HttpGet("subscription/current-cycle/usage")]
+    public async Task<ActionResult<SubscriptionUsageDto>> GetSubscriptionUsage()
+    {
+        return await HandleAsync<SubscriptionUsageDto>(async () =>
+            Ok(await _subscriptionService.GetCurrentClientUsageAsync()));
+    }
+
+    [HttpGet("training-plan")]
+    public async Task<ActionResult<TrainingPlanDto>> GetTrainingPlan()
+    {
+        return await HandleAsync<TrainingPlanDto>(async () =>
+            Ok(await _subscriptionService.GetCurrentClientTrainingPlanAsync()));
+    }
+
+    [HttpPost("package-renewals")]
+    public async Task<ActionResult<ClientPackagePurchaseResultDto>> RequestPackageRenewal(
+        RequestClientPackageRenewalDto request)
+    {
+        return await HandleAsync<ClientPackagePurchaseResultDto>(async () =>
+        {
+            var result = await _clientPaymentService.RequestPackageRenewalAsClientAsync(request);
+            return CreatedAtAction(nameof(GetBilling), new { id = result.ClientPackageId }, result);
+        });
+    }
+
     [HttpGet("payments")]
     public async Task<ActionResult<ClientPortalPaymentDto>> GetPayments()
     {
@@ -75,6 +156,23 @@ public class ClientPortalController : ControllerBase
             return NotFound();
 
         return Ok(result);
+    }
+
+    [HttpGet("billing")]
+    public async Task<ActionResult<ClientBillingSummaryDto>> GetBilling()
+    {
+        return await HandleAsync<ClientBillingSummaryDto>(async () =>
+            Ok(await _clientPaymentService.GetCurrentClientSummaryAsync()));
+    }
+
+    [HttpPost("payments")]
+    public async Task<ActionResult<ClientPaymentDto>> RequestPayment(CreateClientPaymentRequest request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+        {
+            var payment = await _clientPaymentService.RequestPaymentAsClientAsync(request);
+            return CreatedAtAction(nameof(GetBilling), new { id = payment.Id }, payment);
+        });
     }
 
     [HttpGet("trainer")]
@@ -157,5 +255,19 @@ public class ClientPortalController : ControllerBase
             return null;
 
         return userId;
+    }
+    private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
     }
 }

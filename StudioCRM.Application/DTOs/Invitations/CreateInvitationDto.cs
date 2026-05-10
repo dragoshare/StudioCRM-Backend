@@ -7,4 +7,5 @@ public class CreateInvitationDto
     public string Role { get; set; } = string.Empty;
 
     public int LocationId { get; set; }
+
 }

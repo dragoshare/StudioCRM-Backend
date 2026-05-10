@@ -8,10 +8,10 @@ public class CreateClientPackageRequest
 
     public string Name { get; set; } = string.Empty;
 
-    public int TotalSessions { get; set; }
-    public decimal TotalPrice { get; set; }
+    public int? TotalSessions { get; set; }
+    public decimal? TotalPrice { get; set; }
 
-    public SessionBillingType ExpectedBillingType { get; set; }
+    public SessionBillingType? ExpectedBillingType { get; set; }
 
     public DateTime PurchaseDate { get; set; }
     public DateTime? ValidUntil { get; set; }

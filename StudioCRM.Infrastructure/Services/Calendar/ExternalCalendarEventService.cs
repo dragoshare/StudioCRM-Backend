@@ -6,6 +6,7 @@ using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services.Calendar;
@@ -214,14 +215,24 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
 
             if (!alreadyExists)
             {
+                var activeClientPackage = await _context.ClientPackages
+                    .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                    .OrderByDescending(cp => cp.PurchaseDate)
+                    .FirstOrDefaultAsync();
+
+                var plannedBillingType = ResolveBillingType(session.Participants.Count + 1);
+
                 await _context.SessionParticipants.AddAsync(new SessionParticipant
                 {
                     SessionId = session.Id,
                     ClientId = clientId,
-                    PackageId = client.ActivePackageId,
+                    PackageId = activeClientPackage?.PackageId ?? client.ActivePackageId,
+                    ClientPackageId = activeClientPackage?.Id,
                     AttendanceStatus = "Planned",
                     CountsAgainstPackage = true,
                     SessionsCharged = 1,
+                    PlannedBillingType = plannedBillingType,
+                    ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
                 });
@@ -330,5 +341,16 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         return string.IsNullOrWhiteSpace(candidate)
             ? null
             : candidate;
+    }
+
+    private static SessionBillingType ResolveBillingType(int count)
+    {
+        return count switch
+        {
+            <= 1 => SessionBillingType.OneToOne,
+            2 => SessionBillingType.TwoToOne,
+            3 => SessionBillingType.ThreeToOne,
+            _ => SessionBillingType.FourToOne
+        };
     }
 }

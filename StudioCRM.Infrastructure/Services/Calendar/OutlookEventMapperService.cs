@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services.Calendar;
@@ -125,16 +126,26 @@ public class OutlookEventMapperService
         await _context.Sessions.AddAsync(session);
         await _context.SaveChangesAsync();
 
+        var plannedBillingType = ResolveBillingType(clients.DistinctBy(c => c.Id).Count());
+
         foreach (var client in clients.DistinctBy(c => c.Id))
         {
+            var activeClientPackage = await _context.ClientPackages
+                .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                .OrderByDescending(cp => cp.PurchaseDate)
+                .FirstOrDefaultAsync();
+
             await _context.SessionParticipants.AddAsync(new SessionParticipant
             {
                 SessionId = session.Id,
                 ClientId = client.Id,
-                PackageId = client.ActivePackageId,
+                PackageId = activeClientPackage?.PackageId ?? client.ActivePackageId,
+                ClientPackageId = activeClientPackage?.Id,
                 AttendanceStatus = "Planned",
                 CountsAgainstPackage = true,
                 SessionsCharged = 1,
+                PlannedBillingType = plannedBillingType,
+                ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             });
@@ -305,5 +316,16 @@ public class OutlookEventMapperService
 
                 return $"{firstName} {lastInitial}".Trim();
             }));
+    }
+
+    private static SessionBillingType ResolveBillingType(int count)
+    {
+        return count switch
+        {
+            <= 1 => SessionBillingType.OneToOne,
+            2 => SessionBillingType.TwoToOne,
+            3 => SessionBillingType.ThreeToOne,
+            _ => SessionBillingType.FourToOne
+        };
     }
 }

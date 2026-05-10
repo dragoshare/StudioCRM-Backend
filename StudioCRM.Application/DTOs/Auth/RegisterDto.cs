@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Application.DTOs.Auth;
+namespace StudioCRM.Application.DTOs.Auth;
 
 public class RegisterDto
 {
@@ -6,4 +6,7 @@ public class RegisterDto
     public string Password { get; set; } = string.Empty;
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
+    public string Role { get; set; } = "Client";
+    public int? LocationId { get; set; }
+    public int? TrainerId { get; set; }
 }

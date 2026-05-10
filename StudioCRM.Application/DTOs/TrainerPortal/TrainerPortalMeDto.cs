@@ -12,6 +12,8 @@ public class TrainerPortalMeDto
 
     public string? Phone { get; set; }
 
+    public string? AvatarUrl { get; set; }
+
     public string? Bio { get; set; }
 
     public string Status { get; set; } = string.Empty;

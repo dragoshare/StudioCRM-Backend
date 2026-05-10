@@ -6,8 +6,8 @@ using StudioCRM.Application.Interfaces;
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
-[Authorize]
+[Route("api/sessions")]
+[Authorize(Roles = "Owner")]
 public class SessionsController : ControllerBase
 {
     private readonly ISessionService _sessionService;
@@ -18,14 +18,12 @@ public class SessionsController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<SessionDto>>> GetAll()
     {
         return Ok(await _sessionService.GetAllAsync());
     }
 
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<SessionDto>> GetById(int id)
     {
         var result = await _sessionService.GetByIdAsync(id);
@@ -34,14 +32,12 @@ public class SessionsController : ControllerBase
     }
 
     [HttpGet("filter")]
-    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<SessionDto>>> Filter([FromQuery] SessionFilterDto filter)
     {
         return Ok(await _sessionService.GetFilteredAsync(filter));
     }
 
     [HttpPost]
-    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<SessionDto>> Create(CreateSessionDto request)
     {
         var result = await _sessionService.CreateAsync(request);
@@ -49,7 +45,6 @@ public class SessionsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
-    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)
     {
         var result = await _sessionService.UpdateAsync(id, request);
@@ -58,7 +53,6 @@ public class SessionsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Delete(int id)
     {
         var deleted = await _sessionService.DeleteAsync(id);
@@ -66,7 +60,6 @@ public class SessionsController : ControllerBase
         return NoContent();
     }
     [HttpPost("{id:int}/restore")]
-    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Restore(int id)
     {
         var restored = await _sessionService.RestoreAsync(id);
@@ -75,13 +68,11 @@ public class SessionsController : ControllerBase
     }
 
     [HttpGet("deleted")]
-    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<List<SessionDto>>> GetDeleted()
     {
         return Ok(await _sessionService.GetDeletedAsync());
     }
 
-    [Authorize(Roles = "Owner,Trainer")]
     [HttpPost("participants/count-from-package")]
     public async Task<IActionResult> CountFromPackage(CountSessionFromPackageRequest request)
     {

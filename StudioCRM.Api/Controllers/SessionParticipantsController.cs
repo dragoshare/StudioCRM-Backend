@@ -7,7 +7,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/sessions/{sessionId:int}/participants")]
-[Authorize(Roles = "Owner,Trainer")]
+[Authorize(Roles = "Owner")]
 public class SessionParticipantsController : ControllerBase
 {
     private readonly ISessionParticipantService _service;

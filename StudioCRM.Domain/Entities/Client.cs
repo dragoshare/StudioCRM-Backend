@@ -19,6 +19,14 @@ public class Client
 
     public string? AvatarUrl { get; set; }
 
+    public string? GoogleDriveFolderId { get; set; }
+
+    public string? TrainingPlanFileId { get; set; }
+
+    public string? TrainingPlanFileName { get; set; }
+
+    public string? TrainingPlanUrl { get; set; }
+
     public string? Goal { get; set; }
 
     public string? Notes { get; set; }
@@ -47,6 +55,18 @@ public class Client
     public bool IsDeleted { get; set; } = false;
     public DateTime? DeletedAt { get; set; }
     public DateTime? TrainingStartDate { get; set; }
+
+    public bool SubscriptionAutoRenewEnabled { get; set; } = true;
+
+    public int? NextPackageId { get; set; }
+
+    public DateTime? RenewalCancellationRequestedAt { get; set; }
+
+    public int? RenewalCancellationRequestedByUserId { get; set; }
+
+    public DateTime? RenewalCancelledAt { get; set; }
+
+    public int? RenewalCancelledByUserId { get; set; }
 
     public ICollection<ClientMilestone> Milestones { get; set; } = new List<ClientMilestone>();
 }

@@ -17,6 +17,13 @@ public class PackageService : IPackageService
 
     public async Task<PackageDto> CreateAsync(CreatePackageDto request)
     {
+        if (request.LocationId.HasValue)
+        {
+            var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId.Value);
+            if (!locationExists)
+                throw new InvalidOperationException("Location does not exist.");
+        }
+
         var package = new Package
         {
             Name = request.Name,
@@ -24,7 +31,10 @@ public class PackageService : IPackageService
             Price = request.Price,
             Currency = request.Currency,
             SessionsLimit = request.SessionsLimit,
+            SessionsPerWeek = request.SessionsPerWeek,
             DurationDays = request.DurationDays,
+            BillingType = request.BillingType,
+            LocationId = request.LocationId,
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -40,6 +50,7 @@ public class PackageService : IPackageService
     public async Task<List<PackageDto>> GetAllAsync()
     {
         return await _context.Packages
+            .Include(p => p.Location)
             .OrderByDescending(p => p.CreatedAt)
             .Select(p => MapToDto(p))
             .ToListAsync();
@@ -48,6 +59,7 @@ public class PackageService : IPackageService
     public async Task<PackageDto?> GetByIdAsync(int id)
     {
         return await _context.Packages
+            .Include(p => p.Location)
             .Where(p => p.Id == id)
             .Select(p => MapToDto(p))
             .FirstOrDefaultAsync();
@@ -61,12 +73,22 @@ public class PackageService : IPackageService
             return null;
         }
 
+        if (request.LocationId.HasValue)
+        {
+            var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId.Value);
+            if (!locationExists)
+                throw new InvalidOperationException("Location does not exist.");
+        }
+
         package.Name = request.Name;
         package.Description = request.Description;
         package.Price = request.Price;
         package.Currency = request.Currency;
         package.SessionsLimit = request.SessionsLimit;
+        package.SessionsPerWeek = request.SessionsPerWeek;
         package.DurationDays = request.DurationDays;
+        package.BillingType = request.BillingType;
+        package.LocationId = request.LocationId;
         package.IsActive = request.IsActive;
         package.UpdatedAt = DateTime.UtcNow;
 
@@ -113,21 +135,9 @@ public class PackageService : IPackageService
     {
         return await _context.Packages
             .IgnoreQueryFilters()
+            .Include(p => p.Location)
             .Where(p => p.IsDeleted)
-            .Select(p => new PackageDto
-            {
-                Id = p.Id,
-                Name = p.Name,
-                Description = p.Description,
-                Price = p.Price,
-                Currency = p.Currency,
-                SessionsLimit = p.SessionsLimit,
-                DurationDays = p.DurationDays,
-                IsActive = p.IsActive,
-                CreatedAt = p.CreatedAt,
-                UpdatedAt = p.UpdatedAt,
-                CreatedBy = p.CreatedBy
-            })
+            .Select(p => MapToDto(p))
             .ToListAsync();
     }
 
@@ -141,7 +151,11 @@ public class PackageService : IPackageService
             Price = package.Price,
             Currency = package.Currency,
             SessionsLimit = package.SessionsLimit,
+            SessionsPerWeek = package.SessionsPerWeek,
             DurationDays = package.DurationDays,
+            BillingType = package.BillingType,
+            LocationId = package.LocationId,
+            LocationName = package.Location?.Name,
             IsActive = package.IsActive,
             CreatedAt = package.CreatedAt,
             UpdatedAt = package.UpdatedAt,

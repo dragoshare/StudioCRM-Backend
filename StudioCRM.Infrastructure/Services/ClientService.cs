@@ -174,6 +174,31 @@ public class ClientService : IClientService
         return true;
     }
 
+    public async Task<bool> AssignTrainerAsync(int id, SetClientTrainerRequest request)
+    {
+        if (!_currentUser.IsOwner)
+            throw new InvalidOperationException("Only owner can assign trainers.");
+
+        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
+        if (client is null)
+            return false;
+
+        if (request.TrainerId.HasValue)
+        {
+            var trainerExists = await _context.Trainers
+                .AnyAsync(t => t.Id == request.TrainerId.Value && !t.IsDeleted);
+
+            if (!trainerExists)
+                throw new InvalidOperationException("Trainer does not exist.");
+        }
+
+        client.TrainerId = request.TrainerId;
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+        return true;
+    }
+
     public async Task<bool> RestoreAsync(int id)
     {
         var client = await _context.Clients

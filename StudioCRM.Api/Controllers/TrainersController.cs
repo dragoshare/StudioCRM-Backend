@@ -7,7 +7,7 @@ using StudioCRM.Application.Interfaces;
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/trainers")]
 [Authorize(Roles = "Owner")]
 public class TrainersController : ControllerBase
 {
@@ -45,6 +45,18 @@ public class TrainersController : ControllerBase
         var result = await _trainerService.UpdateAsync(id, request);
         if (result is null) return NotFound();
         return Ok(result);
+    }
+
+    [HttpPatch("{id:int}")]
+    public async Task<ActionResult<TrainerDto>> Patch(int id, UpdateTrainerDto request)
+    {
+        return await Update(id, request);
+    }
+
+    [HttpPost("{id:int}/deactivate")]
+    public async Task<IActionResult> Deactivate(int id)
+    {
+        return await Delete(id);
     }
 
     [HttpDelete("{id:int}")]

@@ -156,14 +156,29 @@ public class TrainerService : ITrainerService
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var trainer = await _context.Trainers.FirstOrDefaultAsync(t => t.Id == id);
+        var trainer = await _context.Trainers
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null)
             return false;
 
         trainer.IsDeleted = true;
         trainer.DeletedAt = DateTime.UtcNow;
+        trainer.Status = "Inactive";
         trainer.UpdatedAt = DateTime.UtcNow;
+        trainer.User.IsActive = false;
+        trainer.User.UpdatedAt = DateTime.UtcNow;
+
+        var clients = await _context.Clients
+            .Where(c => c.TrainerId == trainer.Id)
+            .ToListAsync();
+
+        foreach (var client in clients)
+        {
+            client.TrainerId = null;
+            client.UpdatedAt = DateTime.UtcNow;
+        }
 
         await _context.SaveChangesAsync();
         return true;
@@ -173,6 +188,7 @@ public class TrainerService : ITrainerService
     {
         var trainer = await _context.Trainers
             .IgnoreQueryFilters()
+            .Include(t => t.User)
             .FirstOrDefaultAsync(t => t.Id == id);
 
         if (trainer is null || !trainer.IsDeleted)
@@ -180,7 +196,10 @@ public class TrainerService : ITrainerService
 
         trainer.IsDeleted = false;
         trainer.DeletedAt = null;
+        trainer.Status = "Active";
         trainer.UpdatedAt = DateTime.UtcNow;
+        trainer.User.IsActive = true;
+        trainer.User.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
         return true;

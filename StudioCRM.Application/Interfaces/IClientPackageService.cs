@@ -4,4 +4,5 @@ namespace StudioCRM.Application.Interfaces;
 public interface IClientPackageService
 {
     Task<int> CreateAsync(CreateClientPackageRequest request);
+    Task<bool> ActivateAsync(int clientId, int clientPackageId);
 }

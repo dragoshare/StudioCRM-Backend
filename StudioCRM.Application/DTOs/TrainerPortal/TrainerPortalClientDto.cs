@@ -10,6 +10,10 @@ public class TrainerPortalClientDto
 
     public string? PhoneNumber { get; set; }
 
+    public string? AvatarUrl { get; set; }
+
+    public string? Goal { get; set; }
+
     public string Status { get; set; } = string.Empty;
 
     public string BillingStatus { get; set; } = string.Empty;

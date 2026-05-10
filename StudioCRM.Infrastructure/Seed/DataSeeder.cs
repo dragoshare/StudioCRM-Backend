@@ -2,7 +2,9 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using UserRoleEntity = StudioCRM.Domain.Entities.UserRole;
 
 namespace StudioCRM.Infrastructure.Seed;
 
@@ -12,22 +14,72 @@ public static class DataSeeder
     private const string TrainerPassword = "Trainer123!";
     private const string OwnerPassword = "Admin123!";
     private const string SeedNotePrefix = "SEED:";
+    private const string BillingSeedNotePrefix = "SEED:BILLING:";
 
-    public static async Task SeedAsync(StudioCRMDbContext context)
+    public static async Task SeedAsync(StudioCRMDbContext context, bool seedDemoData)
     {
         await context.Database.MigrateAsync();
 
         var passwordHasher = new PasswordHasher<User>();
 
         await SeedRolesAsync(context);
+
+        if (!seedDemoData)
+            return;
+
+        await CleanupGeneratedDemoDataAsync(context);
         await SeedLocationsAsync(context);
         await SeedPackagesAsync(context);
         await SeedOwnerAsync(context, passwordHasher);
         await SeedTrainersAsync(context, passwordHasher);
         await SeedTrainerRatesAsync(context);
         await SeedClientsAsync(context, passwordHasher);
-        await SeedSessionsAsync(context);
-        await SeedOutlookMappingTestDataAsync(context);
+        await SeedBillingTestScenariosAsync(context, passwordHasher);
+    }
+
+    private static async Task CleanupGeneratedDemoDataAsync(StudioCRMDbContext context)
+    {
+        await context.Database.ExecuteSqlRawAsync("""
+            DELETE FROM "ClientBalanceTransactions"
+            WHERE "SessionId" IN (
+                SELECT "Id"
+                FROM "Sessions"
+                WHERE "Note" LIKE 'SEED:%'
+            );
+
+            DELETE FROM "CalendarEventLinks"
+            WHERE "ExternalEventId" LIKE 'seed-outlook-%'
+               OR "SessionId" IN (
+                    SELECT "Id"
+                    FROM "Sessions"
+                    WHERE "Note" LIKE 'SEED:%'
+               );
+
+            DELETE FROM "SessionParticipants"
+            WHERE "Note" LIKE 'SEED:%'
+               OR "SessionId" IN (
+                    SELECT "Id"
+                    FROM "Sessions"
+                    WHERE "Note" LIKE 'SEED:%'
+               );
+
+            DELETE FROM "Sessions"
+            WHERE "Note" LIKE 'SEED:%';
+
+            DELETE FROM "ExternalCalendarEvents"
+            WHERE "ExternalEventId" LIKE 'seed-outlook-%'
+               OR "BodyPreview" LIKE 'SEED:%';
+
+            DELETE FROM "CalendarSubscriptions"
+            WHERE "CalendarIntegrationId" IN (
+                SELECT "Id"
+                FROM "CalendarIntegrations"
+                WHERE "ExternalUserId" = 'seed-outlook-user-trainer'
+            );
+
+            DELETE FROM "CalendarIntegrations"
+            WHERE "ExternalUserId" = 'seed-outlook-user-trainer';
+            """);
     }
 
     private static async Task SeedRolesAsync(StudioCRMDbContext context)
@@ -99,17 +151,17 @@ public static class DataSeeder
 
     private static async Task SeedPackagesAsync(StudioCRMDbContext context)
     {
-        await EnsurePackageAsync(context, "4 treningi 1:1", "Pakiet startowy treningów personalnych", 600, 4, 30);
-        await EnsurePackageAsync(context, "8 treningów 1:1", "Najpopularniejszy pakiet treningów personalnych", 1120, 8, 35);
+        await EnsurePackageAsync(context, "4 treningi 1:1", "Pakiet startowy treningów personalnych", 600, 4, 45);
+        await EnsurePackageAsync(context, "8 treningów 1:1", "Najpopularniejszy pakiet treningów personalnych", 1120, 8, 45);
         await EnsurePackageAsync(context, "12 treningów 1:1", "Pakiet premium treningów personalnych", 1560, 12, 45);
 
-        await EnsurePackageAsync(context, "8 treningów 2:1", "Pakiet treningów półpersonalnych dla 2 osób", 760, 8, 35);
+        await EnsurePackageAsync(context, "8 treningów 2:1", "Pakiet treningów półpersonalnych dla 2 osób", 760, 8, 45);
         await EnsurePackageAsync(context, "12 treningów 2:1", "Pakiet treningów półpersonalnych dla 2 osób", 1080, 12, 45);
 
-        await EnsurePackageAsync(context, "8 treningów 3:1", "Pakiet treningów półpersonalnych dla 3 osób", 640, 8, 35);
+        await EnsurePackageAsync(context, "8 treningów 3:1", "Pakiet treningów półpersonalnych dla 3 osób", 640, 8, 45);
         await EnsurePackageAsync(context, "12 treningów 3:1", "Pakiet treningów półpersonalnych dla 3 osób", 900, 12, 45);
 
-        await EnsurePackageAsync(context, "8 treningów 4:1", "Pakiet treningów półpersonalnych dla 4 osób", 560, 8, 35);
+        await EnsurePackageAsync(context, "8 treningów 4:1", "Pakiet treningów półpersonalnych dla 4 osób", 560, 8, 45);
         await EnsurePackageAsync(context, "12 treningów 4:1", "Pakiet treningów półpersonalnych dla 4 osób", 780, 12, 45);
     }
 
@@ -122,6 +174,8 @@ public static class DataSeeder
         int durationDays)
     {
         var package = await context.Packages.FirstOrDefaultAsync(p => p.Name == name);
+        var billingType = InferBillingType(name);
+        var sessionsPerWeek = InferSessionsPerWeek(sessionsLimit);
 
         if (package is null)
         {
@@ -132,12 +186,30 @@ public static class DataSeeder
                 Price = price,
                 Currency = "PLN",
                 SessionsLimit = sessionsLimit,
+                SessionsPerWeek = sessionsPerWeek,
                 DurationDays = durationDays,
+                BillingType = billingType,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 CreatedBy = 1
             });
+
+            await context.SaveChangesAsync();
+        }
+        else
+        {
+            package.Description = description;
+            package.Price = price;
+            package.Currency = "PLN";
+            package.SessionsLimit = sessionsLimit;
+            package.SessionsPerWeek = sessionsPerWeek;
+            package.DurationDays = durationDays;
+            package.BillingType = billingType;
+            package.IsActive = true;
+            package.IsDeleted = false;
+            package.DeletedAt = null;
+            package.UpdatedAt = DateTime.UtcNow;
 
             await context.SaveChangesAsync();
         }
@@ -164,6 +236,16 @@ public static class DataSeeder
     {
         var trainerSeeds = new[]
         {
+            new
+            {
+                Email = "trainer@studiocrm.local",
+                FirstName = "Marek",
+                LastName = "Wójcik",
+                Bio = "Główne konto trenera do testów CRM",
+                Phone = "501100099",
+                Experience = 6,
+                Locations = new[] { "Niepołomice", "Kłaj" }
+            },
             new
             {
                 Email = "sgorzula@bsworkout.pl",
@@ -266,6 +348,13 @@ public static class DataSeeder
         var trainerRates = new Dictionary<string, Dictionary<string, decimal>>
         {
             ["trainer@studiocrm.local"] = new()
+            {
+                ["OneToOne"] = 70m,
+                ["TwoToOne"] = 85m,
+                ["ThreeToOne"] = 95m,
+                ["FourToOne"] = 105m
+            },
+            ["sgorzula@bsworkout.pl"] = new()
             {
                 ["OneToOne"] = 70m,
                 ["TwoToOne"] = 85m,
@@ -410,6 +499,489 @@ public static class DataSeeder
         }
 
         await context.SaveChangesAsync();
+    }
+
+    private static async Task SeedBillingTestScenariosAsync(
+        StudioCRMDbContext context,
+        PasswordHasher<User> passwordHasher)
+    {
+        var scenarioEmails = new[]
+        {
+            "billing.paid@studiocrm.local",
+            "billing.pending@studiocrm.local",
+            "billing.overpaid@studiocrm.local",
+            "billing.renewal@studiocrm.local",
+            "billing.new@studiocrm.local"
+        };
+
+        await ResetBillingScenarioDataAsync(context, scenarioEmails);
+
+        var owner = await context.Users.FirstAsync(u => u.Email == "owner@studiocrm.local");
+        var trainer = await context.Trainers
+            .Include(t => t.User)
+            .FirstAsync(t => t.User.Email == "trainer@studiocrm.local");
+        var location = await context.Locations.FirstAsync(l => l.Name == "Niepołomice");
+
+        var paidClient = await EnsureBillingScenarioClientAsync(
+            context,
+            passwordHasher,
+            "billing.paid@studiocrm.local",
+            "Paid",
+            "Active",
+            "Test: opłacony cykl 8 treningów 2:1.",
+            trainer.Id,
+            location.Id,
+            owner.Id);
+
+        var paidCycle = await CreateBillingScenarioCycleAsync(
+            context,
+            paidClient,
+            "8 treningów 2:1",
+            PaymentStatus.Paid,
+            amountPaid: 760m,
+            owner.Id);
+
+        await CreateBillingScenarioPaymentAsync(context, paidClient, paidCycle, 760m, ClientPaymentStatus.Confirmed, ClientPaymentSource.StaffEntry, owner.Id, "Pełna płatność testowa.");
+        await CreateCountedBillingSessionsAsync(context, paidClient, trainer.Id, location.Id, paidCycle, 3, SessionBillingType.TwoToOne);
+
+        var pendingClient = await EnsureBillingScenarioClientAsync(
+            context,
+            passwordHasher,
+            "billing.pending@studiocrm.local",
+            "Pending",
+            "Payment",
+            "Test: klient zgłosił płatność, staff musi potwierdzić.",
+            trainer.Id,
+            location.Id,
+            owner.Id);
+
+        var pendingCycle = await CreateBillingScenarioCycleAsync(
+            context,
+            pendingClient,
+            "12 treningów 2:1",
+            PaymentStatus.PendingConfirmation,
+            amountPaid: 0m,
+            owner.Id);
+
+        await CreateBillingScenarioPaymentAsync(context, pendingClient, pendingCycle, 1080m, ClientPaymentStatus.PendingConfirmation, ClientPaymentSource.ClientRequest, pendingClient.UserId, "Zgłoszenie płatności przez klienta.");
+
+        var overpaidClient = await EnsureBillingScenarioClientAsync(
+            context,
+            passwordHasher,
+            "billing.overpaid@studiocrm.local",
+            "Overpaid",
+            "Carryover",
+            "Test: nadpłata przenoszona na kolejny cykl.",
+            trainer.Id,
+            location.Id,
+            owner.Id);
+
+        var overpaidCycle = await CreateBillingScenarioCycleAsync(
+            context,
+            overpaidClient,
+            "8 treningów 1:1",
+            PaymentStatus.Paid,
+            amountPaid: 1200m,
+            owner.Id);
+
+        await CreateBillingScenarioPaymentAsync(context, overpaidClient, overpaidCycle, 1200m, ClientPaymentStatus.Confirmed, ClientPaymentSource.StaffEntry, owner.Id, "Płatność z nadpłatą 80 PLN.");
+        await context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+        {
+            ClientId = overpaidClient.Id,
+            ClientPackageId = overpaidCycle.Id,
+            Amount = 80m,
+            Type = BalanceTransactionType.ManualAdjustment,
+            Description = "SEED: Nadpłata 80 PLN do wykorzystania w następnym cyklu.",
+            CreatedAt = DateTime.UtcNow
+        });
+
+        var renewalClient = await EnsureBillingScenarioClientAsync(
+            context,
+            passwordHasher,
+            "billing.renewal@studiocrm.local",
+            "Renewal",
+            "AlmostDone",
+            "Test: 7/8 wykorzystanych sesji, ustawiony kolejny pakiet 12 treningów 2:1.",
+            trainer.Id,
+            location.Id,
+            owner.Id);
+
+        var renewalCycle = await CreateBillingScenarioCycleAsync(
+            context,
+            renewalClient,
+            "8 treningów 2:1",
+            PaymentStatus.Paid,
+            amountPaid: 760m,
+            owner.Id);
+
+        var nextPackage = await context.Packages.FirstAsync(p => p.Name == "12 treningów 2:1");
+        renewalClient.NextPackageId = nextPackage.Id;
+        await CreateBillingScenarioPaymentAsync(context, renewalClient, renewalCycle, 760m, ClientPaymentStatus.Confirmed, ClientPaymentSource.StaffEntry, owner.Id, "Cykl prawie zakończony.");
+        await CreateCountedBillingSessionsAsync(context, renewalClient, trainer.Id, location.Id, renewalCycle, 7, SessionBillingType.TwoToOne);
+        await CreatePlannedBillingSessionAsync(context, renewalClient, trainer.Id, location.Id, renewalCycle, "Ostatnia sesja do testu auto-renew");
+
+        await EnsureBillingScenarioClientAsync(
+            context,
+            passwordHasher,
+            "billing.new@studiocrm.local",
+            "New",
+            "NoPackage",
+            "Test: klient bez aktywnego pakietu, do przypisania przez ownera/trenera.",
+            trainer.Id,
+            location.Id,
+            owner.Id,
+            status: "New",
+            billingStatus: "Pending");
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task ResetBillingScenarioDataAsync(
+        StudioCRMDbContext context,
+        IReadOnlyCollection<string> scenarioEmails)
+    {
+        var scenarioClients = await context.Clients
+            .Where(c => scenarioEmails.Contains(c.Email))
+            .ToListAsync();
+
+        if (!scenarioClients.Any())
+            return;
+
+        var clientIds = scenarioClients.Select(c => c.Id).ToList();
+        var clientPackageIds = await context.ClientPackages
+            .Where(cp => clientIds.Contains(cp.ClientId))
+            .Select(cp => cp.Id)
+            .ToListAsync();
+        var sessionIds = await context.Sessions
+            .Where(s => s.Note != null && s.Note.StartsWith(BillingSeedNotePrefix))
+            .Select(s => s.Id)
+            .ToListAsync();
+
+        var participants = await context.SessionParticipants
+            .Where(sp =>
+                clientIds.Contains(sp.ClientId) ||
+                sessionIds.Contains(sp.SessionId) ||
+                (sp.ClientPackageId.HasValue && clientPackageIds.Contains(sp.ClientPackageId.Value)))
+            .ToListAsync();
+        context.SessionParticipants.RemoveRange(participants);
+
+        var balances = await context.ClientBalanceTransactions
+            .Where(t =>
+                clientIds.Contains(t.ClientId) ||
+                (t.ClientPackageId.HasValue && clientPackageIds.Contains(t.ClientPackageId.Value)) ||
+                (t.SessionId.HasValue && sessionIds.Contains(t.SessionId.Value)))
+            .ToListAsync();
+        context.ClientBalanceTransactions.RemoveRange(balances);
+
+        var payments = await context.ClientPayments
+            .Where(p =>
+                clientIds.Contains(p.ClientId) ||
+                (p.ClientPackageId.HasValue && clientPackageIds.Contains(p.ClientPackageId.Value)))
+            .ToListAsync();
+        context.ClientPayments.RemoveRange(payments);
+
+        var sessions = await context.Sessions
+            .Where(s => sessionIds.Contains(s.Id))
+            .ToListAsync();
+        context.Sessions.RemoveRange(sessions);
+
+        var cycles = await context.ClientPackages
+            .Where(cp => clientIds.Contains(cp.ClientId))
+            .ToListAsync();
+        context.ClientPackages.RemoveRange(cycles);
+
+        foreach (var client in scenarioClients)
+        {
+            client.ActivePackageId = null;
+            client.NextPackageId = null;
+            client.SubscriptionAutoRenewEnabled = true;
+            client.RenewalCancellationRequestedAt = null;
+            client.RenewalCancellationRequestedByUserId = null;
+            client.RenewalCancelledAt = null;
+            client.RenewalCancelledByUserId = null;
+            client.Status = "New";
+            client.BillingStatus = "Pending";
+            client.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task<Client> EnsureBillingScenarioClientAsync(
+        StudioCRMDbContext context,
+        PasswordHasher<User> passwordHasher,
+        string email,
+        string firstName,
+        string lastName,
+        string notes,
+        int trainerId,
+        int locationId,
+        int ownerUserId,
+        string status = "Active",
+        string billingStatus = "Paid")
+    {
+        var user = await EnsureUserAsync(
+            context,
+            passwordHasher,
+            email,
+            firstName,
+            lastName,
+            ClientPassword);
+
+        await EnsureUserRoleAsync(context, user.Id, "Client");
+
+        var client = await context.Clients.FirstOrDefaultAsync(c => c.Email == email);
+
+        if (client is null)
+        {
+            client = new Client
+            {
+                UserId = user.Id,
+                Email = email,
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = ownerUserId
+            };
+
+            await context.Clients.AddAsync(client);
+        }
+
+        client.UserId = user.Id;
+        client.FirstName = firstName;
+        client.LastName = lastName;
+        client.PhoneNumber = "600200" + client.Id.ToString("000");
+        client.TrainerId = trainerId;
+        client.LocationId = locationId;
+        client.Goal = "Test billing/subskrypcji";
+        client.Notes = notes;
+        client.Status = status;
+        client.BillingStatus = billingStatus;
+        client.ProgressPercent = status == "Active" ? 40 : 0;
+        client.TrainingStartDate = DateTime.UtcNow.Date.AddDays(-20);
+        client.GoogleDriveFolderId = $"seed-folder-{email}";
+        client.TrainingPlanFileId = $"seed-plan-{email}";
+        client.TrainingPlanFileName = "Plan treningowy - test billing";
+        client.TrainingPlanUrl = "https://drive.google.com/";
+        client.SubscriptionAutoRenewEnabled = true;
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await context.SaveChangesAsync();
+
+        return client;
+    }
+
+    private static async Task<ClientPackage> CreateBillingScenarioCycleAsync(
+        StudioCRMDbContext context,
+        Client client,
+        string packageName,
+        PaymentStatus paymentStatus,
+        decimal amountPaid,
+        int ownerUserId)
+    {
+        var package = await context.Packages.FirstAsync(p => p.Name == packageName);
+        var now = DateTime.UtcNow;
+        var expectedUnitPrice = package.SessionsLimit > 0
+            ? decimal.Round(package.Price / package.SessionsLimit, 2)
+            : package.Price;
+
+        var cycle = new ClientPackage
+        {
+            ClientId = client.Id,
+            PackageId = package.Id,
+            Name = package.Name,
+            TotalSessions = package.SessionsLimit,
+            SessionsPerWeek = package.SessionsPerWeek,
+            UsedSessions = 0,
+            TotalPrice = package.Price,
+            OriginalPrice = package.Price,
+            BalanceApplied = 0,
+            AmountPaid = amountPaid,
+            ExpectedUnitPrice = expectedUnitPrice,
+            Currency = package.Currency,
+            LocationId = package.LocationId ?? client.LocationId,
+            ExpectedBillingType = package.BillingType,
+            PaymentStatus = paymentStatus,
+            PurchaseDate = now.Date.AddDays(-14),
+            ValidUntil = now.Date.AddDays(31),
+            PaidAt = paymentStatus == PaymentStatus.Paid ? now.Date.AddDays(-13) : null,
+            PaymentDueDate = paymentStatus == PaymentStatus.Paid ? null : now.Date.AddDays(7),
+            ActivatedAt = now.Date.AddDays(-14),
+            ActivatedByUserId = ownerUserId,
+            ActivationMode = ClientPackageActivationMode.Immediately,
+            RenewalSource = "SeedScenario",
+            IsActive = true
+        };
+
+        await context.ClientPackages.AddAsync(cycle);
+        await context.SaveChangesAsync();
+
+        client.ActivePackageId = package.Id;
+        client.Status = "Active";
+        client.BillingStatus = paymentStatus.ToString();
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await context.SaveChangesAsync();
+
+        return cycle;
+    }
+
+    private static async Task CreateBillingScenarioPaymentAsync(
+        StudioCRMDbContext context,
+        Client client,
+        ClientPackage cycle,
+        decimal amount,
+        ClientPaymentStatus status,
+        ClientPaymentSource source,
+        int? userId,
+        string note)
+    {
+        await context.ClientPayments.AddAsync(new ClientPayment
+        {
+            ClientId = client.Id,
+            ClientPackageId = cycle.Id,
+            Amount = amount,
+            Currency = cycle.Currency,
+            Method = PaymentMethod.BankTransfer,
+            Status = status,
+            Source = source,
+            PaymentDate = DateTime.UtcNow.Date.AddDays(-3),
+            CreatedAt = DateTime.UtcNow,
+            ConfirmedAt = status == ClientPaymentStatus.Confirmed ? DateTime.UtcNow.Date.AddDays(-2) : null,
+            CreatedByUserId = userId,
+            ConfirmedByUserId = status == ClientPaymentStatus.Confirmed ? userId : null,
+            Note = note
+        });
+    }
+
+    private static async Task CreateCountedBillingSessionsAsync(
+        StudioCRMDbContext context,
+        Client client,
+        int trainerId,
+        int locationId,
+        ClientPackage cycle,
+        int count,
+        SessionBillingType actualBillingType)
+    {
+        for (var i = 0; i < count; i++)
+        {
+            var start = DateTime.UtcNow.Date.AddDays(-count + i).AddHours(17);
+            var session = await CreateBillingSessionAsync(
+                context,
+                client,
+                trainerId,
+                locationId,
+                $"{BillingSeedNotePrefix} Policzona sesja {i + 1}/{count}",
+                start,
+                "Completed");
+
+            var actualUnitPrice = ResolveSeedActualUnitPrice(cycle, actualBillingType);
+            var balanceDifference = cycle.ExpectedUnitPrice - actualUnitPrice;
+
+            await context.SessionParticipants.AddAsync(new SessionParticipant
+            {
+                SessionId = session.Id,
+                ClientId = client.Id,
+                PackageId = cycle.PackageId,
+                ClientPackageId = cycle.Id,
+                AttendanceStatus = "Present",
+                CountsAgainstPackage = true,
+                SessionsCharged = 1,
+                PlannedBillingType = cycle.ExpectedBillingType,
+                ActualBillingType = actualBillingType,
+                ExpectedUnitPrice = cycle.ExpectedUnitPrice,
+                ActualUnitPrice = actualUnitPrice,
+                BalanceDifference = balanceDifference,
+                IsCountedFromPackage = true,
+                Note = $"{BillingSeedNotePrefix} Użycie cyklu subskrypcji.",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+
+            if (balanceDifference != 0)
+            {
+                await context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+                {
+                    ClientId = client.Id,
+                    ClientPackageId = cycle.Id,
+                    SessionId = session.Id,
+                    Amount = balanceDifference,
+                    Type = BalanceTransactionType.PackageAdjustment,
+                    Description = $"{BillingSeedNotePrefix} Korekta za sesję {actualBillingType} zamiast {cycle.ExpectedBillingType}.",
+                    CreatedAt = DateTime.UtcNow
+                });
+            }
+        }
+
+        cycle.UsedSessions = count;
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task CreatePlannedBillingSessionAsync(
+        StudioCRMDbContext context,
+        Client client,
+        int trainerId,
+        int locationId,
+        ClientPackage cycle,
+        string title)
+    {
+        var session = await CreateBillingSessionAsync(
+            context,
+            client,
+            trainerId,
+            locationId,
+            $"{BillingSeedNotePrefix} {title}",
+            DateTime.UtcNow.Date.AddDays(1).AddHours(17),
+            "Planned");
+
+        await context.SessionParticipants.AddAsync(new SessionParticipant
+        {
+            SessionId = session.Id,
+            ClientId = client.Id,
+            PackageId = cycle.PackageId,
+            ClientPackageId = null,
+            AttendanceStatus = "Planned",
+            CountsAgainstPackage = false,
+            SessionsCharged = 0,
+            PlannedBillingType = cycle.ExpectedBillingType,
+            Note = $"{BillingSeedNotePrefix} Użyj tego participantId do testu auto-renew.",
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task<Session> CreateBillingSessionAsync(
+        StudioCRMDbContext context,
+        Client client,
+        int trainerId,
+        int locationId,
+        string note,
+        DateTime start,
+        string status)
+    {
+        var session = new Session
+        {
+            Title = $"{client.FirstName} {client.LastName}",
+            Note = note,
+            StartAt = start,
+            EndAt = start.AddHours(1),
+            TrainerId = trainerId,
+            LocationId = locationId,
+            StudioRoom = "Sala testowa",
+            Status = status,
+            PlannedSessionType = "BillingScenario",
+            ActualSessionType = status == "Completed" ? "BillingScenario" : null,
+            ActualParticipantsCount = status == "Completed" ? 1 : null,
+            CompletedAt = status == "Completed" ? start.AddHours(1) : null,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = 1
+        };
+
+        await context.Sessions.AddAsync(session);
+        await context.SaveChangesAsync();
+
+        return session;
     }
 
     private static async Task SeedSessionsAsync(StudioCRMDbContext context)
@@ -830,7 +1402,7 @@ public static class DataSeeder
 
         if (!exists)
         {
-            await context.UserRoles.AddAsync(new UserRole
+            await context.UserRoles.AddAsync(new UserRoleEntity
             {
                 UserId = userId,
                 RoleId = role.Id
@@ -838,6 +1410,54 @@ public static class DataSeeder
 
             await context.SaveChangesAsync();
         }
+    }
+
+    private static SessionBillingType InferBillingType(string packageName)
+    {
+        if (packageName.Contains("2:1", StringComparison.OrdinalIgnoreCase))
+            return SessionBillingType.TwoToOne;
+
+        if (packageName.Contains("3:1", StringComparison.OrdinalIgnoreCase))
+            return SessionBillingType.ThreeToOne;
+
+        if (packageName.Contains("4:1", StringComparison.OrdinalIgnoreCase))
+            return SessionBillingType.FourToOne;
+
+        return SessionBillingType.OneToOne;
+    }
+
+    private static int InferSessionsPerWeek(int sessionsLimit)
+    {
+        return sessionsLimit switch
+        {
+            >= 12 => 3,
+            >= 8 => 2,
+            _ => 1
+        };
+    }
+
+    private static decimal ResolveSeedActualUnitPrice(
+        ClientPackage cycle,
+        SessionBillingType actualBillingType)
+    {
+        if (actualBillingType == cycle.ExpectedBillingType)
+            return cycle.ExpectedUnitPrice;
+
+        var totalSessions = cycle.TotalSessions;
+        var totalPrice = (totalSessions, actualBillingType) switch
+        {
+            (8, SessionBillingType.OneToOne) => 1120m,
+            (8, SessionBillingType.TwoToOne) => 760m,
+            (8, SessionBillingType.ThreeToOne) => 640m,
+            (8, SessionBillingType.FourToOne) => 560m,
+            (12, SessionBillingType.OneToOne) => 1560m,
+            (12, SessionBillingType.TwoToOne) => 1080m,
+            (12, SessionBillingType.ThreeToOne) => 900m,
+            (12, SessionBillingType.FourToOne) => 780m,
+            _ => cycle.OriginalPrice
+        };
+
+        return decimal.Round(totalPrice / Math.Max(1, totalSessions), 2);
     }
 
     private static string RandomPastSessionStatus()

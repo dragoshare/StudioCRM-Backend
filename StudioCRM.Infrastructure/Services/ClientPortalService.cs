@@ -1,6 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.ClientPortal;
+using StudioCRM.Application.DTOs.Profiles;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
@@ -24,9 +27,12 @@ public class ClientPortalService : IClientPortalService
             .Select(c => new ClientPortalMeDto
             {
                 ClientId = c.Id,
+                FirstName = c.FirstName,
+                LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
                 PhoneNumber = c.PhoneNumber,
+                AvatarUrl = c.AvatarUrl,
                 Goal = c.Goal,
                 ProgressPercent = c.ProgressPercent,
                 Status = c.Status,
@@ -37,6 +43,70 @@ public class ClientPortalService : IClientPortalService
                     : null
             })
             .FirstOrDefaultAsync();
+    }
+
+    public async Task<ClientPortalMeDto?> UpdateMeAsync(UpdateClientPortalProfileRequest request)
+    {
+        var client = await GetCurrentClientQuery()
+            .Include(c => c.User)
+            .FirstOrDefaultAsync();
+
+        if (client is null)
+            return null;
+
+        if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+            throw new InvalidOperationException("First name and last name are required.");
+
+        client.FirstName = request.FirstName.Trim();
+        client.LastName = request.LastName.Trim();
+        client.PhoneNumber = request.PhoneNumber;
+        client.AvatarUrl = request.AvatarUrl;
+        client.UpdatedAt = DateTime.UtcNow;
+
+        if (client.User is not null)
+        {
+            client.User.FirstName = client.FirstName;
+            client.User.LastName = client.LastName;
+            client.User.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return await GetMeAsync();
+    }
+
+    public async Task RequestEmailChangeAsync(RequestEmailChangeDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.RequestedEmail))
+            throw new InvalidOperationException("Requested email is required.");
+
+        var client = await GetCurrentClientQuery().FirstOrDefaultAsync();
+        if (client is null)
+            throw new InvalidOperationException("Client profile not found for current user.");
+
+        var requestedEmail = request.RequestedEmail.Trim();
+        var emailAlreadyExists = await _context.Users.AnyAsync(u => u.Email == requestedEmail);
+        if (emailAlreadyExists)
+            throw new InvalidOperationException("User with this email already exists.");
+
+        var existingPending = await _context.ClientEmailChangeRequests.AnyAsync(r =>
+            r.ClientId == client.Id &&
+            r.Status == "Pending");
+
+        if (existingPending)
+            throw new InvalidOperationException("There is already a pending email change request.");
+
+        await _context.ClientEmailChangeRequests.AddAsync(new ClientEmailChangeRequest
+        {
+            ClientId = client.Id,
+            CurrentEmail = client.Email,
+            RequestedEmail = requestedEmail,
+            Status = "Pending",
+            CreatedAt = DateTime.UtcNow,
+            CreatedByUserId = _currentUser.UserId
+        });
+
+        await _context.SaveChangesAsync();
     }
 
     public async Task<ClientPortalDashboardDto?> GetDashboardAsync()
@@ -217,6 +287,7 @@ public class ClientPortalService : IClientPortalService
 
         var activePackage = await _context.ClientPackages
             .Include(cp => cp.Package)
+            .Include(cp => cp.Location)
             .Where(cp => cp.ClientId == client.Id && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
@@ -234,7 +305,9 @@ public class ClientPortalService : IClientPortalService
             })
             .ToListAsync();
 
-        var currentBalance = balanceTransactions.Sum(t => t.Amount);
+        var currentBalance = balanceTransactions
+            .Where(t => t.Type != BalanceTransactionType.PaymentCredit.ToString())
+            .Sum(t => t.Amount);
 
         if (activePackage is null)
         {
@@ -297,11 +370,14 @@ public class ClientPortalService : IClientPortalService
                 PackageId = activePackage.PackageId,
                 PackageName = activePackage.Name,
                 TotalSessions = activePackage.TotalSessions,
+                SessionsPerWeek = activePackage.SessionsPerWeek,
                 UsedSessions = usedSessions,
                 RemainingSessions = remainingSessions,
                 PackagePrice = activePackage.TotalPrice,
                 ExpectedUnitPrice = activePackage.ExpectedUnitPrice,
                 ExpectedBillingType = activePackage.ExpectedBillingType.ToString(),
+                LocationId = activePackage.LocationId,
+                LocationName = activePackage.Location != null ? activePackage.Location.Name : null,
                 PaymentStatus = activePackage.PaymentStatus.ToString(),
                 IsPaid = activePackage.PaymentStatus.ToString() == "Paid",
                 IsOverdue =
@@ -317,24 +393,34 @@ public class ClientPortalService : IClientPortalService
     public async Task<ClientPortalPaymentDto?> GetPaymentAsync()
     {
         var client = await GetCurrentClientQuery()
-            .Include(c => c.ActivePackage)
             .FirstOrDefaultAsync();
 
         if (client is null)
             return null;
 
-        var amountDue = client.BillingStatus == "Paid"
-            ? 0
-            : client.ActivePackage?.Price ?? 0;
+        var activePackage = await _context.ClientPackages
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
+
+        if (activePackage is null)
+        {
+            return new ClientPortalPaymentDto
+            {
+                AmountDue = 0,
+                Currency = "PLN",
+                BillingStatus = "NoActivePackage"
+            };
+        }
 
         return new ClientPortalPaymentDto
         {
-            AmountDue = amountDue,
-            Currency = client.ActivePackage?.Currency ?? "PLN",
-            BillingStatus = client.BillingStatus,
-            PaymentDueDate = client.BillingStatus == "Paid"
+            AmountDue = Math.Max(0, activePackage.TotalPrice - activePackage.AmountPaid),
+            Currency = activePackage.Currency,
+            BillingStatus = activePackage.PaymentStatus.ToString(),
+            PaymentDueDate = activePackage.PaymentStatus.ToString() == "Paid"
                 ? null
-                : DateTime.UtcNow.Date.AddDays(7)
+                : activePackage.PaymentDueDate
         };
     }
 
@@ -403,10 +489,10 @@ public class ClientPortalService : IClientPortalService
     {
         var client = await _context.Clients
             .Include(c => c.Trainer)
-                .ThenInclude(t => t.User)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(c => c.UserId == userId);
 
-        if (client == null || client.Trainer == null)
+        if (client?.Trainer?.User is null)
             return null;
 
         var trainer = client.Trainer;

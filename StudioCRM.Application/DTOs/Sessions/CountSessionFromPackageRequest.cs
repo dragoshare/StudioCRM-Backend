@@ -10,5 +10,5 @@ public class CountSessionFromPackageRequest
 
     public SessionBillingType ActualBillingType { get; set; }
 
-    public decimal ActualUnitPrice { get; set; }
+    public decimal? ActualUnitPrice { get; set; }
 }
