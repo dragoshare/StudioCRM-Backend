@@ -302,25 +302,31 @@ public static class DataSeeder
 
             await EnsureUserRoleAsync(context, user.Id, "Trainer");
 
-            var trainer = await context.Trainers.FirstOrDefaultAsync(t => t.UserId == user.Id);
+            var trainer = await context.Trainers
+                .IgnoreQueryFilters()
+                .FirstOrDefaultAsync(t => t.UserId == user.Id);
 
             if (trainer is null)
             {
                 trainer = new Trainer
                 {
                     UserId = user.Id,
-                    Bio = seed.Bio,
-                    Phone = seed.Phone,
-                    Status = "Active",
-                    ExperienceYears = seed.Experience,
                     CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow,
                     CreatedBy = 1
                 };
 
                 await context.Trainers.AddAsync(trainer);
-                await context.SaveChangesAsync();
             }
+
+            trainer.Bio = seed.Bio;
+            trainer.Phone = seed.Phone;
+            trainer.Status = "Active";
+            trainer.ExperienceYears = seed.Experience;
+            trainer.IsDeleted = false;
+            trainer.DeletedAt = null;
+            trainer.UpdatedAt = DateTime.UtcNow;
+
+            await context.SaveChangesAsync();
 
             foreach (var locationName in seed.Locations)
             {
