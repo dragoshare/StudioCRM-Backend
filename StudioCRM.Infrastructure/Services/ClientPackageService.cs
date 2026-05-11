@@ -53,12 +53,13 @@ public class ClientPackageService : IClientPackageService
             ? package.SessionsPerWeek
             : InferSessionsPerWeek(totalSessions);
 
-        var activePackages = await _context.ClientPackages
-            .Where(cp => cp.ClientId == request.ClientId && cp.IsActive)
-            .ToListAsync();
+        var hasActivePackage = await _context.ClientPackages
+            .AnyAsync(cp => cp.ClientId == request.ClientId && cp.IsActive);
 
-        foreach (var activePackage in activePackages)
-            activePackage.IsActive = false;
+        if (hasActivePackage)
+            throw new InvalidOperationException("Client already has an active subscription cycle. Use subscription next-package endpoint to schedule package changes.");
+
+        var now = DateTime.UtcNow;
 
         var clientPackage = new ClientPackage
         {
@@ -76,12 +77,12 @@ public class ClientPackageService : IClientPackageService
             LocationId = package.LocationId ?? client.LocationId,
             ExpectedBillingType = request.ExpectedBillingType ?? package.BillingType,
             PaymentStatus = PaymentStatus.Unpaid,
-            PurchaseDate = request.PurchaseDate,
-            ValidUntil = request.ValidUntil ?? DateTime.UtcNow.Date.AddDays(45),
-            PaymentDueDate = request.PaymentDueDate,
+            PurchaseDate = NormalizeDateTime(request.PurchaseDate, now),
+            ValidUntil = NormalizeNullableDateTime(request.ValidUntil) ?? now.Date.AddDays(45),
+            PaymentDueDate = NormalizeNullableDateTime(request.PaymentDueDate),
             ActivationMode = ClientPackageActivationMode.Immediately,
             RenewalSource = "Manual",
-            ActivatedAt = DateTime.UtcNow,
+            ActivatedAt = now,
             ActivatedByUserId = _currentUser.UserId,
             IsActive = true
         };
@@ -89,7 +90,7 @@ public class ClientPackageService : IClientPackageService
         _context.ClientPackages.Add(clientPackage);
         client.ActivePackageId = package.Id;
         client.BillingStatus = "Pending";
-        client.UpdatedAt = DateTime.UtcNow;
+        client.UpdatedAt = now;
 
         await _context.SaveChangesAsync();
 
@@ -147,5 +148,31 @@ public class ClientPackageService : IClientPackageService
     private static int InferSessionsPerWeek(int totalSessions)
     {
         return Math.Max(1, (int)Math.Ceiling(totalSessions / 4m));
+    }
+
+    private static DateTime NormalizeDateTime(DateTime value, DateTime fallback)
+    {
+        if (value == default)
+            return fallback;
+
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value, DateTimeKind.Utc)
+        };
+    }
+
+    private static DateTime? NormalizeNullableDateTime(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 }

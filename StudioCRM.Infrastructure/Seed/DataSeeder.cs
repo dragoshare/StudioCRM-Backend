@@ -352,43 +352,13 @@ public static class DataSeeder
 
     private static async Task SeedTrainerRatesAsync(StudioCRMDbContext context)
     {
-        var trainerRates = new Dictionary<string, Dictionary<string, decimal>>
+        var trainerRates = new Dictionary<string, decimal>
         {
-            ["trainer@studiocrm.local"] = new()
-            {
-                ["OneToOne"] = 70m,
-                ["TwoToOne"] = 85m,
-                ["ThreeToOne"] = 95m,
-                ["FourToOne"] = 105m
-            },
-            ["sgorzula@bsworkout.pl"] = new()
-            {
-                ["OneToOne"] = 70m,
-                ["TwoToOne"] = 85m,
-                ["ThreeToOne"] = 95m,
-                ["FourToOne"] = 105m
-            },
-            ["adam.trener@studiocrm.local"] = new()
-            {
-                ["OneToOne"] = 80m,
-                ["TwoToOne"] = 95m,
-                ["ThreeToOne"] = 105m,
-                ["FourToOne"] = 115m
-            },
-            ["karolina.trener@studiocrm.local"] = new()
-            {
-                ["OneToOne"] = 60m,
-                ["TwoToOne"] = 75m,
-                ["ThreeToOne"] = 85m,
-                ["FourToOne"] = 95m
-            },
-            ["bartek.trener@studiocrm.local"] = new()
-            {
-                ["OneToOne"] = 75m,
-                ["TwoToOne"] = 90m,
-                ["ThreeToOne"] = 100m,
-                ["FourToOne"] = 110m
-            }
+            ["trainer@studiocrm.local"] = 70m,
+            ["sgorzula@bsworkout.pl"] = 70m,
+            ["adam.trener@studiocrm.local"] = 80m,
+            ["karolina.trener@studiocrm.local"] = 60m,
+            ["bartek.trener@studiocrm.local"] = 75m
         };
 
         foreach (var trainerSeed in trainerRates)
@@ -400,28 +370,25 @@ public static class DataSeeder
             if (trainer is null)
                 continue;
 
-            foreach (var rateSeed in trainerSeed.Value)
+            var exists = await context.TrainerRates.AnyAsync(r =>
+                r.TrainerId == trainer.Id &&
+                r.SessionType == "Hourly" &&
+                r.IsActive);
+
+            if (exists)
+                continue;
+
+            await context.TrainerRates.AddAsync(new TrainerRate
             {
-                var exists = await context.TrainerRates.AnyAsync(r =>
-                    r.TrainerId == trainer.Id &&
-                    r.SessionType == rateSeed.Key &&
-                    r.IsActive);
-
-                if (exists)
-                    continue;
-
-                await context.TrainerRates.AddAsync(new TrainerRate
-                {
-                    TrainerId = trainer.Id,
-                    SessionType = rateSeed.Key,
-                    Rate = rateSeed.Value,
-                    ValidFrom = DateTime.UtcNow.AddMonths(-6),
-                    ValidTo = null,
-                    IsActive = true,
-                    CreatedAt = DateTime.UtcNow,
-                    UpdatedAt = DateTime.UtcNow
-                });
-            }
+                TrainerId = trainer.Id,
+                SessionType = "Hourly",
+                Rate = trainerSeed.Value,
+                ValidFrom = DateTime.UtcNow.AddMonths(-6),
+                ValidTo = null,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
         }
 
         await context.SaveChangesAsync();

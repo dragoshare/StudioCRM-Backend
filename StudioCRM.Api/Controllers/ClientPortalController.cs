@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.ClientPortal;
-using StudioCRM.Application.DTOs.Packages;
 using StudioCRM.Application.DTOs.Profiles;
 using StudioCRM.Application.DTOs.Subscriptions;
 using StudioCRM.Application.DTOs.TrainingPlans;
@@ -90,17 +89,6 @@ public class ClientPortalController : ControllerBase
         return Ok(await _clientPortalService.GetScheduleAsync());
     }
 
-    [HttpGet("package")]
-    public async Task<ActionResult<ClientPortalPackageDto>> GetPackage()
-    {
-        var result = await _clientPortalService.GetPackageAsync();
-
-        if (result is null)
-            return NotFound();
-
-        return Ok(result);
-    }
-
     [HttpGet("subscription")]
     public async Task<ActionResult<SubscriptionDto>> GetSubscription()
     {
@@ -136,28 +124,6 @@ public class ClientPortalController : ControllerBase
             Ok(await _subscriptionService.GetCurrentClientTrainingPlanAsync()));
     }
 
-    [HttpPost("package-renewals")]
-    public async Task<ActionResult<ClientPackagePurchaseResultDto>> RequestPackageRenewal(
-        RequestClientPackageRenewalDto request)
-    {
-        return await HandleAsync<ClientPackagePurchaseResultDto>(async () =>
-        {
-            var result = await _clientPaymentService.RequestPackageRenewalAsClientAsync(request);
-            return CreatedAtAction(nameof(GetBilling), new { id = result.ClientPackageId }, result);
-        });
-    }
-
-    [HttpGet("payments")]
-    public async Task<ActionResult<ClientPortalPaymentDto>> GetPayments()
-    {
-        var result = await _clientPortalService.GetPaymentAsync();
-
-        if (result is null)
-            return NotFound();
-
-        return Ok(result);
-    }
-
     [HttpGet("billing")]
     public async Task<ActionResult<ClientBillingSummaryDto>> GetBilling()
     {
@@ -173,30 +139,6 @@ public class ClientPortalController : ControllerBase
             var payment = await _clientPaymentService.RequestPaymentAsClientAsync(request);
             return CreatedAtAction(nameof(GetBilling), new { id = payment.Id }, payment);
         });
-    }
-
-    [HttpGet("trainer")]
-    public async Task<ActionResult<ClientPortalTrainerDto>> GetTrainer()
-    {
-        var result = await _clientPortalService.GetTrainerAsync();
-
-        if (result is null)
-            return NotFound();
-
-        return Ok(result);
-    }
-
-    [HttpGet("package-settlement")]
-    public async Task<ActionResult<ClientPackageSettlementDto>> GetPackageSettlement()
-    {
-        var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-
-        if (string.IsNullOrEmpty(userId))
-            return Unauthorized();
-
-        var result = await _clientPortalService.GetPackageSettlementAsync(userId);
-
-        return Ok(result);
     }
 
     [HttpGet("trainer-contact")]

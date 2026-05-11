@@ -7,7 +7,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/operational-alerts")]
-[Authorize(Roles = "Owner,Trainer")]
+[Authorize(Roles = "Owner")]
 public class OperationalAlertsController : ControllerBase
 {
     private readonly IOperationalAlertService _alertService;

@@ -7,7 +7,7 @@ public class TrainerRate
     public int TrainerId { get; set; }
 
     public string SessionType { get; set; } = string.Empty;
-    // OneToOne, TwoToOne, ThreeToOne, FourToOne
+    // Hourly
 
     public decimal Rate { get; set; }
 

@@ -13,13 +13,6 @@ public interface IClientPortalService
 
     Task<List<ClientPortalSessionDto>> GetScheduleAsync();
 
-    Task<ClientPortalPackageDto?> GetPackageAsync();
-
-    Task<ClientPortalPaymentDto?> GetPaymentAsync();
-
-    Task<ClientPortalTrainerDto?> GetTrainerAsync();
-    Task<ClientPackageSettlementDto> GetPackageSettlementAsync(string userId);
-
     Task<ClientTrainerContactDto?> GetTrainerContactAsync(int userId);
     Task<ClientOwnerContactDto?> GetOwnerContactAsync();
 }

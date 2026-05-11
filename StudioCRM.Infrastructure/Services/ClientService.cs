@@ -37,13 +37,6 @@ public class ClientService : IClientService
                 throw new InvalidOperationException("Trainer does not exist.");
         }
 
-        if (request.ActivePackageId.HasValue)
-        {
-            var packageExists = await _context.Packages.AnyAsync(p => p.Id == request.ActivePackageId.Value);
-            if (!packageExists)
-                throw new InvalidOperationException("Package does not exist.");
-        }
-
         var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
@@ -68,7 +61,6 @@ public class ClientService : IClientService
         var client = new Client
         {
             TrainerId = request.TrainerId,
-            ActivePackageId = request.ActivePackageId,
             LocationId = request.LocationId,
             FirstName = request.FirstName,
             LastName = request.LastName,
@@ -79,7 +71,7 @@ public class ClientService : IClientService
             ProgressPercent = request.ProgressPercent,
             BillingStatus = request.BillingStatus ?? "Pending",
             Status = request.Status ?? "New",
-            NextSessionAt = request.NextSessionAt,
+            NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = request.CreatedBy
@@ -168,13 +160,6 @@ public class ClientService : IClientService
                 throw new InvalidOperationException("Trainer does not exist.");
         }
 
-        if (request.ActivePackageId.HasValue)
-        {
-            var packageExists = await _context.Packages.AnyAsync(p => p.Id == request.ActivePackageId.Value);
-            if (!packageExists)
-                throw new InvalidOperationException("Package does not exist.");
-        }
-
         var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
@@ -201,7 +186,6 @@ public class ClientService : IClientService
         }
 
         client.TrainerId = request.TrainerId;
-        client.ActivePackageId = request.ActivePackageId;
         client.LocationId = request.LocationId;
         client.FirstName = request.FirstName;
         client.LastName = request.LastName;
@@ -212,7 +196,7 @@ public class ClientService : IClientService
         client.ProgressPercent = request.ProgressPercent;
         client.BillingStatus = request.BillingStatus;
         client.Status = request.Status;
-        client.NextSessionAt = request.NextSessionAt;
+        client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
         client.UpdatedAt = DateTime.UtcNow;
 
         if (client.User is not null)
@@ -514,5 +498,18 @@ public class ClientService : IClientService
         var query = ApplyAccessControl(BuildClientQuery());
 
         return await query.FirstAsync(c => c.Id == id);
+    }
+
+    private static DateTime? NormalizeNullableDateTime(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 }

@@ -155,7 +155,7 @@ public class TrainerPortalService : ITrainerPortalService
         client.BillingStatus = request.BillingStatus;
         client.Status = request.Status;
         client.LocationId = request.LocationId;
-        client.NextSessionAt = request.NextSessionAt;
+        client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
         client.UpdatedAt = DateTime.UtcNow;
 
         if (client.User is not null)
@@ -480,6 +480,19 @@ public class TrainerPortalService : ITrainerPortalService
         }
 
         return TimeZoneInfo.Utc;
+    }
+
+    private static DateTime? NormalizeNullableDateTime(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 
     private IQueryable<ClientDto> BuildTrainerClientQuery(int trainerId)

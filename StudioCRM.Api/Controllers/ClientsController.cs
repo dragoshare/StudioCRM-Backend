@@ -66,13 +66,6 @@ public class ClientsController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
-    [HttpPut("{id:int}")]
-    public async Task<ActionResult<ClientDto>> Update(int id, UpdateClientDto request)
-    {
-        var result = await _clientService.UpdateAsync(id, request);
-        return result is null ? NotFound() : Ok(result);
-    }
-
     [HttpPost("{id:int}/deactivate")]
     public async Task<IActionResult> Deactivate(int id)
     {
@@ -85,12 +78,6 @@ public class ClientsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-    }
-
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
-    {
-        return await Deactivate(id);
     }
 
     [HttpPost("{id:int}/restore")]

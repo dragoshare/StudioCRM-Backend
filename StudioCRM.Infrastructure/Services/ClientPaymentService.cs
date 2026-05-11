@@ -66,7 +66,7 @@ public class ClientPaymentService : IClientPaymentService
             Method = request.Method,
             Status = ClientPaymentStatus.PendingConfirmation,
             Source = ClientPaymentSource.ClientRequest,
-            PaymentDate = request.PaymentDate ?? DateTime.UtcNow,
+            PaymentDate = NormalizeNullableDateTime(request.PaymentDate) ?? DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             CreatedByUserId = _currentUser.UserId,
             Note = request.Note
@@ -80,84 +80,6 @@ public class ClientPaymentService : IClientPaymentService
         await _context.SaveChangesAsync();
 
         return await GetPaymentDtoAsync(payment.Id);
-    }
-
-    public async Task<ClientPackagePurchaseResultDto> RequestPackageRenewalAsClientAsync(RequestClientPackageRenewalDto request)
-    {
-        var client = await GetCurrentClientAsync();
-
-        var activePackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
-            .OrderByDescending(cp => cp.PurchaseDate)
-            .FirstOrDefaultAsync();
-
-        if (activePackage is null)
-            throw new InvalidOperationException("Client does not have an active package to renew.");
-
-        if (activePackage.TotalSessions <= 0)
-            throw new InvalidOperationException("Active package sessions limit must be greater than zero.");
-
-        var paymentAmount = request.Amount.HasValue && request.Amount.Value > 0
-            ? NormalizeAmount(request.Amount.Value)
-            : activePackage.TotalPrice;
-
-        var clientPackage = new ClientPackage
-        {
-            ClientId = client.Id,
-            PackageId = activePackage.PackageId,
-            Name = activePackage.Name,
-            TotalSessions = activePackage.TotalSessions,
-            SessionsPerWeek = activePackage.SessionsPerWeek,
-            UsedSessions = 0,
-            TotalPrice = activePackage.TotalPrice,
-            OriginalPrice = activePackage.OriginalPrice > 0 ? activePackage.OriginalPrice : activePackage.TotalPrice,
-            BalanceApplied = 0,
-            AmountPaid = 0,
-            ExpectedUnitPrice = activePackage.ExpectedUnitPrice,
-            Currency = activePackage.Currency,
-            LocationId = activePackage.LocationId ?? client.LocationId,
-            ExpectedBillingType = activePackage.ExpectedBillingType,
-            PaymentStatus = PaymentStatus.PendingConfirmation,
-            PurchaseDate = DateTime.UtcNow,
-            ValidUntil = activePackage.ValidUntil,
-            PaymentDueDate = DateTime.UtcNow.Date.AddDays(7),
-            ActivationMode = ClientPackageActivationMode.AfterCurrentPackage,
-            RenewalSource = "ClientRenewalRequest",
-            RequestedByUserId = _currentUser.UserId,
-            IsActive = false
-        };
-
-        await _context.ClientPackages.AddAsync(clientPackage);
-        await _context.SaveChangesAsync();
-
-        var payment = new ClientPayment
-        {
-            ClientId = client.Id,
-            ClientPackageId = clientPackage.Id,
-            Amount = paymentAmount,
-            Currency = clientPackage.Currency,
-            Method = request.Method,
-            Status = ClientPaymentStatus.PendingConfirmation,
-            Source = ClientPaymentSource.ClientRequest,
-            PaymentDate = request.PaymentDate ?? DateTime.UtcNow,
-            CreatedAt = DateTime.UtcNow,
-            CreatedByUserId = _currentUser.UserId,
-            Note = request.Note
-        };
-
-        await _context.ClientPayments.AddAsync(payment);
-        await _context.SaveChangesAsync();
-
-        return new ClientPackagePurchaseResultDto
-        {
-            ClientPackageId = clientPackage.Id,
-            PaymentId = payment.Id,
-            PackageName = clientPackage.Name,
-            PackagePrice = clientPackage.TotalPrice,
-            PaymentAmount = payment.Amount,
-            PaymentStatus = payment.Status.ToString(),
-            ActivationMode = clientPackage.ActivationMode.ToString()
-        };
     }
 
     public async Task<ClientPaymentDto> CreatePaymentAsStaffAsync(CreateClientPaymentRequest request)
@@ -177,7 +99,7 @@ public class ClientPaymentService : IClientPaymentService
             Method = request.Method,
             Status = ClientPaymentStatus.Confirmed,
             Source = ClientPaymentSource.StaffEntry,
-            PaymentDate = request.PaymentDate ?? DateTime.UtcNow,
+            PaymentDate = NormalizeNullableDateTime(request.PaymentDate) ?? DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             ConfirmedAt = DateTime.UtcNow,
             CreatedByUserId = _currentUser.UserId,
@@ -511,5 +433,18 @@ public class ClientPaymentService : IClientPaymentService
             throw new InvalidOperationException("Payment amount must be greater than zero.");
 
         return decimal.Round(amount, 2);
+    }
+
+    private static DateTime? NormalizeNullableDateTime(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 }

@@ -55,32 +55,18 @@ public class TrainerRateService : ITrainerRateService
             oldRate.UpdatedAt = now;
         }
 
-        var ratesToCreate = request.HourlyRate.HasValue
-            ? new List<UpsertTrainerRateDto>
-            {
-                new()
-                {
-                    SessionType = "Hourly",
-                    Rate = request.HourlyRate.Value
-                }
-            }
-            : request.Rates;
-
-        foreach (var rate in ratesToCreate)
+        var newRate = new TrainerRate
         {
-            var newRate = new TrainerRate
-            {
-                TrainerId = trainerId,
-                SessionType = rate.SessionType,
-                Rate = rate.Rate,
-                ValidFrom = now,
-                IsActive = true,
-                CreatedAt = now,
-                UpdatedAt = now
-            };
+            TrainerId = trainerId,
+            SessionType = "Hourly",
+            Rate = request.HourlyRate!.Value,
+            ValidFrom = now,
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
 
-            await _context.TrainerRates.AddAsync(newRate);
-        }
+        await _context.TrainerRates.AddAsync(newRate);
 
         await _context.SaveChangesAsync();
 
@@ -89,40 +75,10 @@ public class TrainerRateService : ITrainerRateService
 
     private static void ValidateRates(UpdateTrainerRatesDto request)
     {
-        var allowedTypes = new[]
-        {
-            "Hourly",
-            "OneToOne",
-            "TwoToOne",
-            "ThreeToOne",
-            "FourToOne"
-        };
-
-        if (!request.HourlyRate.HasValue && (request.Rates is null || request.Rates.Count == 0))
-            throw new InvalidOperationException("At least one rate is required.");
+        if (!request.HourlyRate.HasValue)
+            throw new InvalidOperationException("Hourly rate is required.");
 
         if (request.HourlyRate.HasValue && request.HourlyRate.Value < 0)
             throw new InvalidOperationException("Hourly rate cannot be negative.");
-
-        if (request.HourlyRate.HasValue)
-            return;
-
-        var duplicatedTypes = request.Rates
-            .GroupBy(r => r.SessionType)
-            .Where(g => g.Count() > 1)
-            .Select(g => g.Key)
-            .ToList();
-
-        if (duplicatedTypes.Any())
-            throw new InvalidOperationException("Duplicated session type in rates.");
-
-        foreach (var rate in request.Rates)
-        {
-            if (!allowedTypes.Contains(rate.SessionType))
-                throw new InvalidOperationException($"Invalid session type: {rate.SessionType}");
-
-            if (rate.Rate < 0)
-                throw new InvalidOperationException("Rate cannot be negative.");
-        }
     }
 }

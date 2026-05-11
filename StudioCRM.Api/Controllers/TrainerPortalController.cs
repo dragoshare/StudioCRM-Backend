@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StudioCRM.Application.DTOs.Alerts;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.ClientPackages;
@@ -25,6 +26,7 @@ public class TrainerPortalController : ControllerBase
     private readonly IClientPackageService _clientPackageService;
     private readonly ISubscriptionService _subscriptionService;
     private readonly IInvitationService _invitationService;
+    private readonly IOperationalAlertService _operationalAlertService;
     private readonly ISessionParticipantService _sessionParticipantService;
     private readonly ISessionService _sessionService;
 
@@ -34,6 +36,7 @@ public class TrainerPortalController : ControllerBase
         IClientPackageService clientPackageService,
         ISubscriptionService subscriptionService,
         IInvitationService invitationService,
+        IOperationalAlertService operationalAlertService,
         ISessionParticipantService sessionParticipantService,
         ISessionService sessionService)
     {
@@ -42,6 +45,7 @@ public class TrainerPortalController : ControllerBase
         _clientPackageService = clientPackageService;
         _subscriptionService = subscriptionService;
         _invitationService = invitationService;
+        _operationalAlertService = operationalAlertService;
         _sessionParticipantService = sessionParticipantService;
         _sessionService = sessionService;
     }
@@ -103,15 +107,60 @@ public class TrainerPortalController : ControllerBase
         return result ? NoContent() : NotFound();
     }
 
-    [HttpPost("client-invites")]
-    public async Task<ActionResult<InvitationDto>> CreateClientInvite(CreateInvitationDto request)
+    [HttpGet("invitations")]
+    public async Task<ActionResult<List<InvitationDto>>> GetInvitations([FromQuery] InvitationFilterDto filter)
+    {
+        filter.Role = "Client";
+        return Ok(await _invitationService.GetAllAsync(filter));
+    }
+
+    [HttpGet("invitations/{id:int}")]
+    public async Task<ActionResult<InvitationDto>> GetInvitation(int id)
+    {
+        var result = await _invitationService.GetByIdAsync(id);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPost("invitations")]
+    public async Task<ActionResult<InvitationDto>> CreateInvitation(CreateInvitationDto request)
     {
         return await HandleAsync<InvitationDto>(async () =>
         {
             request.Role = "Client";
             var result = await _invitationService.CreateAsync(request);
-            return CreatedAtAction(nameof(CreateClientInvite), new { id = result.Id }, result);
+            return CreatedAtAction(nameof(GetInvitation), new { id = result.Id }, result);
         });
+    }
+
+    [HttpPost("invitations/{id:int}/resend")]
+    public async Task<ActionResult<InvitationDto>> ResendInvitation(int id)
+    {
+        return await HandleAsync<InvitationDto>(async () =>
+        {
+            var result = await _invitationService.ResendAsync(id);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpPost("invitations/{id:int}/cancel")]
+    public async Task<IActionResult> CancelInvitation(int id)
+    {
+        try
+        {
+            var result = await _invitationService.CancelAsync(id);
+            return result ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpGet("operational-alerts")]
+    public async Task<ActionResult<OperationalAlertsDto>> GetOperationalAlerts(
+        [FromQuery] OperationalAlertFilterDto filter)
+    {
+        return Ok(await _operationalAlertService.GetAlertsAsync(filter));
     }
 
     [HttpGet("clients/{clientId:int}/billing")]

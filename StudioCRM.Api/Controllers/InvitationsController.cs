@@ -6,7 +6,7 @@ using StudioCRM.Application.Interfaces;
 namespace StudioCRM.Api.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/invitations")]
 public class InvitationsController : ControllerBase
 {
     private readonly IInvitationService _invitationService;
@@ -17,7 +17,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Owner,Trainer")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<InvitationDto>> Create(CreateInvitationDto request)
     {
         try
@@ -32,14 +32,14 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Roles = "Owner,Trainer")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<List<InvitationDto>>> GetAll([FromQuery] InvitationFilterDto filter)
     {
         return Ok(await _invitationService.GetAllAsync(filter));
     }
 
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "Owner,Trainer")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<InvitationDto>> GetById(int id)
     {
         var result = await _invitationService.GetByIdAsync(id);
@@ -51,7 +51,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/resend")]
-    [Authorize(Roles = "Owner,Trainer")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<InvitationDto>> Resend(int id)
     {
         try
@@ -70,7 +70,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/cancel")]
-    [Authorize(Roles = "Owner,Trainer")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Cancel(int id)
     {
         try

@@ -48,28 +48,16 @@ public class TrainersController : ControllerBase
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
 
-    [HttpPut("{id:int}")]
-    public async Task<ActionResult<TrainerDto>> Update(int id, UpdateTrainerDto request)
+    [HttpPatch("{id:int}")]
+    public async Task<ActionResult<TrainerDto>> Patch(int id, UpdateTrainerDto request)
     {
         var result = await _trainerService.UpdateAsync(id, request);
         if (result is null) return NotFound();
         return Ok(result);
     }
 
-    [HttpPatch("{id:int}")]
-    public async Task<ActionResult<TrainerDto>> Patch(int id, UpdateTrainerDto request)
-    {
-        return await Update(id, request);
-    }
-
     [HttpPost("{id:int}/deactivate")]
     public async Task<IActionResult> Deactivate(int id)
-    {
-        return await Delete(id);
-    }
-
-    [HttpDelete("{id:int}")]
-    public async Task<IActionResult> Delete(int id)
     {
         var deleted = await _trainerService.DeleteAsync(id);
         if (!deleted) return NotFound();
@@ -99,7 +87,14 @@ public class TrainersController : ControllerBase
     [HttpPut("{id:int}/rates")]
     public async Task<ActionResult<List<TrainerRateDto>>> UpdateRates(int id, UpdateTrainerRatesDto request)
     {
-        return Ok(await _trainerRateService.UpdateRatesAsync(id, request));
+        try
+        {
+            return Ok(await _trainerRateService.UpdateRatesAsync(id, request));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 
     [HttpGet("{id:int}/settlement")]

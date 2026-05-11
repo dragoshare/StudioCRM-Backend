@@ -4,8 +4,6 @@ public class CreateClientDto
 {
     public int? TrainerId { get; set; }
 
-    public int? ActivePackageId { get; set; }
-
     public string FirstName { get; set; } = string.Empty;
 
     public string LastName { get; set; } = string.Empty;
