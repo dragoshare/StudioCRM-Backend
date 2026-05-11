@@ -13,6 +13,7 @@ namespace StudioCRM.Infrastructure.Services;
 public class SessionService : ISessionService
 {
     private const int RoomPeopleLimit = 8;
+    private const string OutlookStudioTimeZone = "Central European Standard Time";
 
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -56,11 +57,14 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
+        var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
+        var normalizedEndAt = NormalizeStudioDateTime(request.EndAt);
+
         await ValidateSessionRequestAsync(
             request.TrainerId,
             request.LocationId,
-            request.StartAt,
-            request.EndAt,
+            normalizedStartAt,
+            normalizedEndAt,
             request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
@@ -73,8 +77,8 @@ public class SessionService : ISessionService
         {
             Title = title,
             Note = request.Note,
-            StartAt = request.StartAt,
-            EndAt = request.EndAt,
+            StartAt = normalizedStartAt,
+            EndAt = normalizedEndAt,
             TrainerId = request.TrainerId,
             LocationId = request.LocationId,
             StudioRoom = request.StudioRoom,
@@ -98,6 +102,9 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request)
     {
+        var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
+        var normalizedEndAt = NormalizeStudioDateTime(request.EndAt);
+
         var session = await _context.Sessions
             .Include(s => s.Participants)
             .FirstOrDefaultAsync(s => s.Id == id);
@@ -111,8 +118,8 @@ public class SessionService : ISessionService
         await ValidateSessionRequestAsync(
             request.TrainerId,
             request.LocationId,
-            request.StartAt,
-            request.EndAt,
+            normalizedStartAt,
+            normalizedEndAt,
             request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
@@ -122,8 +129,8 @@ public class SessionService : ISessionService
             : request.Title;
 
         session.Note = request.Note;
-        session.StartAt = request.StartAt;
-        session.EndAt = request.EndAt;
+        session.StartAt = normalizedStartAt;
+        session.EndAt = normalizedEndAt;
         session.TrainerId = request.TrainerId;
         session.LocationId = request.LocationId;
         session.StudioRoom = request.StudioRoom;
@@ -204,10 +211,16 @@ public class SessionService : ISessionService
             query = query.Where(s => s.Status == filter.Status);
 
         if (filter.From.HasValue)
-            query = query.Where(s => s.StartAt >= filter.From.Value);
+        {
+            var from = NormalizeStudioDateTime(filter.From.Value);
+            query = query.Where(s => s.StartAt >= from);
+        }
 
         if (filter.To.HasValue)
-            query = query.Where(s => s.StartAt <= filter.To.Value);
+        {
+            var to = NormalizeStudioDateTime(filter.To.Value);
+            query = query.Where(s => s.StartAt <= to);
+        }
 
         var sessions = await query
             .OrderBy(s => s.StartAt)
@@ -484,6 +497,37 @@ public class SessionService : ISessionService
         {
             _logger.LogWarning(ex, "Could not delete Outlook event for session {SessionId}.", sessionId);
         }
+    }
+
+    private static DateTime NormalizeStudioDateTime(DateTime value)
+    {
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(value, DateTimeKind.Unspecified),
+                GetStudioTimeZone())
+        };
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", OutlookStudioTimeZone })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private async Task<List<SessionDto>> MapSessionDtosAsync(List<Session> sessions)
