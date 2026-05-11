@@ -1,5 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
+using StudioCRM.Application.DTOs.Subscriptions;
+using StudioCRM.Application.DTOs.TrainingPlans;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
@@ -10,11 +13,19 @@ public class ClientService : IClientService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IClientPaymentService _clientPaymentService;
+    private readonly ISubscriptionService _subscriptionService;
 
-    public ClientService(StudioCRMDbContext context, ICurrentUserService currentUser)
+    public ClientService(
+        StudioCRMDbContext context,
+        ICurrentUserService currentUser,
+        IClientPaymentService clientPaymentService,
+        ISubscriptionService subscriptionService)
     {
         _context = context;
         _currentUser = currentUser;
+        _clientPaymentService = clientPaymentService;
+        _subscriptionService = subscriptionService;
     }
 
     public async Task<ClientDto> CreateAsync(CreateClientDto request)
@@ -95,6 +106,57 @@ public class ClientService : IClientService
 
         return await query
             .FirstOrDefaultAsync(c => c.Id == id);
+    }
+
+    public async Task<ClientWorkspaceDto?> GetWorkspaceAsync(int id)
+    {
+        var profile = await GetByIdAsync(id);
+
+        if (profile is null)
+            return null;
+
+        var client = await _context.Clients
+            .Include(c => c.Trainer)
+                .ThenInclude(t => t!.User)
+            .Include(c => c.Location)
+            .FirstOrDefaultAsync(c => c.Id == id);
+
+        if (client is null)
+            return null;
+
+        var subscription = await TryLoadAsync(() => _subscriptionService.GetClientSubscriptionAsync(id));
+        var billing = await TryLoadAsync(() => _clientPaymentService.GetClientSummaryAsync(id));
+        var trainingPlan = await TryLoadAsync(() => _subscriptionService.GetClientTrainingPlanAsync(id));
+
+        return new ClientWorkspaceDto
+        {
+            Profile = profile,
+            Trainer = client.Trainer is null
+                ? null
+                : new ClientWorkspaceTrainerDto
+                {
+                    TrainerId = client.Trainer.Id,
+                    FullName = client.Trainer.User.FirstName + " " + client.Trainer.User.LastName,
+                    Email = client.Trainer.User.Email,
+                    EmailContactUrl = "mailto:" + client.Trainer.User.Email,
+                    Phone = client.Trainer.Phone,
+                    PhoneContactUrl = !string.IsNullOrWhiteSpace(client.Trainer.Phone)
+                        ? "tel:" + client.Trainer.Phone
+                        : null,
+                    AvatarUrl = client.Trainer.User.AvatarUrl
+                },
+            Subscription = subscription,
+            Billing = billing,
+            TrainingPlan = trainingPlan,
+            UpcomingSessions = await BuildUpcomingSessionsAsync(id),
+            CountedSessions = await BuildCountedSessionsAsync(id),
+            QuickActions = new ClientWorkspaceQuickActionsDto
+            {
+                CanDeactivate = !client.IsDeleted,
+                GoogleDriveFolderUrl = trainingPlan?.GoogleDriveFolderUrl,
+                TrainingPlanUrl = trainingPlan?.Url
+            }
+        };
     }
 
     public async Task<ClientDto?> UpdateAsync(int id, UpdateClientDto request)
@@ -289,6 +351,111 @@ public class ClientService : IClientService
         return await query
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync();
+    }
+
+    private async Task<List<ClientWorkspaceSessionDto>> BuildUpcomingSessionsAsync(int clientId)
+    {
+        var now = DateTime.UtcNow;
+
+        var participants = await _context.SessionParticipants
+            .Include(p => p.Session)
+                .ThenInclude(s => s.Trainer)
+                    .ThenInclude(t => t.User)
+            .Include(p => p.Session)
+                .ThenInclude(s => s.Location)
+            .Where(p => p.ClientId == clientId && p.Session.StartAt >= now)
+            .OrderBy(p => p.Session.StartAt)
+            .Take(8)
+            .ToListAsync();
+
+        return participants.Select(p => new ClientWorkspaceSessionDto
+        {
+            SessionId = p.SessionId,
+            Title = p.Session.Title,
+            StartAt = ToStudioDisplayDateTime(p.Session.StartAt),
+            EndAt = ToStudioDisplayDateTime(p.Session.EndAt),
+            Status = p.Session.Status,
+            LocationName = p.Session.Location.Name,
+            TrainerFullName = p.Session.Trainer.User.FirstName + " " + p.Session.Trainer.User.LastName,
+            AttendanceStatus = p.AttendanceStatus,
+            CountsAgainstPackage = p.CountsAgainstPackage,
+            IsCountedFromPackage = p.IsCountedFromPackage
+        }).ToList();
+    }
+
+    private async Task<List<ClientWorkspaceCountedSessionDto>> BuildCountedSessionsAsync(int clientId)
+    {
+        var participants = await _context.SessionParticipants
+            .Include(p => p.Session)
+                .ThenInclude(s => s.Trainer)
+                    .ThenInclude(t => t.User)
+            .Include(p => p.Session)
+                .ThenInclude(s => s.Location)
+            .Where(p => p.ClientId == clientId && p.CountsAgainstPackage)
+            .OrderByDescending(p => p.Session.StartAt)
+            .Take(12)
+            .ToListAsync();
+
+        return participants.Select(p => new ClientWorkspaceCountedSessionDto
+        {
+            SessionId = p.SessionId,
+            Date = ToStudioDisplayDateTime(p.Session.StartAt),
+            TrainerFullName = p.Session.Trainer.User.FirstName + " " + p.Session.Trainer.User.LastName,
+            LocationName = p.Session.Location.Name,
+            Status = p.Session.Status,
+            SessionsCharged = p.SessionsCharged,
+            PlannedBillingType = p.PlannedBillingType?.ToString() ?? string.Empty,
+            ActualBillingType = p.ActualBillingType?.ToString() ?? string.Empty,
+            ExpectedUnitPrice = p.ExpectedUnitPrice ?? 0,
+            ActualUnitPrice = p.ActualUnitPrice ?? 0,
+            BalanceDifference = p.BalanceDifference ?? 0
+        }).ToList();
+    }
+
+    private static async Task<T?> TryLoadAsync<T>(Func<Task<T>> factory)
+        where T : class
+    {
+        try
+        {
+            return await factory();
+        }
+        catch (InvalidOperationException)
+        {
+            return null;
+        }
+    }
+
+    private static DateTime ToStudioDisplayDateTime(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            return value;
+
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : value.ToUniversalTime();
+
+        return DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone()),
+            DateTimeKind.Unspecified);
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", "Central European Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private IQueryable<ClientDto> BuildClientQuery()

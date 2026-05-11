@@ -76,6 +76,16 @@ public class TrainerPortalController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpGet("clients/{clientId:int}/workspace")]
+    public async Task<ActionResult<ClientWorkspaceDto>> GetClientWorkspace(int clientId)
+    {
+        return await HandleAsync<ClientWorkspaceDto>(async () =>
+        {
+            var result = await _trainerPortalService.GetClientWorkspaceAsync(clientId);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpPatch("clients/{clientId:int}")]
     public async Task<ActionResult<ClientDto>> UpdateClient(int clientId, UpdateClientDto request)
     {
@@ -238,6 +248,16 @@ public class TrainerPortalController : ControllerBase
     {
         var result = await _trainerPortalService.GetSessionAsync(sessionId);
         return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpGet("sessions/{sessionId:int}/workspace")]
+    public async Task<ActionResult<SessionWorkspaceDto>> GetSessionWorkspace(int sessionId)
+    {
+        return await HandleAsync<SessionWorkspaceDto>(async () =>
+        {
+            var result = await _trainerPortalService.GetSessionWorkspaceAsync(sessionId);
+            return result is null ? NotFound() : Ok(result);
+        });
     }
 
     [HttpPost("sessions")]

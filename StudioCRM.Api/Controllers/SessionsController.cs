@@ -31,6 +31,16 @@ public class SessionsController : ControllerBase
         return Ok(result);
     }
 
+    [HttpGet("{id:int}/workspace")]
+    public async Task<ActionResult<SessionWorkspaceDto>> GetWorkspace(int id)
+    {
+        return await HandleAsync<SessionWorkspaceDto>(async () =>
+        {
+            var result = await _sessionService.GetWorkspaceAsync(id);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpGet("filter")]
     public async Task<ActionResult<List<SessionDto>>> Filter([FromQuery] SessionFilterDto filter)
     {

@@ -55,6 +55,44 @@ public class SessionService : ISessionService
         return await MapSessionDtoAsync(session);
     }
 
+    public async Task<SessionWorkspaceDto?> GetWorkspaceAsync(int id)
+    {
+        var session = await GetByIdAsync(id);
+
+        if (session is null)
+            return null;
+
+        var link = await _context.CalendarEventLinks
+            .FirstOrDefaultAsync(x =>
+                x.SessionId == id &&
+                x.Provider == "Outlook");
+
+        var externalEvent = link is null
+            ? null
+            : await _context.ExternalCalendarEvents
+                .FirstOrDefaultAsync(x =>
+                    x.Provider == link.Provider &&
+                    x.ExternalEventId == link.ExternalEventId);
+
+        return new SessionWorkspaceDto
+        {
+            Session = session,
+            OutlookSync = new SessionOutlookSyncDto
+            {
+                IsSynced = link is not null,
+                Provider = link?.Provider,
+                ExternalEventId = link?.ExternalEventId,
+                LastSyncedAt = link?.SyncedAt,
+                Warnings = ReadStringList(externalEvent?.MappingWarningsJson)
+            },
+            QuickActions = new SessionWorkspaceQuickActionsDto
+            {
+                CanEditParticipants = session.Status != "Completed",
+                CanComplete = session.Status != "Completed" && session.Status != "Cancelled"
+            }
+        };
+    }
+
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
         var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
@@ -582,9 +620,16 @@ public class SessionService : ISessionService
                 ClientFullName = p.Client.FirstName + " " + p.Client.LastName,
                 PackageId = p.PackageId,
                 PackageName = p.Package != null ? p.Package.Name : null,
+                ClientPackageId = p.ClientPackageId,
                 AttendanceStatus = p.AttendanceStatus,
                 CountsAgainstPackage = p.CountsAgainstPackage,
+                IsCountedFromPackage = p.IsCountedFromPackage,
                 SessionsCharged = p.SessionsCharged,
+                PlannedBillingType = p.PlannedBillingType != null ? p.PlannedBillingType.ToString()! : string.Empty,
+                ActualBillingType = p.ActualBillingType != null ? p.ActualBillingType.ToString()! : string.Empty,
+                ExpectedUnitPrice = p.ExpectedUnitPrice ?? 0,
+                ActualUnitPrice = p.ActualUnitPrice ?? 0,
+                BalanceDifference = p.BalanceDifference ?? 0,
                 Note = p.Note
             }).ToList(),
             CreatedAt = s.CreatedAt,

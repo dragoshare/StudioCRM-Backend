@@ -36,6 +36,16 @@ public class ClientsController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpGet("{id:int}/workspace")]
+    public async Task<ActionResult<ClientWorkspaceDto>> GetWorkspace(int id)
+    {
+        return await HandleAsync<ClientWorkspaceDto>(async () =>
+        {
+            var result = await _clientService.GetWorkspaceAsync(id);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpGet("filter")]
     public async Task<ActionResult<List<ClientDto>>> Filter([FromQuery] ClientFilterDto filter)
     {

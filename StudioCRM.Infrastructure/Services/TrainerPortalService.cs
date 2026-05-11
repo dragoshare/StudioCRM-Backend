@@ -13,17 +13,20 @@ public class TrainerPortalService : ITrainerPortalService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IClientService _clientService;
     private readonly ISessionService _sessionService;
     private readonly ITrainerSettlementService _settlementService;
 
     public TrainerPortalService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
+        IClientService clientService,
         ISessionService sessionService,
         ITrainerSettlementService settlementService)
     {
         _context = context;
         _currentUser = currentUser;
+        _clientService = clientService;
         _sessionService = sessionService;
         _settlementService = settlementService;
     }
@@ -108,6 +111,21 @@ public class TrainerPortalService : ITrainerPortalService
 
         return await BuildTrainerClientQuery(trainerId.Value)
             .FirstOrDefaultAsync(c => c.Id == clientId);
+    }
+
+    public async Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync();
+        if (trainerId is null)
+            return null;
+
+        var ownsClient = await _context.Clients
+            .AnyAsync(c => c.Id == clientId && c.TrainerId == trainerId.Value);
+
+        if (!ownsClient)
+            return null;
+
+        return await _clientService.GetWorkspaceAsync(clientId);
     }
 
     public async Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request)
@@ -217,6 +235,21 @@ public class TrainerPortalService : ITrainerPortalService
             return null;
 
         return await _sessionService.GetByIdAsync(sessionId);
+    }
+
+    public async Task<SessionWorkspaceDto?> GetSessionWorkspaceAsync(int sessionId)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync();
+        if (trainerId is null)
+            return null;
+
+        var ownsSession = await _context.Sessions
+            .AnyAsync(s => s.Id == sessionId && s.TrainerId == trainerId.Value);
+
+        if (!ownsSession)
+            return null;
+
+        return await _sessionService.GetWorkspaceAsync(sessionId);
     }
 
     public async Task<SessionDto> CreateSessionAsync(CreateSessionDto request)

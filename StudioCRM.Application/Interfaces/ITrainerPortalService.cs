@@ -12,10 +12,12 @@ public interface ITrainerPortalService
     Task<TrainerPortalMeDto?> UpdateMeAsync(UpdateTrainerPortalProfileRequest request);
     Task<List<TrainerPortalClientDto>> GetClientsAsync();
     Task<ClientDto?> GetClientAsync(int clientId);
+    Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId);
     Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request);
     Task<bool> DeactivateClientAsync(int clientId);
     Task<List<TrainerPortalSessionDto>> GetSessionsAsync();
     Task<SessionDto?> GetSessionAsync(int sessionId);
+    Task<SessionWorkspaceDto?> GetSessionWorkspaceAsync(int sessionId);
     Task<SessionDto> CreateSessionAsync(CreateSessionDto request);
     Task<SessionDto?> UpdateSessionAsync(int sessionId, UpdateSessionDto request);
     Task<TrainerPortalDashboardDto?> GetDashboardAsync();

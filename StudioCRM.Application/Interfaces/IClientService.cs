@@ -8,6 +8,7 @@ public interface IClientService
     Task<ClientDto> CreateAsync(CreateClientDto request);
     Task<List<ClientDto>> GetAllAsync();
     Task<ClientDto?> GetByIdAsync(int id);
+    Task<ClientWorkspaceDto?> GetWorkspaceAsync(int id);
     Task<ClientDto?> UpdateAsync(int id, UpdateClientDto request);
     Task<bool> DeleteAsync(int id);
     Task<bool> AssignTrainerAsync(int id, SetClientTrainerRequest request);

@@ -10,6 +10,8 @@ public interface ISessionService
 
     Task<SessionDto?> GetByIdAsync(int id);
 
+    Task<SessionWorkspaceDto?> GetWorkspaceAsync(int id);
+
     Task<SessionDto> CreateAsync(CreateSessionDto request);
 
     Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request);
