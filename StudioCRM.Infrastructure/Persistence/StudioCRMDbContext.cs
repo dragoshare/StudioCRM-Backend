@@ -5,6 +5,8 @@ namespace StudioCRM.Infrastructure.Persistence;
 
 public class StudioCRMDbContext : DbContext
 {
+    private const string WindowsStudioTimeZone = "Central European Standard Time";
+
     public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options)
         : base(options)
     {
@@ -43,6 +45,26 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<MilestoneDefinition> MilestoneDefinitions => Set<MilestoneDefinition>();
     public DbSet<ClientMilestone> ClientMilestones => Set<ClientMilestone>();
+
+    public override int SaveChanges()
+    {
+        NormalizeDateTimesToUtc();
+        return base.SaveChanges();
+    }
+
+    public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        NormalizeDateTimesToUtc();
+        return base.SaveChangesAsync(cancellationToken);
+    }
+
+    public override Task<int> SaveChangesAsync(
+        bool acceptAllChangesOnSuccess,
+        CancellationToken cancellationToken = default)
+    {
+        NormalizeDateTimesToUtc();
+        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -577,6 +599,65 @@ public class StudioCRMDbContext : DbContext
         });
     }
 
+    private void NormalizeDateTimesToUtc()
+    {
+        var entries = ChangeTracker.Entries()
+            .Where(e => e.State is EntityState.Added or EntityState.Modified);
 
+        foreach (var entry in entries)
+        {
+            foreach (var property in entry.CurrentValues.Properties)
+            {
+                if (property.ClrType == typeof(DateTime))
+                {
+                    var value = entry.CurrentValues[property];
+
+                    if (value is DateTime dateTime)
+                        entry.CurrentValues[property] = NormalizeDateTimeToUtc(dateTime);
+                }
+                else if (property.ClrType == typeof(DateTime?))
+                {
+                    var value = entry.CurrentValues[property];
+
+                    if (value is DateTime dateTime)
+                        entry.CurrentValues[property] = NormalizeDateTimeToUtc(dateTime);
+                }
+            }
+        }
+    }
+
+    private static DateTime NormalizeDateTimeToUtc(DateTime value)
+    {
+        if (value == DateTime.MinValue || value == DateTime.MaxValue)
+            return DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+        return value.Kind switch
+        {
+            DateTimeKind.Utc => value,
+            DateTimeKind.Local => value.ToUniversalTime(),
+            _ => TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(value, DateTimeKind.Unspecified),
+                GetStudioTimeZone())
+        };
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", WindowsStudioTimeZone })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
+    }
 
 }
