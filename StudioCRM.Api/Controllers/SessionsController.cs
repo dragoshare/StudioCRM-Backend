@@ -34,22 +34,28 @@ public class SessionsController : ControllerBase
     [HttpGet("filter")]
     public async Task<ActionResult<List<SessionDto>>> Filter([FromQuery] SessionFilterDto filter)
     {
-        return Ok(await _sessionService.GetFilteredAsync(filter));
+        return await HandleAsync<List<SessionDto>>(async () =>
+            Ok(await _sessionService.GetFilteredAsync(filter)));
     }
 
     [HttpPost]
     public async Task<ActionResult<SessionDto>> Create(CreateSessionDto request)
     {
-        var result = await _sessionService.CreateAsync(request);
-        return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        return await HandleAsync<SessionDto>(async () =>
+        {
+            var result = await _sessionService.CreateAsync(request);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
+        });
     }
 
     [HttpPut("{id:int}")]
     public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)
     {
-        var result = await _sessionService.UpdateAsync(id, request);
-        if (result is null) return NotFound();
-        return Ok(result);
+        return await HandleAsync<SessionDto>(async () =>
+        {
+            var result = await _sessionService.UpdateAsync(id, request);
+            return result is null ? NotFound() : Ok(result);
+        });
     }
 
     [HttpDelete("{id:int}")]
@@ -62,9 +68,11 @@ public class SessionsController : ControllerBase
     [HttpPost("{id:int}/restore")]
     public async Task<IActionResult> Restore(int id)
     {
-        var restored = await _sessionService.RestoreAsync(id);
-        if (!restored) return NotFound();
-        return NoContent();
+        return await HandleAsync(async () =>
+        {
+            var restored = await _sessionService.RestoreAsync(id);
+            return restored ? NoContent() : NotFound();
+        });
     }
 
     [HttpGet("deleted")]
@@ -76,7 +84,34 @@ public class SessionsController : ControllerBase
     [HttpPost("participants/count-from-package")]
     public async Task<IActionResult> CountFromPackage(CountSessionFromPackageRequest request)
     {
-        await _sessionService.CountSessionFromPackageAsync(request);
-        return NoContent();
+        return await HandleAsync(async () =>
+        {
+            await _sessionService.CountSessionFromPackageAsync(request);
+            return NoContent();
+        });
+    }
+
+    private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    private async Task<IActionResult> HandleAsync(Func<Task<IActionResult>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
