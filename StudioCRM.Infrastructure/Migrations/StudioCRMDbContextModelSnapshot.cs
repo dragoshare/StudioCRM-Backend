@@ -700,6 +700,13 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<bool>("IsAccepted")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("LastSendError")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime?>("LastSentAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("LocationId")
                         .HasColumnType("integer");
 

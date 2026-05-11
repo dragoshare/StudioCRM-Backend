@@ -66,7 +66,12 @@ public class EmailService : IEmailService
 
         if (!response.Success)
         {
-            throw new InvalidOperationException("Email send failed.");
+            var error = response.Exception;
+            var reason = error is null
+                ? "Unknown Resend error."
+                : $"{error.ErrorType}: {error.Message}";
+
+            throw new InvalidOperationException($"Resend email send failed: {reason}");
         }
     }
 }

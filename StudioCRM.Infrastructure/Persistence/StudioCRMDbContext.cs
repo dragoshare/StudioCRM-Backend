@@ -490,6 +490,10 @@ public class StudioCRMDbContext : DbContext
             .HasIndex(i => i.Token)
             .IsUnique();
 
+        modelBuilder.Entity<Invitation>()
+            .Property(i => i.LastSendError)
+            .HasMaxLength(2000);
+
         // =========================
         // CALENDAR
         // =========================

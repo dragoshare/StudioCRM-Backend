@@ -20,6 +20,10 @@ public class Invitation
 
     public DateTime? CancelledAt { get; set; }
 
+    public DateTime? LastSentAt { get; set; }
+
+    public string? LastSendError { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public int CreatedBy { get; set; }

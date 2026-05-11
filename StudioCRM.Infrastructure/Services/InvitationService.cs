@@ -83,11 +83,7 @@ public class InvitationService : IInvitationService
 
         var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
 
-        await _emailService.SendInvitationEmailAsync(
-            invitation.Email,
-            invitation.Role,
-            location.Name,
-            inviteLink);
+        await SendInvitationEmailAndTrackResultAsync(invitation, location.Name, inviteLink);
 
         return MapToDto(invitation, location.Name);
     }
@@ -262,11 +258,7 @@ public class InvitationService : IInvitationService
 
         var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
 
-        await _emailService.SendInvitationEmailAsync(
-            invitation.Email,
-            invitation.Role,
-            invitation.Location.Name,
-            inviteLink);
+        await SendInvitationEmailAndTrackResultAsync(invitation, invitation.Location.Name, inviteLink);
 
         return MapToDto(invitation, invitation.Location.Name);
     }
@@ -372,9 +364,39 @@ public class InvitationService : IInvitationService
             IsAccepted = invitation.IsAccepted,
             AcceptedAt = invitation.AcceptedAt,
             CancelledAt = invitation.CancelledAt,
+            LastSentAt = invitation.LastSentAt,
+            LastSendError = invitation.LastSendError,
             CreatedAt = invitation.CreatedAt,
             Status = GetStatus(invitation)
         };
+    }
+
+    private async Task SendInvitationEmailAndTrackResultAsync(
+        Invitation invitation,
+        string locationName,
+        string inviteLink)
+    {
+        try
+        {
+            await _emailService.SendInvitationEmailAsync(
+                invitation.Email,
+                invitation.Role,
+                locationName,
+                inviteLink);
+
+            invitation.LastSentAt = DateTime.UtcNow;
+            invitation.LastSendError = null;
+            await _context.SaveChangesAsync();
+        }
+        catch (Exception ex)
+        {
+            invitation.LastSendError = ex.Message;
+            await _context.SaveChangesAsync();
+
+            throw new InvalidOperationException(
+                "Invitation was saved, but email could not be sent. Check Resend domain/API key configuration. " +
+                ex.Message);
+        }
     }
 
     private static string GetStatus(Invitation invitation)

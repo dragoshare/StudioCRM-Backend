@@ -24,6 +24,10 @@ public class InvitationDto
 
     public DateTime? CancelledAt { get; set; }
 
+    public DateTime? LastSentAt { get; set; }
+
+    public string? LastSendError { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public string Status { get; set; } = string.Empty;

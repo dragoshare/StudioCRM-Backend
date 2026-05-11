@@ -17,13 +17,13 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> Create(CreateInvitationDto request)
     {
         try
         {
             var result = await _invitationService.CreateAsync(request);
-            return Ok(result);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         catch (InvalidOperationException ex)
         {
@@ -32,14 +32,14 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpGet]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<InvitationDto>>> GetAll([FromQuery] InvitationFilterDto filter)
     {
         return Ok(await _invitationService.GetAllAsync(filter));
     }
 
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> GetById(int id)
     {
         var result = await _invitationService.GetByIdAsync(id);
@@ -51,7 +51,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/resend")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> Resend(int id)
     {
         try
@@ -70,7 +70,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/cancel")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<IActionResult> Cancel(int id)
     {
         try
