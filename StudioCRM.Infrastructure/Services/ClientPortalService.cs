@@ -32,7 +32,7 @@ public class ClientPortalService : IClientPortalService
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 ProgressPercent = c.ProgressPercent,
                 Status = c.Status,
@@ -60,13 +60,13 @@ public class ClientPortalService : IClientPortalService
         client.FirstName = request.FirstName.Trim();
         client.LastName = request.LastName.Trim();
         client.PhoneNumber = request.PhoneNumber;
-        client.AvatarUrl = request.AvatarUrl;
         client.UpdatedAt = DateTime.UtcNow;
 
         if (client.User is not null)
         {
             client.User.FirstName = client.FirstName;
             client.User.LastName = client.LastName;
+            client.User.AvatarUrl = request.AvatarUrl;
             client.User.UpdatedAt = DateTime.UtcNow;
         }
 
@@ -439,9 +439,10 @@ public class ClientPortalService : IClientPortalService
             TrainerId = client.Trainer.Id,
             FullName = client.Trainer.User.FirstName + " " + client.Trainer.User.LastName,
             Email = client.Trainer.User.Email,
+            EmailContactUrl = "mailto:" + client.Trainer.User.Email,
             Phone = client.Trainer.Phone,
             Bio = client.Trainer.Bio,
-            AvatarUrl = client.Trainer.AvatarUrl,
+            AvatarUrl = client.Trainer.User.AvatarUrl,
             Specialization = client.Trainer.Bio
         };
     }
@@ -503,10 +504,30 @@ public class ClientPortalService : IClientPortalService
             TrainerId = trainer.Id,
             FullName = $"{trainerUser.FirstName} {trainerUser.LastName}".Trim(),
             Email = trainerUser.Email,
+            EmailContactUrl = "mailto:" + trainerUser.Email,
             Phone = trainer.Phone,
+            PhoneContactUrl = !string.IsNullOrWhiteSpace(trainer.Phone) ? "tel:" + trainer.Phone : null,
             Bio = trainer.Bio,
-            AvatarUrl = trainer.AvatarUrl,
+            AvatarUrl = trainerUser.AvatarUrl,
             ExperienceYears = trainer.ExperienceYears
         };
+    }
+
+    public async Task<ClientOwnerContactDto?> GetOwnerContactAsync()
+    {
+        return await _context.Users
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+            .Where(u => u.IsActive && u.UserRoles.Any(ur => ur.Role.Name == "Owner"))
+            .OrderBy(u => u.Id)
+            .Select(u => new ClientOwnerContactDto
+            {
+                UserId = u.Id,
+                FullName = (u.FirstName + " " + u.LastName).Trim(),
+                Email = u.Email,
+                EmailContactUrl = "mailto:" + u.Email,
+                AvatarUrl = u.AvatarUrl
+            })
+            .FirstOrDefaultAsync();
     }
 }

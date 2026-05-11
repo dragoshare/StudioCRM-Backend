@@ -79,17 +79,22 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpGet("me")]
-    public IActionResult Me()
+    public async Task<IActionResult> Me()
     {
         var userId = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        var email = User.FindFirstValue(ClaimTypes.Name) ?? User.FindFirstValue(ClaimTypes.Email);
-        var roles = User.FindAll(ClaimTypes.Role).Select(r => r.Value).ToList();
 
-        return Ok(new
+        if (!int.TryParse(userId, out var parsedUserId))
         {
-            userId,
-            email,
-            roles
-        });
+            return Unauthorized(new { message = "Invalid user token." });
+        }
+
+        var result = await _authService.GetMeAsync(parsedUserId);
+
+        if (result is null)
+        {
+            return NotFound();
+        }
+
+        return Ok(result);
     }
 }

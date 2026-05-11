@@ -10,8 +10,6 @@ public class Trainer
 
     public string? Phone { get; set; }
 
-    public string? AvatarUrl { get; set; }
-
     public string Status { get; set; } = "Active";
 
     public int ExperienceYears { get; set; }

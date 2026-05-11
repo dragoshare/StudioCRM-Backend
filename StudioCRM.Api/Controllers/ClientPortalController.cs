@@ -220,6 +220,22 @@ public class ClientPortalController : ControllerBase
         return Ok(contact);
     }
 
+    [HttpGet("owner-contact")]
+    public async Task<IActionResult> GetOwnerContact()
+    {
+        var contact = await _clientPortalService.GetOwnerContactAsync();
+
+        if (contact is null)
+        {
+            return NotFound(new
+            {
+                message = "Brak aktywnego właściciela studia do kontaktu."
+            });
+        }
+
+        return Ok(contact);
+    }
+
     [HttpGet("milestones")]
     public async Task<IActionResult> GetMyMilestones()
     {

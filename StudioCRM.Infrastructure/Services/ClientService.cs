@@ -63,7 +63,6 @@ public class ClientService : IClientService
             LastName = request.LastName,
             Email = request.Email,
             PhoneNumber = request.PhoneNumber,
-            AvatarUrl = request.AvatarUrl,
             Goal = request.Goal,
             Notes = request.Notes,
             ProgressPercent = request.ProgressPercent,
@@ -146,7 +145,6 @@ public class ClientService : IClientService
         client.LastName = request.LastName;
         client.Email = request.Email;
         client.PhoneNumber = request.PhoneNumber;
-        client.AvatarUrl = request.AvatarUrl;
         client.Goal = request.Goal;
         client.Notes = request.Notes;
         client.ProgressPercent = request.ProgressPercent;
@@ -154,6 +152,14 @@ public class ClientService : IClientService
         client.Status = request.Status;
         client.NextSessionAt = request.NextSessionAt;
         client.UpdatedAt = DateTime.UtcNow;
+
+        if (client.User is not null)
+        {
+            client.User.FirstName = client.FirstName;
+            client.User.LastName = client.LastName;
+            client.User.AvatarUrl = request.AvatarUrl;
+            client.User.UpdatedAt = DateTime.UtcNow;
+        }
 
         await _context.SaveChangesAsync();
 
@@ -179,7 +185,9 @@ public class ClientService : IClientService
         if (!_currentUser.IsOwner)
             throw new InvalidOperationException("Only owner can assign trainers.");
 
-        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
+        var client = await _context.Clients
+            .Include(c => c.User)
+            .FirstOrDefaultAsync(c => c.Id == id);
         if (client is null)
             return false;
 
@@ -236,8 +244,10 @@ public class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
                 ProgressPercent = c.ProgressPercent,
@@ -298,8 +308,10 @@ public class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
                 ProgressPercent = c.ProgressPercent,

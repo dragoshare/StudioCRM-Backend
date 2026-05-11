@@ -8,7 +8,11 @@ public class TrainerPortalClientDto
 
     public string Email { get; set; } = string.Empty;
 
+    public string EmailContactUrl { get; set; } = string.Empty;
+
     public string? PhoneNumber { get; set; }
+
+    public string? PhoneContactUrl { get; set; }
 
     public string? AvatarUrl { get; set; }
 

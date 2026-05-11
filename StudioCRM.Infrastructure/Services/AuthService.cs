@@ -218,6 +218,34 @@ public class AuthService : IAuthService
         return BuildAuthResponse(user, refreshToken);
     }
 
+    public async Task<AuthMeDto?> GetMeAsync(int userId)
+    {
+        var user = await _context.Users
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+            .FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+
+        if (user is null)
+        {
+            return null;
+        }
+
+        var roleNames = user.UserRoles
+            .Select(ur => ur.Role.Name)
+            .ToList();
+
+        var primaryRole = roleNames.FirstOrDefault() ?? string.Empty;
+        return new AuthMeDto
+        {
+            UserId = user.Id,
+            Email = user.Email,
+            Role = primaryRole,
+            Roles = roleNames,
+            FullName = $"{user.FirstName} {user.LastName}".Trim(),
+            AvatarUrl = user.AvatarUrl
+        };
+    }
+
     public async Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request)
     {
         var refreshToken = await _context.RefreshTokens

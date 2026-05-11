@@ -19,7 +19,7 @@ public class TrainerRateService : ITrainerRateService
     {
         return await _context.TrainerRates
             .Where(r => r.TrainerId == trainerId && r.IsActive)
-            .OrderBy(r => r.SessionType)
+            .OrderByDescending(r => r.ValidFrom)
             .Select(r => new TrainerRateDto
             {
                 Id = r.Id,
@@ -55,7 +55,18 @@ public class TrainerRateService : ITrainerRateService
             oldRate.UpdatedAt = now;
         }
 
-        foreach (var rate in request.Rates)
+        var ratesToCreate = request.HourlyRate.HasValue
+            ? new List<UpsertTrainerRateDto>
+            {
+                new()
+                {
+                    SessionType = "Hourly",
+                    Rate = request.HourlyRate.Value
+                }
+            }
+            : request.Rates;
+
+        foreach (var rate in ratesToCreate)
         {
             var newRate = new TrainerRate
             {
@@ -80,14 +91,21 @@ public class TrainerRateService : ITrainerRateService
     {
         var allowedTypes = new[]
         {
+            "Hourly",
             "OneToOne",
             "TwoToOne",
             "ThreeToOne",
             "FourToOne"
         };
 
-        if (request.Rates is null || request.Rates.Count == 0)
+        if (!request.HourlyRate.HasValue && (request.Rates is null || request.Rates.Count == 0))
             throw new InvalidOperationException("At least one rate is required.");
+
+        if (request.HourlyRate.HasValue && request.HourlyRate.Value < 0)
+            throw new InvalidOperationException("Hourly rate cannot be negative.");
+
+        if (request.HourlyRate.HasValue)
+            return;
 
         var duplicatedTypes = request.Rates
             .GroupBy(r => r.SessionType)

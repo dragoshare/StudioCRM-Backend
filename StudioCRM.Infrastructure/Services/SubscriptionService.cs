@@ -459,10 +459,23 @@ public class SubscriptionService : ISubscriptionService
         {
             ClientId = client.Id,
             GoogleDriveFolderId = client.GoogleDriveFolderId,
+            GoogleDriveFolderUrl = BuildDriveFolderUrl(client.GoogleDriveFolderId),
             FileId = client.TrainingPlanFileId,
             FileName = client.TrainingPlanFileName,
             Url = client.TrainingPlanUrl
         };
+    }
+
+    private static string? BuildDriveFolderUrl(string? folderId)
+    {
+        if (string.IsNullOrWhiteSpace(folderId))
+            return null;
+
+        if (folderId.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            folderId.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            return folderId;
+
+        return $"https://drive.google.com/drive/folders/{Uri.EscapeDataString(folderId)}";
     }
 
     private async Task<Client> GetCurrentClientAsync()

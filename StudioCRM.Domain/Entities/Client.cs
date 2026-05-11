@@ -17,8 +17,6 @@ public class Client
 
     public string? PhoneNumber { get; set; }
 
-    public string? AvatarUrl { get; set; }
-
     public string? GoogleDriveFolderId { get; set; }
 
     public string? TrainingPlanFileId { get; set; }

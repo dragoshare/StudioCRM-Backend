@@ -12,6 +12,7 @@ public class CreatePackageDto
     public int SessionsPerWeek { get; set; } = 1;
     public int DurationDays { get; set; }
     public SessionBillingType BillingType { get; set; } = SessionBillingType.OneToOne;
+    public int? ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
     public bool IsActive { get; set; } = true;
     public int? CreatedBy { get; set; }

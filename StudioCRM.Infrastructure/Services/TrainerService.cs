@@ -48,6 +48,7 @@ public class TrainerService : ITrainerService
             Email = request.Email,
             FirstName = request.FirstName,
             LastName = request.LastName,
+            AvatarUrl = request.AvatarUrl,
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -69,7 +70,6 @@ public class TrainerService : ITrainerService
             UserId = user.Id,
             Bio = request.Bio,
             Phone = request.Phone,
-            AvatarUrl = request.AvatarUrl,
             Status = request.Status,
             ExperienceYears = request.ExperienceYears,
             CreatedAt = DateTime.UtcNow,
@@ -127,11 +127,11 @@ public class TrainerService : ITrainerService
 
         trainer.User.FirstName = request.FirstName;
         trainer.User.LastName = request.LastName;
+        trainer.User.AvatarUrl = request.AvatarUrl;
         trainer.User.UpdatedAt = DateTime.UtcNow;
 
         trainer.Bio = request.Bio;
         trainer.Phone = request.Phone;
-        trainer.AvatarUrl = request.AvatarUrl;
         trainer.Status = request.Status;
         trainer.ExperienceYears = request.ExperienceYears;
         trainer.UpdatedAt = DateTime.UtcNow;
@@ -230,7 +230,7 @@ public class TrainerService : ITrainerService
                     .FirstOrDefault() ?? "Trainer",
                 Bio = t.Bio,
                 Phone = t.Phone,
-                AvatarUrl = t.AvatarUrl,
+                AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
                 RatingAverage = 0,
@@ -268,7 +268,7 @@ public class TrainerService : ITrainerService
                     .FirstOrDefault() ?? "Trainer",
                 Bio = t.Bio,
                 Phone = t.Phone,
-                AvatarUrl = t.AvatarUrl,
+                AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
                 RatingAverage = 0,

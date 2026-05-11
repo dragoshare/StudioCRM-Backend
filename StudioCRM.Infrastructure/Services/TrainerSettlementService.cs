@@ -63,8 +63,8 @@ public class TrainerSettlementService : ITrainerSettlementService
         foreach (var session in sessions)
         {
             var sessionType = ResolveSettlementSessionType(session);
-            var hours = CalculateHours(session.StartAt, session.EndAt);
-            var rate = ResolveRate(rates, sessionType, session.StartAt);
+            var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
+            var rate = ResolveHourlyRate(rates, session.StartAt);
 
             var amount = hours * rate;
 
@@ -174,8 +174,19 @@ public class TrainerSettlementService : ITrainerSettlementService
             throw new InvalidOperationException("Invalid month.");
     }
 
-    private static decimal CalculateHours(DateTime startAt, DateTime endAt)
+    private static decimal ResolveBillableHours(string sessionType, DateTime startAt, DateTime endAt)
     {
+        var fixedHours = sessionType switch
+        {
+            "TwoToOne" => 1.6m,
+            "ThreeToOne" => 2.2m,
+            "FourToOne" => 2.66m,
+            _ => (decimal?)null
+        };
+
+        if (fixedHours.HasValue)
+            return fixedHours.Value;
+
         var hours = (decimal)(endAt - startAt).TotalHours;
 
         if (hours <= 0)
@@ -204,14 +215,13 @@ public class TrainerSettlementService : ITrainerSettlementService
         };
     }
 
-    private static decimal ResolveRate(
+    private static decimal ResolveHourlyRate(
         List<TrainerRate> rates,
-        string sessionType,
         DateTime sessionDate)
     {
         var rate = rates
             .Where(r =>
-                r.SessionType == sessionType &&
+                r.SessionType == "Hourly" &&
                 r.ValidFrom <= sessionDate &&
                 (r.ValidTo == null || r.ValidTo > sessionDate))
             .OrderByDescending(r => r.ValidFrom)

@@ -8,7 +8,11 @@ public class ClientTrainerContactDto
 
     public string? Email { get; set; }
 
+    public string? EmailContactUrl { get; set; }
+
     public string? Phone { get; set; }
+
+    public string? PhoneContactUrl { get; set; }
 
     public string? Bio { get; set; }
 

@@ -12,6 +12,8 @@ public class ClientPortalTrainerDto
 
     public string? Email { get; set; }
 
+    public string? EmailContactUrl { get; set; }
+
     public string? AvatarUrl { get; set; }
 
     public string? Specialization { get; set; }

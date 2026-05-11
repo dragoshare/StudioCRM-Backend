@@ -56,6 +56,10 @@ public class StudioCRMDbContext : DbContext
             .HasIndex(u => u.Email)
             .IsUnique();
 
+        modelBuilder.Entity<User>()
+            .Property(u => u.AvatarUrl)
+            .HasMaxLength(1000);
+
         modelBuilder.Entity<UserRole>()
             .HasKey(ur => new { ur.UserId, ur.RoleId });
 

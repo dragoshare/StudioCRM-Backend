@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
@@ -221,15 +222,20 @@ public class SessionService : ISessionService
             throw new InvalidOperationException("Client package is not active.");
 
         var usedSessions = await _context.SessionParticipants
-            .CountAsync(p =>
+            .Where(p =>
                 p.ClientPackageId == clientPackage.Id &&
-                p.CountsAgainstPackage);
+                p.CountsAgainstPackage)
+            .SumAsync(p => p.SessionsCharged);
 
         var isAlreadyCountedThisParticipant =
             participant.ClientPackageId == clientPackage.Id &&
             participant.CountsAgainstPackage;
 
-        if (!isAlreadyCountedThisParticipant && usedSessions >= clientPackage.TotalSessions)
+        var previousCharged = isAlreadyCountedThisParticipant ? Math.Max(0, participant.SessionsCharged) : 0;
+        var sessionsCharged = 1;
+        var newUsedSessions = usedSessions - previousCharged + sessionsCharged;
+
+        if (newUsedSessions > clientPackage.TotalSessions)
             throw new InvalidOperationException("Client package has no remaining sessions.");
 
         var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
@@ -240,7 +246,7 @@ public class SessionService : ISessionService
 
         participant.ClientPackageId = clientPackage.Id;
         participant.CountsAgainstPackage = true;
-        participant.SessionsCharged = 1;
+        participant.SessionsCharged = sessionsCharged;
         participant.PackageId = clientPackage.PackageId;
 
         participant.PlannedBillingType = clientPackage.ExpectedBillingType;
@@ -248,6 +254,7 @@ public class SessionService : ISessionService
         participant.ExpectedUnitPrice = expectedUnitPrice;
         participant.ActualUnitPrice = actualUnitPrice;
         participant.BalanceDifference = balanceDifference;
+        participant.IsCountedFromPackage = true;
 
         participant.UpdatedAt = DateTime.UtcNow;
 
@@ -288,7 +295,7 @@ public class SessionService : ISessionService
             await _context.ClientBalanceTransactions.AddAsync(transaction);
         }
 
-        clientPackage.UsedSessions = usedSessions + (isAlreadyCountedThisParticipant ? 0 : 1);
+        clientPackage.UsedSessions = newUsedSessions;
 
         if (clientPackage.UsedSessions >= clientPackage.TotalSessions)
             await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackage.Id);
@@ -499,8 +506,25 @@ public class SessionService : ISessionService
             }).ToList(),
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
-            CreatedBy = s.CreatedBy
+            CreatedBy = s.CreatedBy,
+            OutlookCategories = ReadStringList(s.OutlookCategoriesJson),
+            PrimaryOutlookCategory = s.PrimaryOutlookCategory
         };
+    }
+
+    private static List<string> ReadStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<string>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
     }
 
     private async Task<int> CountPeopleInRoomForTimeRangeAsync(

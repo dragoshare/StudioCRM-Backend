@@ -14,6 +14,7 @@ public class PackageDto
     public int SessionsPerWeek { get; set; }
     public int DurationDays { get; set; }
     public SessionBillingType BillingType { get; set; }
+    public int ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }
     public bool IsActive { get; set; }

@@ -34,7 +34,7 @@ public class TrainerPortalService : ITrainerPortalService
                 FullName = t.User.FirstName + " " + t.User.LastName,
                 Email = t.User.Email,
                 Phone = t.Phone,
-                AvatarUrl = t.AvatarUrl,
+                AvatarUrl = t.User.AvatarUrl,
                 Bio = t.Bio,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
@@ -56,9 +56,9 @@ public class TrainerPortalService : ITrainerPortalService
 
         trainer.User.FirstName = request.FirstName.Trim();
         trainer.User.LastName = request.LastName.Trim();
+        trainer.User.AvatarUrl = request.AvatarUrl;
         trainer.User.UpdatedAt = DateTime.UtcNow;
         trainer.Phone = request.Phone;
-        trainer.AvatarUrl = request.AvatarUrl;
         trainer.Bio = request.Bio;
         trainer.ExperienceYears = request.ExperienceYears;
         trainer.UpdatedAt = DateTime.UtcNow;
@@ -82,8 +82,10 @@ public class TrainerPortalService : ITrainerPortalService
                 ClientId = c.Id,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
@@ -111,6 +113,7 @@ public class TrainerPortalService : ITrainerPortalService
             return null;
 
         var client = await _context.Clients
+            .Include(c => c.User)
             .FirstOrDefaultAsync(c => c.Id == clientId && c.TrainerId == trainerId.Value);
 
         if (client is null)
@@ -124,7 +127,6 @@ public class TrainerPortalService : ITrainerPortalService
         client.LastName = request.LastName;
         client.Email = request.Email;
         client.PhoneNumber = request.PhoneNumber;
-        client.AvatarUrl = request.AvatarUrl;
         client.Goal = request.Goal;
         client.Notes = request.Notes;
         client.ProgressPercent = request.ProgressPercent;
@@ -133,6 +135,14 @@ public class TrainerPortalService : ITrainerPortalService
         client.LocationId = request.LocationId;
         client.NextSessionAt = request.NextSessionAt;
         client.UpdatedAt = DateTime.UtcNow;
+
+        if (client.User is not null)
+        {
+            client.User.FirstName = client.FirstName;
+            client.User.LastName = client.LastName;
+            client.User.AvatarUrl = request.AvatarUrl;
+            client.User.UpdatedAt = DateTime.UtcNow;
+        }
 
         await _context.SaveChangesAsync();
 
@@ -260,8 +270,10 @@ public class TrainerPortalService : ITrainerPortalService
                 ClientId = c.Id,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
@@ -340,8 +352,10 @@ public class TrainerPortalService : ITrainerPortalService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
-                AvatarUrl = c.AvatarUrl,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
                 ProgressPercent = c.ProgressPercent,

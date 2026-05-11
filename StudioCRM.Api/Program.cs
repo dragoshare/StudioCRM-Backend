@@ -62,6 +62,7 @@ builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
 builder.Services.AddScoped<IClientPaymentService, ClientPaymentService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
+builder.Services.AddScoped<ISessionAutoCompletionService, SessionAutoCompletionService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>
@@ -145,6 +146,7 @@ builder.Services.AddHttpClient<IOutlookWebhookService, OutlookWebhookService>();
 builder.Services.AddHttpClient<IOutlookTokenService, OutlookTokenService>();
 
 builder.Services.AddHostedService<OutlookSubscriptionRenewalWorker>();
+builder.Services.AddHostedService<SessionAutoCompletionWorker>();
 
 builder.Services.Configure<ResendClientOptions>(options =>
 {

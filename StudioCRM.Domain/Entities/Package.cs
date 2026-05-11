@@ -22,6 +22,8 @@ public class Package
 
     public SessionBillingType BillingType { get; set; } = SessionBillingType.OneToOne;
 
+    public int ParticipantsCount { get; set; } = 1;
+
     public int? LocationId { get; set; }
 
     public Location? Location { get; set; }

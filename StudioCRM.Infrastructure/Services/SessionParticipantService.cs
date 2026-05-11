@@ -11,13 +11,16 @@ public class SessionParticipantService : ISessionParticipantService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISubscriptionService _subscriptionService;
 
     public SessionParticipantService(
         StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ISubscriptionService subscriptionService)
     {
         _context = context;
         _currentUser = currentUser;
+        _subscriptionService = subscriptionService;
     }
 
     public async Task<List<SessionParticipantDto>> GetBySessionIdAsync(int sessionId)
@@ -133,6 +136,11 @@ public class SessionParticipantService : ISessionParticipantService
         if (!request.Participants.Any())
             throw new InvalidOperationException("At least one participant is required.");
 
+        if (!Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))
+            throw new InvalidOperationException("Invalid actual session type.");
+
+        var completedPackageIds = new HashSet<int>();
+
         foreach (var participantRequest in request.Participants)
         {
             var client = await _context.Clients
@@ -159,12 +167,18 @@ public class SessionParticipantService : ISessionParticipantService
                 await _context.SessionParticipants.AddAsync(participant);
             }
 
+            var previouslyCountedPackageId = participant.ClientPackageId;
+            var wasPreviouslyCounted = participant.CountsAgainstPackage;
+            var previouslyCharged = wasPreviouslyCounted
+                ? Math.Max(0, participant.SessionsCharged)
+                : 0;
+
             participant.AttendanceStatus = participantRequest.AttendanceStatus;
             participant.CountsAgainstPackage = participantRequest.CountsAgainstPackage;
             participant.SessionsCharged = participantRequest.SessionsCharged;
             participant.Note = participantRequest.Note;
 
-            if (participantRequest.CountsAgainstPackage)
+            if (participantRequest.CountsAgainstPackage && participantRequest.AttendanceStatus == "Present")
             {
                 var activeClientPackage = await _context.ClientPackages
                     .Where(cp => cp.ClientId == client.Id && cp.IsActive)
@@ -173,16 +187,74 @@ public class SessionParticipantService : ISessionParticipantService
 
                 if (activeClientPackage is not null)
                 {
+                    var usedSessions = await _context.SessionParticipants
+                        .Where(p =>
+                            p.ClientPackageId == activeClientPackage.Id &&
+                            p.CountsAgainstPackage)
+                        .SumAsync(p => p.SessionsCharged);
+
+                    var sessionsCharged = Math.Max(1, participantRequest.SessionsCharged);
+                    var isAlreadyCountedThisPackage = previouslyCountedPackageId == activeClientPackage.Id;
+                    var newUsedSessions = usedSessions - (isAlreadyCountedThisPackage ? previouslyCharged : 0) + sessionsCharged;
+
+                    if (newUsedSessions > activeClientPackage.TotalSessions)
+                        throw new InvalidOperationException("Client package has no remaining sessions.");
+
+                    var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
+                    var actualUnitPrice = await ResolveActualUnitPriceAsync(
+                        activeClientPackage,
+                        session.LocationId,
+                        actualBillingType);
+                    var balanceDifference = (expectedUnitPrice - actualUnitPrice) * sessionsCharged;
+
                     participant.PackageId = activeClientPackage.PackageId;
                     participant.ClientPackageId = activeClientPackage.Id;
-                    participant.PlannedBillingType ??= activeClientPackage.ExpectedBillingType;
-                    participant.ExpectedUnitPrice ??= activeClientPackage.ExpectedUnitPrice;
+                    participant.SessionsCharged = sessionsCharged;
+                    participant.PlannedBillingType = activeClientPackage.ExpectedBillingType;
+                    participant.ActualBillingType = actualBillingType;
+                    participant.ExpectedUnitPrice = expectedUnitPrice;
+                    participant.ActualUnitPrice = actualUnitPrice;
+                    participant.BalanceDifference = balanceDifference;
+                    participant.IsCountedFromPackage = true;
 
-                    if (Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))
+                    var existingTransaction = await _context.ClientBalanceTransactions
+                        .FirstOrDefaultAsync(t =>
+                            t.ClientPackageId == activeClientPackage.Id &&
+                            t.SessionId == session.Id &&
+                            t.ClientId == activeClientPackage.ClientId &&
+                            t.Type == BalanceTransactionType.PackageAdjustment);
+
+                    if (existingTransaction is not null)
                     {
-                        participant.ActualBillingType = actualBillingType;
+                        _context.ClientBalanceTransactions.Remove(existingTransaction);
                     }
+
+                    if (balanceDifference != 0)
+                    {
+                        await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+                        {
+                            ClientId = activeClientPackage.ClientId,
+                            ClientPackageId = activeClientPackage.Id,
+                            SessionId = session.Id,
+                            Amount = balanceDifference,
+                            Type = BalanceTransactionType.PackageAdjustment,
+                            Description = balanceDifference > 0
+                                ? $"Nadpłata: sesja rozliczona taniej niż pakiet ({actualBillingType} zamiast {activeClientPackage.ExpectedBillingType})."
+                                : $"Dopłata: sesja rozliczona drożej niż pakiet ({actualBillingType} zamiast {activeClientPackage.ExpectedBillingType}).",
+                            CreatedAt = DateTime.UtcNow
+                        });
+                    }
+
+                    activeClientPackage.UsedSessions = newUsedSessions;
+
+                    if (newUsedSessions >= activeClientPackage.TotalSessions)
+                        completedPackageIds.Add(activeClientPackage.Id);
                 }
+            }
+            else
+            {
+                participant.CountsAgainstPackage = false;
+                participant.IsCountedFromPackage = false;
             }
 
             participant.UpdatedAt = DateTime.UtcNow;
@@ -199,7 +271,52 @@ public class SessionParticipantService : ISessionParticipantService
 
         await _context.SaveChangesAsync();
 
+        foreach (var clientPackageId in completedPackageIds)
+        {
+            await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackageId);
+        }
+
         return true;
+    }
+
+    private async Task<decimal> ResolveActualUnitPriceAsync(
+        ClientPackage clientPackage,
+        int sessionLocationId,
+        SessionBillingType actualBillingType)
+    {
+        var sessionsPerWeek = clientPackage.SessionsPerWeek > 0
+            ? clientPackage.SessionsPerWeek
+            : Math.Max(1, (int)Math.Ceiling(clientPackage.TotalSessions / 4m));
+        var locationId = clientPackage.LocationId ?? sessionLocationId;
+
+        var pricePackage = await _context.Packages
+            .Where(p =>
+                p.IsActive &&
+                p.BillingType == actualBillingType &&
+                p.SessionsPerWeek == sessionsPerWeek &&
+                p.SessionsLimit == clientPackage.TotalSessions &&
+                (p.LocationId == locationId || p.LocationId == null))
+            .OrderByDescending(p => p.LocationId == locationId)
+            .FirstOrDefaultAsync();
+
+        if (pricePackage is null)
+        {
+            throw new InvalidOperationException(
+                $"No price package found for {actualBillingType}, {sessionsPerWeek} sessions per week and location {locationId}.");
+        }
+
+        if (pricePackage.SessionsLimit <= 0)
+            throw new InvalidOperationException("Matched price package sessions limit must be greater than zero.");
+
+        return NormalizeUnitPrice(pricePackage.Price / pricePackage.SessionsLimit);
+    }
+
+    private static decimal NormalizeUnitPrice(decimal amount)
+    {
+        if (amount <= 0)
+            throw new InvalidOperationException("Actual unit price must be greater than zero.");
+
+        return decimal.Round(amount, 2);
     }
 
     private async Task<SessionParticipantDto> MapParticipantAsync(int participantId)

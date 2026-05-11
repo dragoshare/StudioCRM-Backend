@@ -21,4 +21,5 @@ public interface IClientPortalService
     Task<ClientPackageSettlementDto> GetPackageSettlementAsync(string userId);
 
     Task<ClientTrainerContactDto?> GetTrainerContactAsync(int userId);
+    Task<ClientOwnerContactDto?> GetOwnerContactAsync();
 }

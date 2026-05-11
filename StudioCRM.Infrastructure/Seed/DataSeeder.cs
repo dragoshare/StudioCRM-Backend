@@ -189,6 +189,7 @@ public static class DataSeeder
                 SessionsPerWeek = sessionsPerWeek,
                 DurationDays = durationDays,
                 BillingType = billingType,
+                ParticipantsCount = (int)billingType,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -206,6 +207,7 @@ public static class DataSeeder
             package.SessionsPerWeek = sessionsPerWeek;
             package.DurationDays = durationDays;
             package.BillingType = billingType;
+            package.ParticipantsCount = (int)billingType;
             package.IsActive = true;
             package.IsDeleted = false;
             package.DeletedAt = null;
@@ -309,7 +311,6 @@ public static class DataSeeder
                     UserId = user.Id,
                     Bio = seed.Bio,
                     Phone = seed.Phone,
-                    AvatarUrl = null,
                     Status = "Active",
                     ExperienceYears = seed.Experience,
                     CreatedAt = DateTime.UtcNow,

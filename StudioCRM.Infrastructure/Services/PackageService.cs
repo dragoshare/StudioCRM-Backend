@@ -34,6 +34,7 @@ public class PackageService : IPackageService
             SessionsPerWeek = request.SessionsPerWeek,
             DurationDays = request.DurationDays,
             BillingType = request.BillingType,
+            ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType),
             LocationId = request.LocationId,
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
@@ -88,6 +89,7 @@ public class PackageService : IPackageService
         package.SessionsPerWeek = request.SessionsPerWeek;
         package.DurationDays = request.DurationDays;
         package.BillingType = request.BillingType;
+        package.ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType);
         package.LocationId = request.LocationId;
         package.IsActive = request.IsActive;
         package.UpdatedAt = DateTime.UtcNow;
@@ -154,6 +156,7 @@ public class PackageService : IPackageService
             SessionsPerWeek = package.SessionsPerWeek,
             DurationDays = package.DurationDays,
             BillingType = package.BillingType,
+            ParticipantsCount = package.ParticipantsCount,
             LocationId = package.LocationId,
             LocationName = package.Location?.Name,
             IsActive = package.IsActive,
@@ -161,5 +164,17 @@ public class PackageService : IPackageService
             UpdatedAt = package.UpdatedAt,
             CreatedBy = package.CreatedBy
         };
+    }
+
+    private static int ResolveParticipantsCount(int? participantsCount, StudioCRM.Domain.Enums.SessionBillingType billingType)
+    {
+        var resolved = participantsCount ?? (int)billingType;
+
+        if (resolved < 1 || resolved > 4)
+        {
+            throw new InvalidOperationException("Participants count must be between 1 and 4.");
+        }
+
+        return resolved;
     }
 }

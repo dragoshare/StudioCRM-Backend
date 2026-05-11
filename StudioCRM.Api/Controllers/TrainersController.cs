@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StudioCRM.Application.DTOs.TrainerRates;
+using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.DTOs.Trainers;
 using StudioCRM.Application.Interfaces;
 
@@ -12,10 +14,17 @@ namespace StudioCRM.Api.Controllers;
 public class TrainersController : ControllerBase
 {
     private readonly ITrainerService _trainerService;
+    private readonly ITrainerRateService _trainerRateService;
+    private readonly ITrainerSettlementService _trainerSettlementService;
 
-    public TrainersController(ITrainerService trainerService)
+    public TrainersController(
+        ITrainerService trainerService,
+        ITrainerRateService trainerRateService,
+        ITrainerSettlementService trainerSettlementService)
     {
         _trainerService = trainerService;
+        _trainerRateService = trainerRateService;
+        _trainerSettlementService = trainerSettlementService;
     }
 
     [HttpGet]
@@ -79,5 +88,37 @@ public class TrainersController : ControllerBase
     public async Task<ActionResult<List<TrainerDto>>> GetDeleted()
     {
         return Ok(await _trainerService.GetDeletedAsync());
+    }
+
+    [HttpGet("{id:int}/rates")]
+    public async Task<ActionResult<List<TrainerRateDto>>> GetRates(int id)
+    {
+        return Ok(await _trainerRateService.GetByTrainerIdAsync(id));
+    }
+
+    [HttpPut("{id:int}/rates")]
+    public async Task<ActionResult<List<TrainerRateDto>>> UpdateRates(int id, UpdateTrainerRatesDto request)
+    {
+        return Ok(await _trainerRateService.UpdateRatesAsync(id, request));
+    }
+
+    [HttpGet("{id:int}/settlement")]
+    public async Task<ActionResult<TrainerMonthlySettlementDto>> GetMonthlySettlement(
+        int id,
+        [FromQuery] int year,
+        [FromQuery] int month)
+    {
+        var result = await _trainerSettlementService.GetMonthlySettlementAsync(id, year, month);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPost("{id:int}/settlement/mark-as-paid")]
+    public async Task<ActionResult<TrainerMonthlySettlementDto>> MarkSettlementAsPaid(
+        int id,
+        [FromQuery] int year,
+        [FromQuery] int month)
+    {
+        var result = await _trainerSettlementService.MarkAsPaidAsync(id, year, month);
+        return result is null ? NotFound() : Ok(result);
     }
 }
