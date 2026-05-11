@@ -11,6 +11,8 @@ namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookWebhookService : IOutlookWebhookService
 {
+    private const string OutlookStudioTimeZone = "Central European Standard Time";
+
     private readonly StudioCRMDbContext _context;
     private readonly HttpClient _httpClient;
     private readonly IOutlookTokenService _tokenService;
@@ -687,8 +689,57 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var raw = dateTime.GetString();
 
-        return DateTime.TryParse(raw, out var parsed)
-            ? DateTime.SpecifyKind(parsed, DateTimeKind.Utc)
-            : DateTime.UtcNow;
+        if (!DateTime.TryParse(raw, out var parsed))
+            return DateTime.UtcNow;
+
+        var hasExplicitOffset =
+            raw?.EndsWith("Z", StringComparison.OrdinalIgnoreCase) == true ||
+            raw?.Contains('+') == true ||
+            (raw?.LastIndexOf('-') ?? -1) > "yyyy-MM-dd".Length;
+
+        if (hasExplicitOffset && DateTimeOffset.TryParse(raw, out var offsetValue))
+            return offsetValue.UtcDateTime;
+
+        var graphTimeZone = dateWrapper.TryGetProperty("timeZone", out var timeZoneElement)
+            ? timeZoneElement.GetString()
+            : null;
+
+        if (string.Equals(graphTimeZone, "UTC", StringComparison.OrdinalIgnoreCase))
+            return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+
+        var localTime = DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(localTime, ResolveGraphTimeZone(graphTimeZone));
+    }
+
+    private static TimeZoneInfo ResolveGraphTimeZone(string? graphTimeZone)
+    {
+        var ids = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(graphTimeZone))
+            ids.Add(graphTimeZone);
+
+        if (string.Equals(graphTimeZone, OutlookStudioTimeZone, StringComparison.OrdinalIgnoreCase))
+            ids.Add("Europe/Warsaw");
+        else if (string.Equals(graphTimeZone, "Europe/Warsaw", StringComparison.OrdinalIgnoreCase))
+            ids.Add(OutlookStudioTimeZone);
+
+        ids.Add("Europe/Warsaw");
+        ids.Add(OutlookStudioTimeZone);
+
+        foreach (var id in ids.Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 }

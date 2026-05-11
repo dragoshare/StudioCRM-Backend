@@ -12,6 +12,8 @@ namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 {
+    private const string OutlookStudioTimeZone = "Central European Standard Time";
+
     private readonly StudioCRMDbContext _context;
     private readonly OutlookSettings _settings;
     private readonly HttpClient _httpClient;
@@ -194,13 +196,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             },
             ["start"] = new
             {
-                dateTime = session.StartAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
-                timeZone = "UTC"
+                dateTime = ToStudioLocalTime(session.StartAt).ToString("yyyy-MM-ddTHH:mm:ss"),
+                timeZone = OutlookStudioTimeZone
             },
             ["end"] = new
             {
-                dateTime = session.EndAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
-                timeZone = "UTC"
+                dateTime = ToStudioLocalTime(session.EndAt).ToString("yyyy-MM-ddTHH:mm:ss"),
+                timeZone = OutlookStudioTimeZone
             },
             ["location"] = new
             {
@@ -214,6 +216,37 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             payload["categories"] = categories;
 
         return payload;
+    }
+
+    private static DateTime ToStudioLocalTime(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            return value;
+
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : value.ToUniversalTime();
+
+        return TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone());
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", OutlookStudioTimeZone })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private static List<object> BuildAttendees(Session session)
