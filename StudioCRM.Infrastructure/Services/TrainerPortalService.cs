@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Profiles;
+using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.DTOs.TrainerPortal;
 using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.Interfaces;
@@ -12,15 +13,18 @@ public class TrainerPortalService : ITrainerPortalService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly ISessionService _sessionService;
     private readonly ITrainerSettlementService _settlementService;
 
     public TrainerPortalService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
+        ISessionService sessionService,
         ITrainerSettlementService settlementService)
     {
         _context = context;
         _currentUser = currentUser;
+        _sessionService = sessionService;
         _settlementService = settlementService;
     }
 
@@ -177,25 +181,71 @@ public class TrainerPortalService : ITrainerPortalService
         if (trainerId is null)
             return new List<TrainerPortalSessionDto>();
 
-        return await _context.Sessions
+        var sessions = await _context.Sessions
             .Include(s => s.Participants)
             .ThenInclude(p => p.Client)
             .Include(s => s.Location)
             .Where(s => s.TrainerId == trainerId.Value)
             .OrderBy(s => s.StartAt)
+            .ToListAsync();
+
+        return sessions
             .Select(s => new TrainerPortalSessionDto
             {
                 SessionId = s.Id,
                 Title = s.Title,
                 Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
+                StartAt = ToStudioDisplayDateTime(s.StartAt),
+                EndAt = ToStudioDisplayDateTime(s.EndAt),
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
-                StudioRoom = s.StudioRoom,
                 Status = s.Status
             })
-            .ToListAsync();
+            .ToList();
+    }
+
+    public async Task<SessionDto?> GetSessionAsync(int sessionId)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync();
+        if (trainerId is null)
+            return null;
+
+        var ownsSession = await _context.Sessions
+            .AnyAsync(s => s.Id == sessionId && s.TrainerId == trainerId.Value);
+
+        if (!ownsSession)
+            return null;
+
+        return await _sessionService.GetByIdAsync(sessionId);
+    }
+
+    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto request)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync()
+            ?? throw new InvalidOperationException("Trainer not found.");
+
+        await ValidateTrainerCanManageSessionAsync(trainerId, request.LocationId, request.Participants);
+
+        request.TrainerId = trainerId;
+        return await _sessionService.CreateAsync(request);
+    }
+
+    public async Task<SessionDto?> UpdateSessionAsync(int sessionId, UpdateSessionDto request)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync();
+        if (trainerId is null)
+            return null;
+
+        var ownsSession = await _context.Sessions
+            .AnyAsync(s => s.Id == sessionId && s.TrainerId == trainerId.Value);
+
+        if (!ownsSession)
+            return null;
+
+        await ValidateTrainerCanManageSessionAsync(trainerId.Value, request.LocationId, request.Participants);
+
+        request.TrainerId = trainerId.Value;
+        return await _sessionService.UpdateAsync(sessionId, request);
     }
 
     public async Task<TrainerPortalDashboardDto?> GetDashboardAsync()
@@ -226,41 +276,45 @@ public class TrainerPortalService : ITrainerPortalService
         var todaySessionsCount = await sessionsQuery.CountAsync(s => s.StartAt >= today && s.StartAt < tomorrow);
         var upcomingSessionsCount = await sessionsQuery.CountAsync(s => s.StartAt >= now);
 
-        var todaySessions = await sessionsQuery
+        var todaySessionsSource = await sessionsQuery
             .Where(s => s.StartAt >= today && s.StartAt < tomorrow)
             .OrderBy(s => s.StartAt)
             .Take(8)
+            .ToListAsync();
+
+        var todaySessions = todaySessionsSource
             .Select(s => new TrainerPortalSessionDto
             {
                 SessionId = s.Id,
                 Title = s.Title,
                 Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
+                StartAt = ToStudioDisplayDateTime(s.StartAt),
+                EndAt = ToStudioDisplayDateTime(s.EndAt),
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
-                StudioRoom = s.StudioRoom,
                 Status = s.Status
             })
-            .ToListAsync();
+            .ToList();
 
-        var upcomingSessions = await sessionsQuery
+        var upcomingSessionsSource = await sessionsQuery
             .Where(s => s.StartAt >= now)
             .OrderBy(s => s.StartAt)
             .Take(8)
+            .ToListAsync();
+
+        var upcomingSessions = upcomingSessionsSource
             .Select(s => new TrainerPortalSessionDto
             {
                 SessionId = s.Id,
                 Title = s.Title,
                 Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
+                StartAt = ToStudioDisplayDateTime(s.StartAt),
+                EndAt = ToStudioDisplayDateTime(s.EndAt),
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
-                StudioRoom = s.StudioRoom,
                 Status = s.Status
             })
-            .ToListAsync();
+            .ToList();
 
         var recentClients = await clientsQuery
             .OrderByDescending(c => c.CreatedAt)
@@ -332,6 +386,67 @@ public class TrainerPortalService : ITrainerPortalService
             .Where(t => t.UserId == _currentUser.UserId.Value)
             .Select(t => (int?)t.Id)
             .FirstOrDefaultAsync();
+    }
+
+    private async Task ValidateTrainerCanManageSessionAsync(
+        int trainerId,
+        int locationId,
+        IReadOnlyCollection<CreateSessionParticipantDto>? participants)
+    {
+        var hasLocationAccess = await _context.TrainerLocations
+            .AnyAsync(tl => tl.TrainerId == trainerId && tl.LocationId == locationId);
+
+        if (!hasLocationAccess)
+            throw new InvalidOperationException("Trainer cannot manage sessions in this location.");
+
+        if (participants is null || participants.Count == 0)
+            return;
+
+        var clientIds = participants
+            .Select(p => p.ClientId)
+            .Distinct()
+            .ToList();
+
+        var ownedClientIds = await _context.Clients
+            .Where(c => c.TrainerId == trainerId && clientIds.Contains(c.Id))
+            .Select(c => c.Id)
+            .ToListAsync();
+
+        if (ownedClientIds.Count != clientIds.Count)
+            throw new InvalidOperationException("Trainer can only add their own clients to sessions.");
+    }
+
+    private static DateTime ToStudioDisplayDateTime(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            return value;
+
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : value.ToUniversalTime();
+
+        return DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone()),
+            DateTimeKind.Unspecified);
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", "Central European Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private IQueryable<ClientDto> BuildTrainerClientQuery(int trainerId)

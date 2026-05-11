@@ -172,9 +172,6 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
              session.Participants.Select(p => $"{p.Client.FirstName} {p.Client.LastName}"));
         var trainerName = $"{session.Trainer.User.FirstName} {session.Trainer.User.LastName}";
         var locationName = session.Location.Name;
-        var room = string.IsNullOrWhiteSpace(session.StudioRoom)
-            ? "Brak sali"
-            : session.StudioRoom;
 
         var attendees = BuildAttendees(session);
         var categories = ReadStringList(session.OutlookCategoriesJson);
@@ -189,7 +186,6 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 <p><strong>Klient:</strong> {clientName}</p>
                 <p><strong>Trener:</strong> {trainerName}</p>
                 <p><strong>Lokalizacja:</strong> {locationName}</p>
-                <p><strong>Sala:</strong> {room}</p>
                 <p><strong>Status:</strong> {session.Status}</p>
                 <p><strong>Notatka:</strong> {session.Note}</p>
                 """
@@ -206,7 +202,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             },
             ["location"] = new
             {
-                displayName = $"{locationName} / {room}",
+                displayName = locationName,
                 locationEmailAddress = session.Location.CalendarEmail
             },
             ["attendees"] = attendees

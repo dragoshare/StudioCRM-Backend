@@ -321,7 +321,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             return "UnknownLocation";
 
         if (normalized.Contains("limit sali"))
-            return "RoomLimitExceeded";
+            return "LocationLimitExceeded";
 
         if (normalized.Contains("trenera"))
             return "UnknownTrainer";

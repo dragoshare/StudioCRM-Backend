@@ -12,7 +12,7 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class SessionService : ISessionService
 {
-    private const int RoomPeopleLimit = 8;
+    private const int LocationPeopleLimit = 8;
     private const string OutlookStudioTimeZone = "Central European Standard Time";
 
     private readonly StudioCRMDbContext _context;
@@ -81,7 +81,7 @@ public class SessionService : ISessionService
             EndAt = normalizedEndAt,
             TrainerId = request.TrainerId,
             LocationId = request.LocationId,
-            StudioRoom = request.StudioRoom,
+            StudioRoom = null,
             Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status,
             PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
             CreatedAt = DateTime.UtcNow,
@@ -133,7 +133,7 @@ public class SessionService : ISessionService
         session.EndAt = normalizedEndAt;
         session.TrainerId = request.TrainerId;
         session.LocationId = request.LocationId;
-        session.StudioRoom = request.StudioRoom;
+        session.StudioRoom = null;
         session.Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status;
         session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
         session.UpdatedAt = DateTime.UtcNow;
@@ -549,7 +549,7 @@ public class SessionService : ISessionService
             .ThenBy(p => p.Client.LastName)
             .ToList();
 
-        var roomParticipantsCount = await CountPeopleInRoomForTimeRangeAsync(
+        var locationParticipantsCount = await CountPeopleInLocationForTimeRangeAsync(
             s.LocationId,
             s.StartAt,
             s.EndAt);
@@ -559,23 +559,22 @@ public class SessionService : ISessionService
             Id = s.Id,
             Title = s.Title,
             Note = s.Note,
-            StartAt = s.StartAt,
-            EndAt = s.EndAt,
+            StartAt = ToStudioDisplayDateTime(s.StartAt),
+            EndAt = ToStudioDisplayDateTime(s.EndAt),
             TrainerId = s.TrainerId,
             TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
             LocationId = s.LocationId,
             LocationName = s.Location.Name,
-            StudioRoom = s.StudioRoom,
             Status = s.Status,
             PlannedSessionType = s.PlannedSessionType,
             ActualSessionType = s.ActualSessionType,
             ActualParticipantsCount = s.ActualParticipantsCount,
-            CompletedAt = s.CompletedAt,
+            CompletedAt = s.CompletedAt.HasValue ? ToStudioDisplayDateTime(s.CompletedAt.Value) : null,
             ParticipantsCount = participants.Count,
             ClientsDisplayName = SessionTitleBuilder.Build(participants.Select(p => p.Client).ToList()),
-            RoomParticipantsCount = roomParticipantsCount,
-            RoomLimit = RoomPeopleLimit,
-            IsRoomLimitExceeded = roomParticipantsCount > RoomPeopleLimit,
+            LocationParticipantsCount = locationParticipantsCount,
+            LocationLimit = LocationPeopleLimit,
+            IsLocationLimitExceeded = locationParticipantsCount > LocationPeopleLimit,
             Participants = participants.Select(p => new SessionParticipantListDto
             {
                 Id = p.Id,
@@ -611,7 +610,21 @@ public class SessionService : ISessionService
         }
     }
 
-    private async Task<int> CountPeopleInRoomForTimeRangeAsync(
+    private static DateTime ToStudioDisplayDateTime(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            return value;
+
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : value.ToUniversalTime();
+
+        return DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone()),
+            DateTimeKind.Unspecified);
+    }
+
+    private async Task<int> CountPeopleInLocationForTimeRangeAsync(
         int locationId,
         DateTime startAt,
         DateTime endAt)

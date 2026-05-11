@@ -20,8 +20,6 @@ public class SessionDto
 
     public string LocationName { get; set; } = string.Empty;
 
-    public string? StudioRoom { get; set; }
-
     public string Status { get; set; } = string.Empty;
 
     public string? PlannedSessionType { get; set; }
@@ -43,9 +41,9 @@ public class SessionDto
     public DateTime UpdatedAt { get; set; }
 
     public int? CreatedBy { get; set; }
-    public int RoomParticipantsCount { get; set; }
-    public int RoomLimit { get; set; } = 8;
-    public bool IsRoomLimitExceeded { get; set; }
+    public int LocationParticipantsCount { get; set; }
+    public int LocationLimit { get; set; } = 8;
+    public bool IsLocationLimitExceeded { get; set; }
     public List<string> OutlookCategories { get; set; } = new();
 
     public string? PrimaryOutlookCategory { get; set; }

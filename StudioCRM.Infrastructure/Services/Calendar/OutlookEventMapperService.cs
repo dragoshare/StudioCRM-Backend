@@ -8,7 +8,7 @@ namespace StudioCRM.Infrastructure.Services.Calendar;
 
 public class OutlookEventMapperService
 {
-    private const int RoomPeopleLimit = 8;
+    private const int LocationPeopleLimit = 8;
 
     private readonly StudioCRMDbContext _context;
 
@@ -112,7 +112,6 @@ public class OutlookEventMapperService
             EndAt = evt.EndAt,
             TrainerId = trainer.Id,
             LocationId = location.Id,
-            StudioRoom = location.Name,
             Status = "Planned",
 
             OutlookCategoriesJson = evt.CategoriesJson,
@@ -165,14 +164,14 @@ public class OutlookEventMapperService
 
         await _context.SaveChangesAsync();
 
-        var roomPeopleCount = await CountPeopleInRoomForTimeRangeAsync(
+        var locationPeopleCount = await CountPeopleInLocationForTimeRangeAsync(
             location.Id,
             evt.StartAt,
             evt.EndAt);
 
-        if (roomPeopleCount > RoomPeopleLimit)
+        if (locationPeopleCount > LocationPeopleLimit)
         {
-            warnings.Add($"Limit sali przekroczony: {roomPeopleCount}/{RoomPeopleLimit}");
+            warnings.Add($"Limit lokalizacji przekroczony: {locationPeopleCount}/{LocationPeopleLimit}");
         }
 
         await SaveWarningsAsync(evt, warnings);
@@ -215,7 +214,7 @@ public class OutlookEventMapperService
         });
     }
 
-    private async Task<int> CountPeopleInRoomForTimeRangeAsync(
+    private async Task<int> CountPeopleInLocationForTimeRangeAsync(
         int locationId,
         DateTime startAt,
         DateTime endAt)

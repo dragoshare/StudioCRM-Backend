@@ -278,7 +278,6 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (location != null)
         {
             session.LocationId = location.Id;
-            session.StudioRoom = location.Name;
         }
 
         session.OutlookCategoriesJson = evt.CategoriesJson;

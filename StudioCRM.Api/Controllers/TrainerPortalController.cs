@@ -233,6 +233,35 @@ public class TrainerPortalController : ControllerBase
         return Ok(await _trainerPortalService.GetSessionsAsync());
     }
 
+    [HttpGet("sessions/{sessionId:int}")]
+    public async Task<ActionResult<SessionDto>> GetSession(int sessionId)
+    {
+        var result = await _trainerPortalService.GetSessionAsync(sessionId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
+    [HttpPost("sessions")]
+    public async Task<ActionResult<SessionDto>> CreateSession(CreateSessionDto request)
+    {
+        return await HandleAsync<SessionDto>(async () =>
+        {
+            var result = await _trainerPortalService.CreateSessionAsync(request);
+            return CreatedAtAction(nameof(GetSession), new { sessionId = result.Id }, result);
+        });
+    }
+
+    [HttpPut("sessions/{sessionId:int}")]
+    public async Task<ActionResult<SessionDto>> UpdateSession(
+        int sessionId,
+        UpdateSessionDto request)
+    {
+        return await HandleAsync<SessionDto>(async () =>
+        {
+            var result = await _trainerPortalService.UpdateSessionAsync(sessionId, request);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpPost("sessions/{sessionId:int}/complete")]
     public async Task<IActionResult> CompleteSession(
         int sessionId,

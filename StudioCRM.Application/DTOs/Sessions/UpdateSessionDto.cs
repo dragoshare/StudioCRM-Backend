@@ -14,8 +14,6 @@ public class UpdateSessionDto
 
     public int LocationId { get; set; }
 
-    public string? StudioRoom { get; set; }
-
     public string Status { get; set; } = "Planned";
 
     public string? PlannedSessionType { get; set; }

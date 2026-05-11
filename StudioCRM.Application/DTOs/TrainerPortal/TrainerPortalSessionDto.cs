@@ -16,7 +16,5 @@ public class TrainerPortalSessionDto
 
     public string LocationName { get; set; } = string.Empty;
 
-    public string? StudioRoom { get; set; }
-
     public string Status { get; set; } = string.Empty;
 }

@@ -8,7 +8,5 @@ public class ConvertExternalEventToSessionDto
 
     public int LocationId { get; set; }
 
-    public string? StudioRoom { get; set; }
-
     public string Status { get; set; } = "Planned";
 }

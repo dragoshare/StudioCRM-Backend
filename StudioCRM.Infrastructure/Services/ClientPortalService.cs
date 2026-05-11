@@ -125,64 +125,40 @@ public class ClientPortalService : IClientPortalService
         var payment = await GetPaymentAsync() ?? new ClientPortalPaymentDto();
         var trainer = await GetTrainerAsync();
 
-        var nextSession = await _context.Sessions
+        var nextSessionSource = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
             .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt >= now)
             .OrderBy(s => s.StartAt)
-            .Select(s => new ClientPortalSessionDto
-            {
-                Id = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
-                StudioRoom = s.StudioRoom,
-                LocationName = s.Location.Name,
-                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                Status = s.Status
-            })
             .FirstOrDefaultAsync();
 
-        var upcomingSessions = await _context.Sessions
+        var nextSession = nextSessionSource is null
+            ? null
+            : MapClientSession(nextSessionSource);
+
+        var upcomingSessionsSource = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
             .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt >= now)
             .OrderBy(s => s.StartAt)
             .Take(5)
-            .Select(s => new ClientPortalSessionDto
-            {
-                Id = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
-                StudioRoom = s.StudioRoom,
-                LocationName = s.Location.Name,
-                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                Status = s.Status
-            })
             .ToListAsync();
 
-        var recentSessions = await _context.Sessions
+        var upcomingSessions = upcomingSessionsSource
+            .Select(MapClientSession)
+            .ToList();
+
+        var recentSessionsSource = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
             .Where(s => s.Participants.Any(p => p.ClientId == client.Id) && s.StartAt < now)
             .OrderByDescending(s => s.StartAt)
             .Take(5)
-            .Select(s => new ClientPortalSessionDto
-            {
-                Id = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
-                StudioRoom = s.StudioRoom,
-                LocationName = s.Location.Name,
-                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                Status = s.Status
-            })
             .ToListAsync();
+
+        var recentSessions = recentSessionsSource
+            .Select(MapClientSession)
+            .ToList();
 
         return new ClientPortalDashboardDto
         {
@@ -205,24 +181,16 @@ public class ClientPortalService : IClientPortalService
         if (clientId is null)
             return new List<ClientPortalSessionDto>();
 
-        return await _context.Sessions
+        var sessions = await _context.Sessions
             .Include(s => s.Trainer).ThenInclude(t => t.User)
             .Include(s => s.Location)
             .Where(s => s.Participants.Any(p => p.ClientId == clientId.Value))
             .OrderBy(s => s.StartAt)
-            .Select(s => new ClientPortalSessionDto
-            {
-                Id = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = s.StartAt,
-                EndAt = s.EndAt,
-                StudioRoom = s.StudioRoom,
-                LocationName = s.Location.Name,
-                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                Status = s.Status
-            })
             .ToListAsync();
+
+        return sessions
+            .Select(MapClientSession)
+            .ToList();
     }
 
     public async Task<ClientPortalPackageDto?> GetPackageAsync()
@@ -470,9 +438,57 @@ public class ClientPortalService : IClientPortalService
             .FirstOrDefaultAsync();
     }
 
+    private static ClientPortalSessionDto MapClientSession(Session session)
+    {
+        return new ClientPortalSessionDto
+        {
+            Id = session.Id,
+            Title = session.Title,
+            Note = session.Note,
+            StartAt = ToStudioDisplayDateTime(session.StartAt),
+            EndAt = ToStudioDisplayDateTime(session.EndAt),
+            LocationName = session.Location.Name,
+            TrainerFullName = session.Trainer.User.FirstName + " " + session.Trainer.User.LastName,
+            Status = session.Status
+        };
+    }
+
+    private static DateTime ToStudioDisplayDateTime(DateTime value)
+    {
+        if (value.Kind == DateTimeKind.Unspecified)
+            return value;
+
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : value.ToUniversalTime();
+
+        return DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone()),
+            DateTimeKind.Unspecified);
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", "Central European Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
+    }
+
     private static string BuildGreetingMessage(string firstName)
     {
-        var dayName = DateTime.UtcNow.DayOfWeek switch
+        var dayName = ToStudioDisplayDateTime(DateTime.UtcNow).DayOfWeek switch
         {
             DayOfWeek.Monday => "poniedziałek",
             DayOfWeek.Tuesday => "wtorek",

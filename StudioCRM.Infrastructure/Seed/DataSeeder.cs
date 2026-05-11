@@ -974,7 +974,6 @@ public static class DataSeeder
             EndAt = start.AddHours(1),
             TrainerId = trainerId,
             LocationId = locationId,
-            StudioRoom = "Sala testowa",
             Status = status,
             PlannedSessionType = "BillingScenario",
             ActualSessionType = status == "Completed" ? "BillingScenario" : null,
@@ -1080,7 +1079,6 @@ public static class DataSeeder
                     EndAt = end,
                     TrainerId = trainer.Id,
                     LocationId = locationId,
-                    StudioRoom = $"Sala {Random.Shared.Next(1, 4)}",
                     Status = status,
                     PlannedSessionType = plannedType,
                     ActualSessionType = status == "Completed"

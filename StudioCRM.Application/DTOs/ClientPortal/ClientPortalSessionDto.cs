@@ -12,8 +12,6 @@ public class ClientPortalSessionDto
 
     public DateTime EndAt { get; set; }
 
-    public string? StudioRoom { get; set; }
-
     public string LocationName { get; set; } = string.Empty;
 
     public string? TrainerFullName { get; set; }
