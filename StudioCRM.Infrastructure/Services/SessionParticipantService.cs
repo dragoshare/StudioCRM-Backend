@@ -1,6 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
@@ -12,15 +14,21 @@ public class SessionParticipantService : ISessionParticipantService
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly IOutlookCalendarSyncService _outlookCalendarSyncService;
+    private readonly ILogger<SessionParticipantService> _logger;
 
     public SessionParticipantService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
-        ISubscriptionService subscriptionService)
+        ISubscriptionService subscriptionService,
+        IOutlookCalendarSyncService outlookCalendarSyncService,
+        ILogger<SessionParticipantService> logger)
     {
         _context = context;
         _currentUser = currentUser;
         _subscriptionService = subscriptionService;
+        _outlookCalendarSyncService = outlookCalendarSyncService;
+        _logger = logger;
     }
 
     public async Task<List<SessionParticipantDto>> GetBySessionIdAsync(int sessionId)
@@ -97,6 +105,8 @@ public class SessionParticipantService : ISessionParticipantService
 
         await _context.SaveChangesAsync();
 
+        await TrySyncSessionToOutlookAsync(sessionId);
+
         return await MapParticipantAsync(participant.Id);
     }
 
@@ -114,6 +124,8 @@ public class SessionParticipantService : ISessionParticipantService
 
         _context.SessionParticipants.Remove(participant);
         await _context.SaveChangesAsync();
+
+        await TrySyncSessionToOutlookAsync(sessionId);
 
         return true;
     }
@@ -276,7 +288,21 @@ public class SessionParticipantService : ISessionParticipantService
             await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackageId);
         }
 
+        await TrySyncSessionToOutlookAsync(sessionId);
+
         return true;
+    }
+
+    private async Task TrySyncSessionToOutlookAsync(int sessionId)
+    {
+        try
+        {
+            await _outlookCalendarSyncService.SyncSessionAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not sync session {SessionId} participants to Outlook.", sessionId);
+        }
     }
 
     private async Task<decimal> ResolveActualUnitPriceAsync(

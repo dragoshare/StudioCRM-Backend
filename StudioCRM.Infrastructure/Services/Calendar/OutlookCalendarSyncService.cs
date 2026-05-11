@@ -39,11 +39,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (session is null)
             throw new InvalidOperationException("Session does not exist.");
 
-        var integration = await _context.CalendarIntegrations
-            .FirstOrDefaultAsync(x =>
-                x.UserId == session.Trainer.UserId &&
-                x.Provider == "Outlook" &&
-                x.IsActive);
+        var integration = await GetTrainerIntegrationAsync(session.Trainer.UserId);
 
         if (integration is null)
             throw new InvalidOperationException("Trainer does not have active Outlook integration.");
@@ -69,11 +65,28 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             };
 
             await _context.CalendarEventLinks.AddAsync(link);
+
+            await UpsertExternalCalendarEventAsync(session, integration.Id, externalEventId);
         }
         else
         {
-            await UpdateEventAsync(session, integration.AccessToken, existingLink.ExternalEventId);
+            if (existingLink.CalendarIntegrationId != integration.Id)
+            {
+                await DeleteLinkedEventAsync(existingLink);
+
+                var externalEventId = await CreateEventAsync(session, integration.AccessToken);
+
+                existingLink.CalendarIntegrationId = integration.Id;
+                existingLink.ExternalEventId = externalEventId;
+            }
+            else
+            {
+                await UpdateEventAsync(session, integration.AccessToken, existingLink.ExternalEventId);
+            }
+
             existingLink.SyncedAt = DateTime.UtcNow;
+
+            await UpsertExternalCalendarEventAsync(session, integration.Id, existingLink.ExternalEventId);
         }
 
         await _context.SaveChangesAsync();
@@ -95,27 +108,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (!integration.IsActive)
             return;
 
-        await EnsureAccessTokenAsync(integration);
-
-        using var request = new HttpRequestMessage(
-            HttpMethod.Delete,
-            $"https://graph.microsoft.com/v1.0/me/events/{link.ExternalEventId}");
-
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
-
-        var response = await _httpClient.SendAsync(request);
-
-        if (response.IsSuccessStatusCode)
-        {
-            _context.CalendarEventLinks.Remove(link);
-            await _context.SaveChangesAsync();
-        }
-        else
-        {
-            var body = await response.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Microsoft delete event error: {body}");
-        }
+        await DeleteLinkedEventAsync(link);
+        _context.CalendarEventLinks.Remove(link);
+        await _context.SaveChangesAsync();
     }
 
     private async Task<string> CreateEventAsync(Session session, string accessToken)
@@ -169,7 +164,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             throw new InvalidOperationException($"Microsoft update event error: {body}");
     }
 
-    private object BuildGraphEventPayload(Session session)
+    private Dictionary<string, object?> BuildGraphEventPayload(Session session)
     {
         var clientName = string.Join(" + ",
              session.Participants.Select(p => $"{p.Client.FirstName} {p.Client.LastName}"));
@@ -179,10 +174,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             ? "Brak sali"
             : session.StudioRoom;
 
-        return new
+        var attendees = BuildAttendees(session);
+        var categories = ReadStringList(session.OutlookCategoriesJson);
+
+        var payload = new Dictionary<string, object?>
         {
-            subject = $"StudioCRM: {session.Title} — {clientName}",
-            body = new
+            ["subject"] = $"StudioCRM: {session.Title} - {clientName}",
+            ["body"] = new
             {
                 contentType = "HTML",
                 content = $"""
@@ -194,21 +192,153 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 <p><strong>Notatka:</strong> {session.Note}</p>
                 """
             },
-            start = new
+            ["start"] = new
             {
                 dateTime = session.StartAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
                 timeZone = "UTC"
             },
-            end = new
+            ["end"] = new
             {
                 dateTime = session.EndAt.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss"),
                 timeZone = "UTC"
             },
-            location = new
+            ["location"] = new
             {
-                displayName = $"{locationName} / {room}"
-            }
+                displayName = $"{locationName} / {room}",
+                locationEmailAddress = session.Location.CalendarEmail
+            },
+            ["attendees"] = attendees
         };
+
+        if (categories.Count > 0)
+            payload["categories"] = categories;
+
+        return payload;
+    }
+
+    private static List<object> BuildAttendees(Session session)
+    {
+        var attendees = session.Participants
+            .Where(p => !string.IsNullOrWhiteSpace(p.Client.Email))
+            .OrderBy(p => p.Client.FirstName)
+            .ThenBy(p => p.Client.LastName)
+            .Select(p => new
+            {
+                emailAddress = new
+                {
+                    address = p.Client.Email,
+                    name = $"{p.Client.FirstName} {p.Client.LastName}".Trim()
+                },
+                type = "required"
+            })
+            .Cast<object>()
+            .ToList();
+
+        if (!string.IsNullOrWhiteSpace(session.Location.CalendarEmail))
+        {
+            attendees.Add(new
+            {
+                emailAddress = new
+                {
+                    address = session.Location.CalendarEmail,
+                    name = session.Location.Name
+                },
+                type = "resource"
+            });
+        }
+
+        return attendees;
+    }
+
+    private async Task<CalendarIntegration?> GetTrainerIntegrationAsync(int userId)
+    {
+        return await _context.CalendarIntegrations
+            .FirstOrDefaultAsync(x =>
+                x.UserId == userId &&
+                x.Provider == "Outlook" &&
+                x.IsActive);
+    }
+
+    private async Task DeleteLinkedEventAsync(CalendarEventLink link)
+    {
+        var integration = link.CalendarIntegration
+            ?? await _context.CalendarIntegrations
+                .FirstOrDefaultAsync(x => x.Id == link.CalendarIntegrationId);
+
+        if (integration is null || !integration.IsActive)
+            return;
+
+        await EnsureAccessTokenAsync(integration);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"https://graph.microsoft.com/v1.0/me/events/{link.ExternalEventId}");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        var response = await _httpClient.SendAsync(request);
+
+        if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync();
+        throw new InvalidOperationException($"Microsoft delete event error: {body}");
+    }
+
+    private async Task UpsertExternalCalendarEventAsync(
+        Session session,
+        int calendarIntegrationId,
+        string externalEventId)
+    {
+        var externalEvent = await _context.ExternalCalendarEvents
+            .FirstOrDefaultAsync(x =>
+                x.CalendarIntegrationId == calendarIntegrationId &&
+                x.ExternalEventId == externalEventId);
+
+        if (externalEvent is null)
+        {
+            externalEvent = new ExternalCalendarEvent
+            {
+                CalendarIntegrationId = calendarIntegrationId,
+                Provider = "Outlook",
+                ExternalEventId = externalEventId
+            };
+
+            await _context.ExternalCalendarEvents.AddAsync(externalEvent);
+        }
+
+        externalEvent.Subject = session.Title;
+        externalEvent.BodyPreview = session.Note;
+        externalEvent.StartAt = session.StartAt;
+        externalEvent.EndAt = session.EndAt;
+        externalEvent.LocationName = session.Location.Name;
+        externalEvent.LocationEmail = session.Location.CalendarEmail;
+        externalEvent.AttendeesJson = JsonSerializer.Serialize(
+            session.Participants
+                .Select(p => p.Client.Email.Trim().ToLowerInvariant())
+                .Where(e => !string.IsNullOrWhiteSpace(e))
+                .Distinct()
+                .ToList());
+        externalEvent.CategoriesJson = session.OutlookCategoriesJson;
+        externalEvent.SessionId = session.Id;
+        externalEvent.IsConvertedToSession = true;
+        externalEvent.ImportedAt = DateTime.UtcNow;
+    }
+
+    private static List<string> ReadStringList(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<string>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<string>>(json) ?? new List<string>();
+        }
+        catch
+        {
+            return new List<string>();
+        }
     }
 
     private async Task EnsureAccessTokenAsync(CalendarIntegration integration)

@@ -134,10 +134,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             ? displayName.GetString()
             : null;
 
-        var locationEmailValue = root.TryGetProperty("location", out var locationObj) &&
-                                 locationObj.TryGetProperty("emailAddress", out var emailObj)
-            ? emailObj.GetString()?.Trim().ToLowerInvariant()
-            : null;
+        var locationEmailValue = ReadLocationEmail(root);
 
         var organizerEmailValue = root.TryGetProperty("organizer", out var organizer) &&
                                   organizer.TryGetProperty("emailAddress", out var organizerEmailAddress) &&
@@ -361,8 +358,13 @@ public class OutlookWebhookService : IOutlookWebhookService
             });
         }
 
+        var canRemoveParticipants = !string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase);
+
         var participantsToRemove = currentParticipants
-            .Where(p => !desiredClientIds.Contains(p.ClientId))
+            .Where(p =>
+                canRemoveParticipants &&
+                !p.IsCountedFromPackage &&
+                !desiredClientIds.Contains(p.ClientId))
             .ToList();
 
         _context.SessionParticipants.RemoveRange(participantsToRemove);
@@ -566,6 +568,33 @@ public class OutlookWebhookService : IOutlookWebhookService
         }
 
         return emails.Distinct().ToList();
+    }
+
+    private static string? ReadLocationEmail(JsonElement root)
+    {
+        if (!root.TryGetProperty("location", out var location) ||
+            location.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        if (location.TryGetProperty("locationEmailAddress", out var locationEmailAddress))
+        {
+            var value = locationEmailAddress.GetString();
+
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim().ToLowerInvariant();
+        }
+
+        if (location.TryGetProperty("emailAddress", out var emailAddress))
+        {
+            var value = emailAddress.GetString();
+
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim().ToLowerInvariant();
+        }
+
+        return null;
     }
 
     private static List<string> ReadCategories(JsonElement root)

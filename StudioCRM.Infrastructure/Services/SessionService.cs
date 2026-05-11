@@ -1,7 +1,9 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
@@ -15,15 +17,21 @@ public class SessionService : ISessionService
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly IOutlookCalendarSyncService _outlookCalendarSyncService;
+    private readonly ILogger<SessionService> _logger;
 
     public SessionService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
-        ISubscriptionService subscriptionService)
+        ISubscriptionService subscriptionService,
+        IOutlookCalendarSyncService outlookCalendarSyncService,
+        ILogger<SessionService> logger)
     {
         _context = context;
         _currentUser = currentUser;
         _subscriptionService = subscriptionService;
+        _outlookCalendarSyncService = outlookCalendarSyncService;
+        _logger = logger;
     }
 
     public async Task<List<SessionDto>> GetAllAsync()
@@ -82,6 +90,8 @@ public class SessionService : ISessionService
 
         await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
 
+        await TrySyncSessionToOutlookAsync(session.Id);
+
         return await GetByIdAsync(session.Id)
             ?? throw new InvalidOperationException("Created session could not be loaded.");
     }
@@ -127,6 +137,8 @@ public class SessionService : ISessionService
 
         await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
 
+        await TrySyncSessionToOutlookAsync(session.Id);
+
         return await GetByIdAsync(session.Id);
     }
 
@@ -136,6 +148,8 @@ public class SessionService : ISessionService
 
         if (session is null)
             return false;
+
+        await TryDeleteSessionFromOutlookAsync(session.Id);
 
         _context.Sessions.Remove(session);
         await _context.SaveChangesAsync();
@@ -156,6 +170,8 @@ public class SessionService : ISessionService
         session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await TrySyncSessionToOutlookAsync(session.Id);
 
         return true;
     }
@@ -444,6 +460,30 @@ public class SessionService : ISessionService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task TrySyncSessionToOutlookAsync(int sessionId)
+    {
+        try
+        {
+            await _outlookCalendarSyncService.SyncSessionAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not sync session {SessionId} to Outlook.", sessionId);
+        }
+    }
+
+    private async Task TryDeleteSessionFromOutlookAsync(int sessionId)
+    {
+        try
+        {
+            await _outlookCalendarSyncService.DeleteSessionEventAsync(sessionId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not delete Outlook event for session {SessionId}.", sessionId);
+        }
     }
 
     private async Task<List<SessionDto>> MapSessionDtosAsync(List<Session> sessions)
