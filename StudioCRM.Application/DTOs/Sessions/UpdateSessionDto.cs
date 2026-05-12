@@ -18,5 +18,7 @@ public class UpdateSessionDto
 
     public string? PlannedSessionType { get; set; }
 
+    public List<string> OutlookCategories { get; set; } = new();
+
     public List<CreateSessionParticipantDto> Participants { get; set; } = new();
 }

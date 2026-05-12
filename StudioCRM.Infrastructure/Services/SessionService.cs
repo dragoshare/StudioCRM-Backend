@@ -122,6 +122,8 @@ public class SessionService : ISessionService
             StudioRoom = null,
             Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status,
             PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
+            OutlookCategoriesJson = SerializeOutlookCategories(request.OutlookCategories),
+            PrimaryOutlookCategory = GetPrimaryOutlookCategory(request.OutlookCategories),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.UserId
@@ -174,6 +176,8 @@ public class SessionService : ISessionService
         session.StudioRoom = null;
         session.Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status;
         session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
+        session.OutlookCategoriesJson = SerializeOutlookCategories(request.OutlookCategories);
+        session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(request.OutlookCategories);
         session.UpdatedAt = DateTime.UtcNow;
 
         _context.SessionParticipants.RemoveRange(session.Participants);
@@ -653,6 +657,29 @@ public class SessionService : ISessionService
         {
             return new List<string>();
         }
+    }
+
+    private static string? SerializeOutlookCategories(List<string>? categories)
+    {
+        var normalized = NormalizeOutlookCategories(categories);
+
+        return normalized.Count == 0
+            ? null
+            : JsonSerializer.Serialize(normalized);
+    }
+
+    private static string? GetPrimaryOutlookCategory(List<string>? categories)
+    {
+        return NormalizeOutlookCategories(categories).FirstOrDefault();
+    }
+
+    private static List<string> NormalizeOutlookCategories(List<string>? categories)
+    {
+        return categories?
+            .Select(c => c.Trim())
+            .Where(c => !string.IsNullOrWhiteSpace(c))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList() ?? new List<string>();
     }
 
     private static DateTime ToStudioDisplayDateTime(DateTime value)
