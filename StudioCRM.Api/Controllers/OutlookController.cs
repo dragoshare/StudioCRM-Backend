@@ -249,6 +249,7 @@ public class OutlookController : ControllerBase
     }
     [AllowAnonymous]
     [HttpGet("subscription/keepalive")]
+    [HttpHead("subscription/keepalive")]
     public async Task<IActionResult> KeepAlive()
     {
         await _subscriptionService.RenewExpiringSubscriptionsAsync();

@@ -191,6 +191,31 @@ app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
 
+app.MapMethods("/health", new[] { "GET", "HEAD" }, () => Results.Ok(new
+{
+    status = "ok",
+    utcNow = DateTime.UtcNow
+}));
+
+app.MapMethods(
+    "/api/workers/session-auto-completion/keepalive",
+    new[] { "GET", "HEAD" },
+    async (
+        ISessionAutoCompletionService sessionAutoCompletionService,
+        CancellationToken cancellationToken) =>
+    {
+        var result = await sessionAutoCompletionService.CompleteFinishedSessionsAsync(cancellationToken);
+
+        return Results.Ok(new
+        {
+            message = "Session auto-completion checked",
+            completed = result.CompletedCount,
+            skipped = result.SkippedCount,
+            failed = result.FailedCount,
+            utcNow = DateTime.UtcNow
+        });
+    });
+
 app.MapControllers();
 
 // Seeder
