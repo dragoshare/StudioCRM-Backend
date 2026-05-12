@@ -334,7 +334,7 @@ public class SubscriptionService : ISubscriptionService
             .Where(sp =>
                 sp.ClientId == clientId &&
                 sp.ClientPackageId == currentCycle.Id &&
-                sp.CountsAgainstPackage)
+                sp.IsCountedFromPackage)
             .OrderByDescending(sp => sp.Session.StartAt)
             .Select(sp => new SubscriptionUsageSessionDto
             {

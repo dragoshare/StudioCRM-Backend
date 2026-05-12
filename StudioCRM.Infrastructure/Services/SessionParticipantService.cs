@@ -76,23 +76,20 @@ public class SessionParticipantService : ISessionParticipantService
         if (alreadyExists)
             throw new InvalidOperationException("Client is already assigned to this session.");
 
-        var packageId = request.PackageId ?? client.ActivePackageId;
-
-        if (packageId.HasValue)
-        {
-            var packageExists = await _context.Packages.AnyAsync(p => p.Id == packageId.Value);
-            if (!packageExists)
-                throw new InvalidOperationException("Package does not exist.");
-        }
+        var activeClientPackage = await ResolveActiveClientPackageAsync(client.Id);
+        var sessionsCharged = NormalizeSessionsCharged(request.SessionsCharged);
 
         var participant = new SessionParticipant
         {
             SessionId = sessionId,
             ClientId = client.Id,
-            PackageId = packageId,
+            PackageId = activeClientPackage?.PackageId,
+            ClientPackageId = activeClientPackage?.Id,
             AttendanceStatus = "Planned",
             CountsAgainstPackage = request.CountsAgainstPackage,
-            SessionsCharged = request.SessionsCharged,
+            SessionsCharged = sessionsCharged,
+            PlannedBillingType = activeClientPackage?.ExpectedBillingType,
+            ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
             Note = request.Note,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -172,7 +169,6 @@ public class SessionParticipantService : ISessionParticipantService
                 {
                     SessionId = sessionId,
                     ClientId = client.Id,
-                    PackageId = client.ActivePackageId,
                     CreatedAt = DateTime.UtcNow
                 };
 
@@ -180,14 +176,15 @@ public class SessionParticipantService : ISessionParticipantService
             }
 
             var previouslyCountedPackageId = participant.ClientPackageId;
-            var wasPreviouslyCounted = participant.CountsAgainstPackage;
+            var wasPreviouslyCounted = participant.IsCountedFromPackage;
             var previouslyCharged = wasPreviouslyCounted
                 ? Math.Max(0, participant.SessionsCharged)
                 : 0;
+            var requestedSessionsCharged = NormalizeSessionsCharged(participantRequest.SessionsCharged);
 
             participant.AttendanceStatus = participantRequest.AttendanceStatus;
             participant.CountsAgainstPackage = participantRequest.CountsAgainstPackage;
-            participant.SessionsCharged = participantRequest.SessionsCharged;
+            participant.SessionsCharged = requestedSessionsCharged;
             participant.Note = participantRequest.Note;
 
             if (participantRequest.CountsAgainstPackage && participantRequest.AttendanceStatus == "Present")
@@ -202,10 +199,10 @@ public class SessionParticipantService : ISessionParticipantService
                     var usedSessions = await _context.SessionParticipants
                         .Where(p =>
                             p.ClientPackageId == activeClientPackage.Id &&
-                            p.CountsAgainstPackage)
+                            p.IsCountedFromPackage)
                         .SumAsync(p => p.SessionsCharged);
 
-                    var sessionsCharged = Math.Max(1, participantRequest.SessionsCharged);
+                    var sessionsCharged = requestedSessionsCharged;
                     var isAlreadyCountedThisPackage = previouslyCountedPackageId == activeClientPackage.Id;
                     var newUsedSessions = usedSessions - (isAlreadyCountedThisPackage ? previouslyCharged : 0) + sessionsCharged;
 
@@ -262,11 +259,23 @@ public class SessionParticipantService : ISessionParticipantService
                     if (newUsedSessions >= activeClientPackage.TotalSessions)
                         completedPackageIds.Add(activeClientPackage.Id);
                 }
+                else
+                {
+                    throw new InvalidOperationException(
+                        $"Client {client.Id} does not have an active subscription package.");
+                }
             }
             else
             {
                 participant.CountsAgainstPackage = false;
                 participant.IsCountedFromPackage = false;
+                participant.ClientPackageId = null;
+                participant.PackageId = null;
+                participant.PlannedBillingType = null;
+                participant.ActualBillingType = null;
+                participant.ExpectedUnitPrice = null;
+                participant.ActualUnitPrice = null;
+                participant.BalanceDifference = null;
             }
 
             participant.UpdatedAt = DateTime.UtcNow;
@@ -343,6 +352,19 @@ public class SessionParticipantService : ISessionParticipantService
             throw new InvalidOperationException("Actual unit price must be greater than zero.");
 
         return decimal.Round(amount, 2);
+    }
+
+    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)
+    {
+        return await _context.ClientPackages
+            .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
+    }
+
+    private static int NormalizeSessionsCharged(int value)
+    {
+        return Math.Max(1, value);
     }
 
     private async Task<SessionParticipantDto> MapParticipantAsync(int participantId)

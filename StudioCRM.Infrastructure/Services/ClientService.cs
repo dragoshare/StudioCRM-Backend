@@ -375,7 +375,7 @@ public class ClientService : IClientService
                     .ThenInclude(t => t.User)
             .Include(p => p.Session)
                 .ThenInclude(s => s.Location)
-            .Where(p => p.ClientId == clientId && p.CountsAgainstPackage)
+            .Where(p => p.ClientId == clientId && p.IsCountedFromPackage)
             .OrderByDescending(p => p.Session.StartAt)
             .Take(12)
             .ToListAsync();

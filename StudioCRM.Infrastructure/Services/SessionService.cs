@@ -301,12 +301,12 @@ public class SessionService : ISessionService
         var usedSessions = await _context.SessionParticipants
             .Where(p =>
                 p.ClientPackageId == clientPackage.Id &&
-                p.CountsAgainstPackage)
+                p.IsCountedFromPackage)
             .SumAsync(p => p.SessionsCharged);
 
         var isAlreadyCountedThisParticipant =
             participant.ClientPackageId == clientPackage.Id &&
-            participant.CountsAgainstPackage;
+            participant.IsCountedFromPackage;
 
         var previousCharged = isAlreadyCountedThisParticipant ? Math.Max(0, participant.SessionsCharged) : 0;
         var sessionsCharged = 1;
@@ -466,17 +466,6 @@ public class SessionService : ISessionService
         if (clientIds.Count != distinctClientIds.Count)
             throw new InvalidOperationException("Duplicated clients in session participants.");
 
-        foreach (var participant in participants)
-        {
-            if (participant.PackageId.HasValue)
-            {
-                var packageExists = await _context.Packages
-                    .AnyAsync(p => p.Id == participant.PackageId.Value);
-
-                if (!packageExists)
-                    throw new InvalidOperationException($"Package {participant.PackageId.Value} does not exist.");
-            }
-        }
     }
 
     private async Task<List<Client>> GetClientsForParticipantsAsync(List<CreateSessionParticipantDto> participants)
@@ -503,15 +492,20 @@ public class SessionService : ISessionService
         foreach (var participantRequest in participants)
         {
             var client = clients.First(c => c.Id == participantRequest.ClientId);
+            var activeClientPackage = await ResolveActiveClientPackageAsync(client.Id);
+            var sessionsCharged = NormalizeSessionsCharged(participantRequest.SessionsCharged);
 
             var participant = new SessionParticipant
             {
                 SessionId = sessionId,
                 ClientId = client.Id,
-                PackageId = participantRequest.PackageId ?? client.ActivePackageId,
+                PackageId = activeClientPackage?.PackageId,
+                ClientPackageId = activeClientPackage?.Id,
                 AttendanceStatus = "Planned",
                 CountsAgainstPackage = participantRequest.CountsAgainstPackage,
-                SessionsCharged = participantRequest.SessionsCharged,
+                SessionsCharged = sessionsCharged,
+                PlannedBillingType = activeClientPackage?.ExpectedBillingType,
+                ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                 Note = participantRequest.Note,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -521,6 +515,14 @@ public class SessionService : ISessionService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)
+    {
+        return await _context.ClientPackages
+            .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
     }
 
     private async Task TrySyncSessionToOutlookAsync(int sessionId)
@@ -767,5 +769,10 @@ public class SessionService : ISessionService
             3 => "ThreeToOne",
             _ => "Group"
         };
+    }
+
+    private static int NormalizeSessionsCharged(int value)
+    {
+        return Math.Max(1, value);
     }
 }

@@ -4,8 +4,6 @@ public class CreateSessionParticipantDto
 {
     public int ClientId { get; set; }
 
-    public int? PackageId { get; set; }
-
     public bool CountsAgainstPackage { get; set; } = true;
 
     public int SessionsCharged { get; set; } = 1;

@@ -346,14 +346,22 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         foreach (var client in clientsToAdd)
         {
+            var activeClientPackage = await _context.ClientPackages
+                .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                .OrderByDescending(cp => cp.PurchaseDate)
+                .FirstOrDefaultAsync();
+
             await _context.SessionParticipants.AddAsync(new SessionParticipant
             {
                 SessionId = session.Id,
                 ClientId = client.Id,
-                PackageId = client.ActivePackageId,
+                PackageId = activeClientPackage?.PackageId,
+                ClientPackageId = activeClientPackage?.Id,
                 AttendanceStatus = "Planned",
                 CountsAgainstPackage = true,
                 SessionsCharged = 1,
+                PlannedBillingType = activeClientPackage?.ExpectedBillingType,
+                ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
             });
