@@ -398,10 +398,20 @@ public class SessionService : ISessionService
             .OrderByDescending(p => p.LocationId == locationId)
             .FirstOrDefaultAsync();
 
+        pricePackage ??= await _context.Packages
+            .Where(p =>
+                p.IsActive &&
+                p.BillingType == actualBillingType &&
+                p.SessionsLimit == clientPackage.TotalSessions &&
+                (p.LocationId == locationId || p.LocationId == null))
+            .OrderByDescending(p => p.LocationId == locationId)
+            .ThenBy(p => Math.Abs(p.SessionsPerWeek - sessionsPerWeek))
+            .FirstOrDefaultAsync();
+
         if (pricePackage is null)
         {
             throw new InvalidOperationException(
-                $"No price package found for {actualBillingType}, {sessionsPerWeek} sessions per week and location {locationId}.");
+                $"No price package found for {actualBillingType}, {clientPackage.TotalSessions} sessions and location {locationId}.");
         }
 
         if (pricePackage.SessionsLimit <= 0)

@@ -125,8 +125,6 @@ public class OutlookEventMapperService
         await _context.Sessions.AddAsync(session);
         await _context.SaveChangesAsync();
 
-        var plannedBillingType = ResolveBillingType(clients.DistinctBy(c => c.Id).Count());
-
         foreach (var client in clients.DistinctBy(c => c.Id))
         {
             var activeClientPackage = await _context.ClientPackages
@@ -138,12 +136,12 @@ public class OutlookEventMapperService
             {
                 SessionId = session.Id,
                 ClientId = client.Id,
-                PackageId = activeClientPackage?.PackageId ?? client.ActivePackageId,
+                PackageId = activeClientPackage?.PackageId,
                 ClientPackageId = activeClientPackage?.Id,
                 AttendanceStatus = "Planned",
                 CountsAgainstPackage = true,
                 SessionsCharged = 1,
-                PlannedBillingType = plannedBillingType,
+                PlannedBillingType = activeClientPackage?.ExpectedBillingType,
                 ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow
@@ -317,14 +315,4 @@ public class OutlookEventMapperService
             }));
     }
 
-    private static SessionBillingType ResolveBillingType(int count)
-    {
-        return count switch
-        {
-            <= 1 => SessionBillingType.OneToOne,
-            2 => SessionBillingType.TwoToOne,
-            3 => SessionBillingType.ThreeToOne,
-            _ => SessionBillingType.FourToOne
-        };
-    }
 }

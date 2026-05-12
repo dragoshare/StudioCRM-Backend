@@ -48,7 +48,7 @@ public class ClientPackageService : IClientPackageService
             throw new InvalidOperationException("Total sessions must be greater than zero.");
 
         var totalPrice = request.TotalPrice ?? package.Price;
-        var expectedUnitPrice = package.Price / totalSessions;
+        var expectedUnitPrice = totalPrice / totalSessions;
         var sessionsPerWeek = package.SessionsPerWeek > 0
             ? package.SessionsPerWeek
             : InferSessionsPerWeek(totalSessions);

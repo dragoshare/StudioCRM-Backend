@@ -220,18 +220,16 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
                     .OrderByDescending(cp => cp.PurchaseDate)
                     .FirstOrDefaultAsync();
 
-                var plannedBillingType = ResolveBillingType(session.Participants.Count + 1);
-
                 await _context.SessionParticipants.AddAsync(new SessionParticipant
                 {
                     SessionId = session.Id,
                     ClientId = clientId,
-                    PackageId = activeClientPackage?.PackageId ?? client.ActivePackageId,
+                    PackageId = activeClientPackage?.PackageId,
                     ClientPackageId = activeClientPackage?.Id,
                     AttendanceStatus = "Planned",
                     CountsAgainstPackage = true,
                     SessionsCharged = 1,
-                    PlannedBillingType = plannedBillingType,
+                    PlannedBillingType = activeClientPackage?.ExpectedBillingType,
                     ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
                     CreatedAt = DateTime.UtcNow,
                     UpdatedAt = DateTime.UtcNow
@@ -343,14 +341,4 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             : candidate;
     }
 
-    private static SessionBillingType ResolveBillingType(int count)
-    {
-        return count switch
-        {
-            <= 1 => SessionBillingType.OneToOne,
-            2 => SessionBillingType.TwoToOne,
-            3 => SessionBillingType.ThreeToOne,
-            _ => SessionBillingType.FourToOne
-        };
-    }
 }
