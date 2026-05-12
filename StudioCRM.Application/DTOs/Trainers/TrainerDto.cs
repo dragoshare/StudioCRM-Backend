@@ -16,6 +16,8 @@ public class TrainerDto
     public string? AvatarUrl { get; set; }
     public string Status { get; set; } = string.Empty;
     public int ExperienceYears { get; set; }
+    public string? OutlookCategoryName { get; set; }
+    public string? OutlookCategoryColor { get; set; }
 
     public decimal RatingAverage { get; set; }
     public int SessionsCount { get; set; }

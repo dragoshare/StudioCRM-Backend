@@ -108,6 +108,14 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Trainer>()
             .HasQueryFilter(t => !t.IsDeleted);
 
+        modelBuilder.Entity<Trainer>()
+            .Property(t => t.OutlookCategoryName)
+            .HasMaxLength(100);
+
+        modelBuilder.Entity<Trainer>()
+            .Property(t => t.OutlookCategoryColor)
+            .HasMaxLength(32);
+
         // =========================
         // TRAINER RATES
         // =========================

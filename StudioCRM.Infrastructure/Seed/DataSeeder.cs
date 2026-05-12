@@ -246,6 +246,8 @@ public static class DataSeeder
                 Bio = "Główne konto trenera do testów CRM",
                 Phone = "501100099",
                 Experience = 6,
+                OutlookCategoryName = "Szymek",
+                OutlookCategoryColor = "preset5",
                 Locations = new[] { "Niepołomice", "Kłaj" }
             },
             new
@@ -256,6 +258,8 @@ public static class DataSeeder
                 Bio = "Trener siłowy i motoryczny",
                 Phone = "501100100",
                 Experience = 5,
+                OutlookCategoryName = "Jan Kowalski",
+                OutlookCategoryColor = "preset7",
                 Locations = new[] { "Niepołomice", "Kłaj" }
             },
             new
@@ -266,6 +270,8 @@ public static class DataSeeder
                 Bio = "Trener przygotowania motorycznego",
                 Phone = "501100101",
                 Experience = 7,
+                OutlookCategoryName = "Adam Nowak",
+                OutlookCategoryColor = "preset4",
                 Locations = new[] { "Niepołomice" }
             },
             new
@@ -276,6 +282,8 @@ public static class DataSeeder
                 Bio = "Trenerka sylwetkowa i funkcjonalna",
                 Phone = "501100102",
                 Experience = 3,
+                OutlookCategoryName = "Karolina Wójcik",
+                OutlookCategoryColor = "preset8",
                 Locations = new[] { "Kłaj" }
             },
             new
@@ -286,6 +294,8 @@ public static class DataSeeder
                 Bio = "Trener personalny i rehabilitacyjny",
                 Phone = "501100103",
                 Experience = 6,
+                OutlookCategoryName = "Bartosz Zieliński",
+                OutlookCategoryColor = "preset1",
                 Locations = new[] { "Niepołomice", "Kłaj" }
             }
         };
@@ -322,6 +332,8 @@ public static class DataSeeder
             trainer.Phone = seed.Phone;
             trainer.Status = "Active";
             trainer.ExperienceYears = seed.Experience;
+            trainer.OutlookCategoryName = seed.OutlookCategoryName;
+            trainer.OutlookCategoryColor = seed.OutlookCategoryColor;
             trainer.IsDeleted = false;
             trainer.DeletedAt = null;
             trainer.UpdatedAt = DateTime.UtcNow;

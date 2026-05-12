@@ -2,6 +2,7 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Settings;
@@ -17,15 +18,18 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
     private readonly StudioCRMDbContext _context;
     private readonly OutlookSettings _settings;
     private readonly HttpClient _httpClient;
+    private readonly ILogger<OutlookCalendarSyncService> _logger;
 
     public OutlookCalendarSyncService(
         StudioCRMDbContext context,
         IOptions<OutlookSettings> options,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        ILogger<OutlookCalendarSyncService> logger)
     {
         _context = context;
         _settings = options.Value;
         _httpClient = httpClient;
+        _logger = logger;
     }
 
     public async Task SyncSessionAsync(int sessionId)
@@ -117,7 +121,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task<string> CreateEventAsync(Session session, string accessToken)
     {
-        var payload = BuildGraphEventPayload(session);
+        var categories = ResolveGraphEventCategories(session);
+        await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
+        var payload = BuildGraphEventPayload(session, categories);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
@@ -145,7 +151,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task UpdateEventAsync(Session session, string accessToken, string eventId)
     {
-        var payload = BuildGraphEventPayload(session);
+        var categories = ResolveGraphEventCategories(session);
+        await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
+        var payload = BuildGraphEventPayload(session, categories);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Patch,
@@ -166,7 +174,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             throw new InvalidOperationException($"Microsoft update event error: {body}");
     }
 
-    private Dictionary<string, object?> BuildGraphEventPayload(Session session)
+    private Dictionary<string, object?> BuildGraphEventPayload(Session session, List<string> categories)
     {
         var clientName = string.Join(" + ",
              session.Participants.Select(p => $"{p.Client.FirstName} {p.Client.LastName}"));
@@ -174,7 +182,6 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var locationName = session.Location.Name;
 
         var attendees = BuildAttendees(session);
-        var categories = ReadStringList(session.OutlookCategoriesJson);
 
         var payload = new Dictionary<string, object?>
         {
@@ -349,10 +356,141 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 .Where(e => !string.IsNullOrWhiteSpace(e))
                 .Distinct()
                 .ToList());
-        externalEvent.CategoriesJson = session.OutlookCategoriesJson;
+        externalEvent.CategoriesJson = JsonSerializer.Serialize(ResolveGraphEventCategories(session));
         externalEvent.SessionId = session.Id;
         externalEvent.IsConvertedToSession = true;
         externalEvent.ImportedAt = DateTime.UtcNow;
+    }
+
+    private async Task EnsureTrainerMasterCategoryAsync(
+        Session session,
+        string accessToken,
+        List<string> categories)
+    {
+        var trainerCategoryName = NormalizeCategoryName(session.Trainer.OutlookCategoryName);
+
+        if (trainerCategoryName is null ||
+            !categories.Contains(trainerCategoryName, StringComparer.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        try
+        {
+            using var listRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                "https://graph.microsoft.com/v1.0/me/outlook/masterCategories?$select=displayName,color");
+
+            listRequest.Headers.Authorization =
+                new AuthenticationHeaderValue("Bearer", accessToken);
+
+            var listResponse = await _httpClient.SendAsync(listRequest);
+            var listBody = await listResponse.Content.ReadAsStringAsync();
+
+            if (!listResponse.IsSuccessStatusCode)
+            {
+                _logger.LogWarning(
+                    "Could not read Outlook master categories for trainer {TrainerId}: {Body}",
+                    session.TrainerId,
+                    listBody);
+
+                return;
+            }
+
+            using var doc = JsonDocument.Parse(listBody);
+
+            if (doc.RootElement.TryGetProperty("value", out var value) &&
+                value.ValueKind == JsonValueKind.Array &&
+                value.EnumerateArray().Any(category =>
+                    category.TryGetProperty("displayName", out var displayName) &&
+                    string.Equals(displayName.GetString(), trainerCategoryName, StringComparison.OrdinalIgnoreCase)))
+            {
+                return;
+            }
+
+            await CreateMasterCategoryAsync(
+                accessToken,
+                trainerCategoryName,
+                NormalizeCategoryColor(session.Trainer.OutlookCategoryColor));
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Could not ensure Outlook master category {CategoryName} for trainer {TrainerId}.",
+                trainerCategoryName,
+                session.TrainerId);
+        }
+    }
+
+    private async Task CreateMasterCategoryAsync(
+        string accessToken,
+        string categoryName,
+        string color)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://graph.microsoft.com/v1.0/me/outlook/masterCategories");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", accessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new
+            {
+                displayName = categoryName,
+                color
+            }),
+            Encoding.UTF8,
+            "application/json");
+
+        var response = await _httpClient.SendAsync(request);
+
+        if (response.IsSuccessStatusCode)
+            return;
+
+        var body = await response.Content.ReadAsStringAsync();
+
+        _logger.LogWarning(
+            "Could not create Outlook master category {CategoryName}: {Body}",
+            categoryName,
+            body);
+    }
+
+    private static List<string> ResolveGraphEventCategories(Session session)
+    {
+        var categories = new List<string>();
+        var trainerCategoryName = NormalizeCategoryName(session.Trainer.OutlookCategoryName);
+
+        if (trainerCategoryName is not null)
+            categories.Add(trainerCategoryName);
+
+        categories.AddRange(ReadStringList(session.OutlookCategoriesJson));
+
+        return categories
+            .Select(NormalizeCategoryName)
+            .Where(c => c is not null)
+            .Select(c => c!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+    }
+
+    private static string? NormalizeCategoryName(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
+    }
+
+    private static string NormalizeCategoryColor(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? "preset7"
+            : normalized;
     }
 
     private static List<string> ReadStringList(string? json)

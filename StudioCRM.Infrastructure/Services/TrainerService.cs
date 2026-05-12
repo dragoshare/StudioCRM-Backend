@@ -72,6 +72,8 @@ public class TrainerService : ITrainerService
             Phone = request.Phone,
             Status = request.Status,
             ExperienceYears = request.ExperienceYears,
+            OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName),
+            OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = request.CreatedBy
@@ -134,6 +136,8 @@ public class TrainerService : ITrainerService
         trainer.Phone = request.Phone;
         trainer.Status = request.Status;
         trainer.ExperienceYears = request.ExperienceYears;
+        trainer.OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName);
+        trainer.OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor);
         trainer.UpdatedAt = DateTime.UtcNow;
 
         var existingTrainerLocations = await _context.TrainerLocations
@@ -233,6 +237,8 @@ public class TrainerService : ITrainerService
                 AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
+                OutlookCategoryName = t.OutlookCategoryName,
+                OutlookCategoryColor = t.OutlookCategoryColor,
                 RatingAverage = 0,
                 SessionsCount = t.Sessions.Count,
                 ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
@@ -271,6 +277,8 @@ public class TrainerService : ITrainerService
                 AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
                 ExperienceYears = t.ExperienceYears,
+                OutlookCategoryName = t.OutlookCategoryName,
+                OutlookCategoryColor = t.OutlookCategoryColor,
                 RatingAverage = 0,
                 SessionsCount = t.Sessions.Count,
                 ActiveClientsCount = t.Clients.Count(c => c.Status == "Active"),
@@ -285,5 +293,23 @@ public class TrainerService : ITrainerService
     private async Task<TrainerDto> GetProjectedById(int id)
     {
         return await BuildTrainerQuery().FirstAsync(t => t.Id == id);
+    }
+
+    private static string? NormalizeOutlookCategoryName(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
+    }
+
+    private static string? NormalizeOutlookCategoryColor(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
     }
 }

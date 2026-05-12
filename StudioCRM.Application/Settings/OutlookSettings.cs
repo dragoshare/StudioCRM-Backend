@@ -10,5 +10,5 @@ public class OutlookSettings
 
     public string RedirectUri { get; set; } = string.Empty;
 
-    public string Scopes { get; set; } = "openid profile offline_access Calendars.ReadWrite User.Read";
+    public string Scopes { get; set; } = "openid profile offline_access Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite User.Read";
 }

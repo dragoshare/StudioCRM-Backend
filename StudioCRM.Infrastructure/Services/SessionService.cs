@@ -106,6 +106,9 @@ public class SessionService : ISessionService
             request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
+        var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
+            request.TrainerId,
+            request.OutlookCategories);
 
         var title = string.IsNullOrWhiteSpace(request.Title)
             ? SessionTitleBuilder.Build(clients)
@@ -122,8 +125,8 @@ public class SessionService : ISessionService
             StudioRoom = null,
             Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status,
             PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
-            OutlookCategoriesJson = SerializeOutlookCategories(request.OutlookCategories),
-            PrimaryOutlookCategory = GetPrimaryOutlookCategory(request.OutlookCategories),
+            OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
+            PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.UserId
@@ -163,6 +166,9 @@ public class SessionService : ISessionService
             request.Participants);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
+        var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
+            request.TrainerId,
+            request.OutlookCategories);
 
         session.Title = string.IsNullOrWhiteSpace(request.Title)
             ? SessionTitleBuilder.Build(clients)
@@ -176,8 +182,8 @@ public class SessionService : ISessionService
         session.StudioRoom = null;
         session.Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status;
         session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
-        session.OutlookCategoriesJson = SerializeOutlookCategories(request.OutlookCategories);
-        session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(request.OutlookCategories);
+        session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
+        session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
         session.UpdatedAt = DateTime.UtcNow;
 
         _context.SessionParticipants.RemoveRange(session.Participants);
@@ -680,6 +686,25 @@ public class SessionService : ISessionService
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? new List<string>();
+    }
+
+    private async Task<List<string>> ResolveOutlookCategoriesForTrainerAsync(
+        int trainerId,
+        List<string>? requestedCategories)
+    {
+        var trainerCategory = await _context.Trainers
+            .Where(t => t.Id == trainerId)
+            .Select(t => t.OutlookCategoryName)
+            .FirstOrDefaultAsync();
+
+        var categories = new List<string>();
+
+        if (!string.IsNullOrWhiteSpace(trainerCategory))
+            categories.Add(trainerCategory);
+
+        categories.AddRange(requestedCategories ?? new List<string>());
+
+        return NormalizeOutlookCategories(categories);
     }
 
     private static DateTime ToStudioDisplayDateTime(DateTime value)
