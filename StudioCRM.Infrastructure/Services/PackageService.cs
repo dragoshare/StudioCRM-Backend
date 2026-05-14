@@ -101,13 +101,35 @@ public class PackageService : IPackageService
 
     public async Task<bool> DeleteAsync(int id)
     {
-        var package = await _context.Packages.FirstOrDefaultAsync(p => p.Id == id);
+        var package = await _context.Packages
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(p => p.Id == id);
+
         if (package is null)
         {
             return false;
         }
 
+        if (package.IsDeleted)
+        {
+            return true;
+        }
+
+        var isUsedByActiveSubscription = await _context.ClientPackages
+            .AnyAsync(cp => cp.PackageId == id && cp.IsActive);
+
+        var isScheduledAsNextPackage = await _context.Clients
+            .IgnoreQueryFilters()
+            .AnyAsync(c => c.ActivePackageId == id || c.NextPackageId == id);
+
+        if (isUsedByActiveSubscription || isScheduledAsNextPackage)
+        {
+            throw new InvalidOperationException(
+                "Package cannot be deleted while it is used by an active or scheduled subscription. Deactivate it or change clients to another package first.");
+        }
+
         package.IsDeleted = true;
+        package.IsActive = false;
         package.DeletedAt = DateTime.UtcNow;
         package.UpdatedAt = DateTime.UtcNow;
 

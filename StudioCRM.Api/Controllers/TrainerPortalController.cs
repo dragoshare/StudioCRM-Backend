@@ -156,6 +156,12 @@ public class TrainerPortalController : ControllerBase
         }
     }
 
+    [HttpDelete("invitations/{id:int}")]
+    public Task<IActionResult> DeleteInvitation(int id)
+    {
+        return CancelInvitation(id);
+    }
+
     [HttpGet("operational-alerts")]
     public async Task<ActionResult<OperationalAlertsDto>> GetOperationalAlerts(
         [FromQuery] OperationalAlertFilterDto filter)

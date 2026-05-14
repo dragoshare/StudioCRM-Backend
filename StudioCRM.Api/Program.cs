@@ -165,13 +165,52 @@ app.UseExceptionHandler(errorApp =>
     errorApp.Run(async context =>
     {
         var exceptionFeature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+        var exception = exceptionFeature?.Error;
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+
+        var (statusCode, message) = exception switch
+        {
+            InvalidOperationException invalidOperationException => (
+                StatusCodes.Status400BadRequest,
+                invalidOperationException.Message),
+            ArgumentException argumentException => (
+                StatusCodes.Status400BadRequest,
+                argumentException.Message),
+            UnauthorizedAccessException unauthorizedAccessException => (
+                StatusCodes.Status403Forbidden,
+                unauthorizedAccessException.Message),
+            KeyNotFoundException keyNotFoundException => (
+                StatusCodes.Status404NotFound,
+                keyNotFoundException.Message),
+            DbUpdateConcurrencyException => (
+                StatusCodes.Status409Conflict,
+                "The data was changed by another operation. Refresh and try again."),
+            DbUpdateException => (
+                StatusCodes.Status409Conflict,
+                "Database conflict. Check whether the resource is still connected with existing data."),
+            HttpRequestException httpRequestException => (
+                StatusCodes.Status502BadGateway,
+                app.Environment.IsDevelopment()
+                    ? httpRequestException.Message
+                    : "External service request failed."),
+            _ => (
+                StatusCodes.Status500InternalServerError,
+                app.Environment.IsDevelopment()
+                    ? exception?.Message ?? "Unexpected server error."
+                    : "Unexpected server error.")
+        };
 
         context.Response.ContentType = "application/json";
-        context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+        context.Response.StatusCode = statusCode;
 
-        var message = app.Environment.IsDevelopment()
-            ? exceptionFeature?.Error.Message
-            : "Unexpected server error.";
+        if (exception is not null && statusCode >= StatusCodes.Status500InternalServerError)
+        {
+            logger.LogError(exception, "Unhandled request exception.");
+        }
+        else if (exception is not null)
+        {
+            logger.LogWarning(exception, "Handled request exception returned {StatusCode}.", statusCode);
+        }
 
         await context.Response.WriteAsync(JsonSerializer.Serialize(new
         {

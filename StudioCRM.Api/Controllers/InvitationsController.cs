@@ -1,5 +1,6 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
 
@@ -17,7 +18,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> Create(CreateInvitationDto request)
     {
         try
@@ -29,17 +30,21 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Invitation could not be saved because of a database conflict." });
+        }
     }
 
     [HttpGet]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<InvitationDto>>> GetAll([FromQuery] InvitationFilterDto filter)
     {
         return Ok(await _invitationService.GetAllAsync(filter));
     }
 
     [HttpGet("{id:int}")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> GetById(int id)
     {
         var result = await _invitationService.GetByIdAsync(id);
@@ -51,7 +56,7 @@ public class InvitationsController : ControllerBase
     }
 
     [HttpPost("{id:int}/resend")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> Resend(int id)
     {
         try
@@ -67,10 +72,14 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Invitation could not be resent because of a database conflict." });
+        }
     }
 
     [HttpPost("{id:int}/cancel")]
-    [Authorize(Roles = "Owner")]
+    [Authorize(Roles = "Owner,Trainer")]
     public async Task<IActionResult> Cancel(int id)
     {
         try
@@ -86,6 +95,17 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Invitation could not be cancelled because of a database conflict." });
+        }
+    }
+
+    [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Owner,Trainer")]
+    public Task<IActionResult> Delete(int id)
+    {
+        return Cancel(id);
     }
 
     [HttpGet("validate")]
@@ -116,6 +136,10 @@ public class InvitationsController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Invitation could not be accepted because of a database conflict." });
         }
     }
 }

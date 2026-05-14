@@ -37,12 +37,18 @@ public class InvitationService : IInvitationService
         if (!_currentUser.UserId.HasValue)
             throw new InvalidOperationException("User is not authenticated.");
 
-        if (request.Role != "Trainer" && request.Role != "Client")
+        var email = NormalizeEmail(request.Email);
+        var role = NormalizeRole(request.Role);
+
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Email is required.");
+
+        if (role != "Trainer" && role != "Client")
             throw new InvalidOperationException("Only Trainer and Client invitations are supported.");
 
         if (!_currentUser.IsOwner)
         {
-            if (!_currentUser.IsTrainer || request.Role != "Client")
+            if (!_currentUser.IsTrainer || role != "Client")
                 throw new InvalidOperationException("Trainer can invite only clients.");
 
             await EnsureTrainerCanInviteToLocationAsync(request.LocationId);
@@ -52,13 +58,13 @@ public class InvitationService : IInvitationService
         if (location is null)
             throw new InvalidOperationException("Location does not exist.");
 
-        var existingUser = await _context.Users.AnyAsync(u => u.Email == request.Email);
+        var existingUser = await _context.Users.AnyAsync(u => u.Email.ToLower() == email);
         if (existingUser)
             throw new InvalidOperationException("User with this email already exists.");
 
         var existingPendingInvitation = await _context.Invitations
             .AnyAsync(i =>
-                i.Email == request.Email &&
+                i.Email.ToLower() == email &&
                 !i.IsAccepted &&
                 i.CancelledAt == null &&
                 i.ExpiresAt > DateTime.UtcNow);
@@ -68,10 +74,11 @@ public class InvitationService : IInvitationService
 
         var invitation = new Invitation
         {
-            Email = request.Email.Trim(),
-            Role = request.Role,
+            Email = email,
+            Role = role,
             Token = GenerateToken(),
             LocationId = request.LocationId,
+            Location = location,
             ExpiresAt = DateTime.UtcNow.AddDays(3),
             IsAccepted = false,
             CreatedAt = DateTime.UtcNow,
@@ -85,7 +92,7 @@ public class InvitationService : IInvitationService
 
         await SendInvitationEmailAndTrackResultAsync(invitation, location.Name, inviteLink);
 
-        return MapToDto(invitation, location.Name);
+        return MapToDto(invitation);
     }
 
     public async Task<List<InvitationDto>> GetAllAsync(InvitationFilterDto? filter = null)
@@ -105,7 +112,10 @@ public class InvitationService : IInvitationService
         if (filter is not null)
         {
             if (!string.IsNullOrWhiteSpace(filter.Role))
-                query = query.Where(i => i.Role == filter.Role);
+            {
+                var role = NormalizeRole(filter.Role);
+                query = query.Where(i => i.Role == role);
+            }
 
             if (filter.LocationId.HasValue)
                 query = query.Where(i => i.LocationId == filter.LocationId.Value);
@@ -119,13 +129,18 @@ public class InvitationService : IInvitationService
             if (!string.IsNullOrWhiteSpace(filter.Status))
             {
                 var now = DateTime.UtcNow;
+                var status = filter.Status.Trim();
 
-                query = filter.Status switch
+                query = status switch
                 {
-                    "Pending" => query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > now),
-                    "Accepted" => query.Where(i => i.IsAccepted),
-                    "Expired" => query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt <= now),
-                    "Cancelled" => query.Where(i => i.CancelledAt != null),
+                    var value when value.Equals("Pending", StringComparison.OrdinalIgnoreCase) =>
+                        query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > now),
+                    var value when value.Equals("Accepted", StringComparison.OrdinalIgnoreCase) =>
+                        query.Where(i => i.IsAccepted),
+                    var value when value.Equals("Expired", StringComparison.OrdinalIgnoreCase) =>
+                        query.Where(i => !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt <= now),
+                    var value when value.Equals("Cancelled", StringComparison.OrdinalIgnoreCase) =>
+                        query.Where(i => i.CancelledAt != null),
                     _ => query
                 };
             }
@@ -136,7 +151,7 @@ public class InvitationService : IInvitationService
             .ToListAsync();
 
         return invitations
-            .Select(i => MapToDto(i, i.Location.Name))
+            .Select(MapToDto)
             .ToList();
     }
 
@@ -152,7 +167,7 @@ public class InvitationService : IInvitationService
         if (!_currentUser.IsOwner && invitation.CreatedBy != _currentUser.UserId)
             return null;
 
-        return MapToDto(invitation, invitation.Location.Name);
+        return MapToDto(invitation);
     }
 
     public async Task<ValidateInvitationDto?> ValidateAsync(string token)
@@ -172,13 +187,22 @@ public class InvitationService : IInvitationService
             Email = invitation.Email,
             Role = invitation.Role,
             LocationId = invitation.LocationId,
-            LocationName = invitation.Location.Name,
+            LocationName = GetLocationName(invitation),
             ExpiresAt = invitation.ExpiresAt
         };
     }
 
     public async Task<bool> AcceptAsync(AcceptInvitationDto request)
     {
+        if (string.IsNullOrWhiteSpace(request.FirstName))
+            throw new InvalidOperationException("First name is required.");
+
+        if (string.IsNullOrWhiteSpace(request.LastName))
+            throw new InvalidOperationException("Last name is required.");
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+            throw new InvalidOperationException("Password is required.");
+
         var invitation = await _context.Invitations
             .Include(i => i.Location)
             .FirstOrDefaultAsync(i => i.Token == request.Token);
@@ -197,11 +221,13 @@ public class InvitationService : IInvitationService
         if (role is null)
             throw new InvalidOperationException("Role does not exist.");
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
         var user = new User
         {
             Email = invitation.Email,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
+            FirstName = request.FirstName.Trim(),
+            LastName = request.LastName.Trim(),
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -229,6 +255,8 @@ public class InvitationService : IInvitationService
         invitation.AcceptedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        await transaction.CommitAsync();
 
         return true;
     }
@@ -258,9 +286,9 @@ public class InvitationService : IInvitationService
 
         var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
 
-        await SendInvitationEmailAndTrackResultAsync(invitation, invitation.Location.Name, inviteLink);
+        await SendInvitationEmailAndTrackResultAsync(invitation, GetLocationName(invitation), inviteLink);
 
-        return MapToDto(invitation, invitation.Location.Name);
+        return MapToDto(invitation);
     }
 
     public async Task<bool> CancelAsync(int id)
@@ -349,7 +377,7 @@ public class InvitationService : IInvitationService
         await _context.SaveChangesAsync();
     }
 
-    private InvitationDto MapToDto(Invitation invitation, string locationName)
+    private InvitationDto MapToDto(Invitation invitation)
     {
         return new InvitationDto
         {
@@ -357,7 +385,7 @@ public class InvitationService : IInvitationService
             Email = invitation.Email,
             Role = invitation.Role,
             LocationId = invitation.LocationId,
-            LocationName = locationName,
+            LocationName = GetLocationName(invitation),
             Token = invitation.Token,
             InviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}",
             ExpiresAt = invitation.ExpiresAt,
@@ -405,6 +433,29 @@ public class InvitationService : IInvitationService
         if (invitation.CancelledAt != null) return "Cancelled";
         if (invitation.ExpiresAt <= DateTime.UtcNow) return "Expired";
         return "Pending";
+    }
+
+    private static string GetLocationName(Invitation invitation)
+    {
+        return invitation.Location?.Name ?? string.Empty;
+    }
+
+    private static string NormalizeEmail(string? email)
+    {
+        return (email ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private static string NormalizeRole(string? role)
+    {
+        var value = (role ?? string.Empty).Trim();
+
+        if (value.Equals("trainer", StringComparison.OrdinalIgnoreCase))
+            return "Trainer";
+
+        if (value.Equals("client", StringComparison.OrdinalIgnoreCase))
+            return "Client";
+
+        return value;
     }
 
     private static string GenerateToken()
