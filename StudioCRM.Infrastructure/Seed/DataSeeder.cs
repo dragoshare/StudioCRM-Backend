@@ -15,6 +15,7 @@ public static class DataSeeder
     private const string OwnerPassword = "Admin123!";
     private const string SeedNotePrefix = "SEED:";
     private const string BillingSeedNotePrefix = "SEED:BILLING:";
+    private const string SettlementSeedNotePrefix = "SEED:SETTLEMENT:";
 
     public static async Task SeedAsync(StudioCRMDbContext context, bool seedDemoData)
     {
@@ -35,6 +36,7 @@ public static class DataSeeder
         await SeedTrainerRatesAsync(context);
         await SeedClientsAsync(context, passwordHasher);
         await SeedBillingTestScenariosAsync(context, passwordHasher);
+        await SeedTrainerSettlementTestDataAsync(context);
     }
 
     private static async Task CleanupGeneratedDemoDataAsync(StudioCRMDbContext context)
@@ -620,6 +622,231 @@ public static class DataSeeder
             billingStatus: "Pending");
 
         await context.SaveChangesAsync();
+    }
+
+    private static async Task SeedTrainerSettlementTestDataAsync(StudioCRMDbContext context)
+    {
+        var trainer = await context.Trainers
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.User.Email == "trainer@studiocrm.local");
+
+        if (trainer is null)
+            return;
+
+        var owner = await context.Users.FirstAsync(u => u.Email == "owner@studiocrm.local");
+        var location = await context.Locations.FirstAsync(l => l.Name == "Niepołomice");
+        var hourlyRate = await context.TrainerRates
+            .Where(r => r.TrainerId == trainer.Id && r.SessionType == "Hourly" && r.IsActive)
+            .OrderByDescending(r => r.ValidFrom)
+            .Select(r => r.Rate)
+            .FirstOrDefaultAsync();
+
+        if (hourlyRate <= 0)
+            hourlyRate = 70m;
+
+        var clients = await context.Clients
+            .Where(c =>
+                c.TrainerId == trainer.Id &&
+                c.LocationId == location.Id &&
+                c.Status == "Active")
+            .OrderBy(c => c.Id)
+            .Take(4)
+            .ToListAsync();
+
+        if (!clients.Any())
+            return;
+
+        var now = DateTime.UtcNow;
+        var currentMonthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var previousMonthStart = currentMonthStart.AddMonths(-1);
+
+        await RemoveSeedTrainerSettlementDataAsync(
+            context,
+            trainer.Id,
+            currentMonthStart,
+            previousMonthStart);
+
+        await CreateSettlementSessionAsync(
+            context,
+            trainer.Id,
+            location.Id,
+            clients.Take(1).ToList(),
+            currentMonthStart.AddDays(1).AddHours(15),
+            "Rozliczenie testowe - trening 1:1",
+            "OneToOne");
+
+        await CreateSettlementSessionAsync(
+            context,
+            trainer.Id,
+            location.Id,
+            clients.Take(2).ToList(),
+            currentMonthStart.AddDays(3).AddHours(17),
+            "Rozliczenie testowe - trening 2:1",
+            "TwoToOne");
+
+        await CreateSettlementSessionAsync(
+            context,
+            trainer.Id,
+            location.Id,
+            clients.Take(Math.Min(3, clients.Count)).ToList(),
+            currentMonthStart.AddDays(6).AddHours(18),
+            "Rozliczenie testowe - trening 3:1",
+            clients.Count >= 3 ? "ThreeToOne" : ResolveSessionType(clients.Count));
+
+        await CreateSettlementSessionAsync(
+            context,
+            trainer.Id,
+            location.Id,
+            clients.Take(Math.Min(4, clients.Count)).ToList(),
+            currentMonthStart.AddDays(9).AddHours(19),
+            "Rozliczenie testowe - trening 4:1",
+            clients.Count >= 4 ? "FourToOne" : ResolveSessionType(clients.Count));
+
+        var previousSessions = new[]
+        {
+            await CreateSettlementSessionAsync(
+                context,
+                trainer.Id,
+                location.Id,
+                clients.Take(1).ToList(),
+                previousMonthStart.AddDays(5).AddHours(16),
+                "Poprzedni miesiąc - trening 1:1",
+                "OneToOne"),
+            await CreateSettlementSessionAsync(
+                context,
+                trainer.Id,
+                location.Id,
+                clients.Take(2).ToList(),
+                previousMonthStart.AddDays(12).AddHours(17),
+                "Poprzedni miesiąc - trening 2:1",
+                "TwoToOne")
+        };
+
+        var previousHours = previousSessions.Sum(s => ResolveSeedSettlementHours(s.ActualSessionType!, s.StartAt, s.EndAt));
+
+        await context.TrainerMonthlySettlements.AddAsync(new TrainerMonthlySettlement
+        {
+            TrainerId = trainer.Id,
+            Year = previousMonthStart.Year,
+            Month = previousMonthStart.Month,
+            TotalSessions = previousSessions.Length,
+            TotalHours = previousHours,
+            TotalAmount = previousHours * hourlyRate,
+            IsPaid = true,
+            PaidAt = previousMonthStart.AddMonths(1).AddDays(1).AddHours(10),
+            PaidByUserId = owner.Id,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task RemoveSeedTrainerSettlementDataAsync(
+        StudioCRMDbContext context,
+        int trainerId,
+        DateTime currentMonthStart,
+        DateTime previousMonthStart)
+    {
+        var currentYear = currentMonthStart.Year;
+        var currentMonth = currentMonthStart.Month;
+        var previousYear = previousMonthStart.Year;
+        var previousMonth = previousMonthStart.Month;
+
+        var settlements = await context.TrainerMonthlySettlements
+            .Where(s =>
+                s.TrainerId == trainerId &&
+                ((s.Year == currentYear && s.Month == currentMonth) ||
+                 (s.Year == previousYear && s.Month == previousMonth)))
+            .ToListAsync();
+
+        context.TrainerMonthlySettlements.RemoveRange(settlements);
+
+        var sessionIds = await context.Sessions
+            .Where(s => s.Note != null && s.Note.StartsWith(SettlementSeedNotePrefix))
+            .Select(s => s.Id)
+            .ToListAsync();
+
+        if (sessionIds.Any())
+        {
+            var participants = await context.SessionParticipants
+                .Where(p => sessionIds.Contains(p.SessionId))
+                .ToListAsync();
+
+            context.SessionParticipants.RemoveRange(participants);
+
+            var sessions = await context.Sessions
+                .Where(s => sessionIds.Contains(s.Id))
+                .ToListAsync();
+
+            context.Sessions.RemoveRange(sessions);
+        }
+
+        await context.SaveChangesAsync();
+    }
+
+    private static async Task<Session> CreateSettlementSessionAsync(
+        StudioCRMDbContext context,
+        int trainerId,
+        int locationId,
+        List<Client> clients,
+        DateTime start,
+        string title,
+        string sessionType)
+    {
+        var end = start.AddHours(1);
+        var session = new Session
+        {
+            Title = title,
+            Note = $"{SettlementSeedNotePrefix} {title}",
+            StartAt = start,
+            EndAt = end,
+            TrainerId = trainerId,
+            LocationId = locationId,
+            Status = "Completed",
+            PlannedSessionType = sessionType,
+            ActualSessionType = sessionType,
+            ActualParticipantsCount = clients.Count,
+            CompletedAt = end,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = 1,
+            IsDeleted = false
+        };
+
+        await context.Sessions.AddAsync(session);
+        await context.SaveChangesAsync();
+
+        foreach (var client in clients)
+        {
+            await context.SessionParticipants.AddAsync(new SessionParticipant
+            {
+                SessionId = session.Id,
+                ClientId = client.Id,
+                PackageId = client.ActivePackageId,
+                AttendanceStatus = "Present",
+                CountsAgainstPackage = true,
+                SessionsCharged = 1,
+                IsCountedFromPackage = true,
+                Note = $"{SettlementSeedNotePrefix} Uczestnik sesji do testu rozliczenia trenera.",
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        await context.SaveChangesAsync();
+        return session;
+    }
+
+    private static decimal ResolveSeedSettlementHours(string sessionType, DateTime startAt, DateTime endAt)
+    {
+        return sessionType switch
+        {
+            "TwoToOne" => 1.6m,
+            "ThreeToOne" => 2.2m,
+            "FourToOne" => 2.66m,
+            _ => Math.Round((decimal)(endAt - startAt).TotalHours, 2)
+        };
     }
 
     private static async Task ResetBillingScenarioDataAsync(

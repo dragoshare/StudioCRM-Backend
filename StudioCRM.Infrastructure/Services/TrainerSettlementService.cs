@@ -8,6 +8,8 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class TrainerSettlementService : ITrainerSettlementService
 {
+    private const string WindowsStudioTimeZone = "Central European Standard Time";
+
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
 
@@ -35,8 +37,10 @@ public class TrainerSettlementService : ITrainerSettlementService
         if (trainer is null)
             return null;
 
-        var from = new DateTime(year, month, 1);
-        var to = from.AddMonths(1);
+        var from = GetStudioMonthStartUtc(year, month);
+        var nextYear = month == 12 ? year + 1 : year;
+        var nextMonth = month == 12 ? 1 : month + 1;
+        var to = GetStudioMonthStartUtc(nextYear, nextMonth);
 
         var savedSettlement = await _context.TrainerMonthlySettlements
             .FirstOrDefaultAsync(s =>
@@ -71,8 +75,8 @@ public class TrainerSettlementService : ITrainerSettlementService
             items.Add(new TrainerSettlementItemDto
             {
                 SessionId = session.Id,
-                StartAt = session.StartAt,
-                EndAt = session.EndAt,
+                StartAt = ToStudioDisplayDateTime(session.StartAt),
+                EndAt = ToStudioDisplayDateTime(session.EndAt),
                 Title = session.Title,
                 SessionType = sessionType,
                 Hours = hours,
@@ -92,7 +96,9 @@ public class TrainerSettlementService : ITrainerSettlementService
             TotalSessions = items.Count,
             TotalAmount = items.Sum(i => i.Amount),
             IsPaid = savedSettlement?.IsPaid ?? false,
-            PaidAt = savedSettlement?.PaidAt,
+            PaidAt = savedSettlement?.PaidAt.HasValue == true
+                ? ToStudioDisplayDateTime(savedSettlement.PaidAt.Value)
+                : null,
             Items = items
         };
     }
@@ -228,5 +234,41 @@ public class TrainerSettlementService : ITrainerSettlementService
             .FirstOrDefault();
 
         return rate?.Rate ?? 0;
+    }
+
+    private static DateTime GetStudioMonthStartUtc(int year, int month)
+    {
+        var local = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Unspecified);
+        return TimeZoneInfo.ConvertTimeToUtc(local, GetStudioTimeZone());
+    }
+
+    private static DateTime ToStudioDisplayDateTime(DateTime value)
+    {
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+        return DateTime.SpecifyKind(
+            TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone()),
+            DateTimeKind.Unspecified);
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", WindowsStudioTimeZone })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 }
