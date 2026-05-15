@@ -44,6 +44,7 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
             $"&redirect_uri={Uri.EscapeDataString(_settings.RedirectUri)}" +
             $"&response_mode=query" +
             $"&scope={Uri.EscapeDataString(_settings.Scopes)}" +
+            $"&prompt=consent" +
             $"&state={Uri.EscapeDataString(state)}";
 
         return Task.FromResult(new CalendarConnectUrlDto { Url = url });
