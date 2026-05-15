@@ -66,19 +66,16 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             clientState = "StudioCRM-Outlook-Webhook"
         };
 
-        using var request = new HttpRequestMessage(
-            HttpMethod.Post,
-            "https://graph.microsoft.com/v1.0/subscriptions");
-
-        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
-
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(payload),
-            Encoding.UTF8,
-            "application/json");
-
-        var response = await _httpClient.SendAsync(request);
+        var response = await SendCreateSubscriptionRequestAsync(integration.AccessToken, payload);
         var body = await response.Content.ReadAsStringAsync();
+
+        if (!response.IsSuccessStatusCode && IsInvalidAuthenticationToken(response, body))
+        {
+            await _tokenService.EnsureValidAccessTokenAsync(integration, forceRefresh: true);
+
+            response = await SendCreateSubscriptionRequestAsync(integration.AccessToken, payload);
+            body = await response.Content.ReadAsStringAsync();
+        }
 
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"Microsoft subscription error: {body}");
@@ -115,6 +112,28 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
         existing.IsActive = true;
 
         await _context.SaveChangesAsync();
+    }
+
+    private async Task<HttpResponseMessage> SendCreateSubscriptionRequestAsync(string accessToken, object payload)
+    {
+        using var request = new HttpRequestMessage(
+            HttpMethod.Post,
+            "https://graph.microsoft.com/v1.0/subscriptions");
+
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(payload),
+            Encoding.UTF8,
+            "application/json");
+
+        return await _httpClient.SendAsync(request);
+    }
+
+    private static bool IsInvalidAuthenticationToken(HttpResponseMessage response, string body)
+    {
+        return response.StatusCode == System.Net.HttpStatusCode.Unauthorized &&
+               body.Contains("InvalidAuthenticationToken", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task RenewExpiringSubscriptionsAsync()

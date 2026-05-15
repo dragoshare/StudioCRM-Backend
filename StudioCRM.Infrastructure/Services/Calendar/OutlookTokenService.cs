@@ -23,9 +23,10 @@ public class OutlookTokenService : IOutlookTokenService
         _httpClient = httpClient;
     }
 
-    public async Task EnsureValidAccessTokenAsync(CalendarIntegration integration)
+    public async Task EnsureValidAccessTokenAsync(CalendarIntegration integration, bool forceRefresh = false)
     {
-        if (integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(5) &&
+        if (!forceRefresh &&
+            integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(5) &&
             !string.IsNullOrWhiteSpace(integration.AccessToken))
         {
             return;

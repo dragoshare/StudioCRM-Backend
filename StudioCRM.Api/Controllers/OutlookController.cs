@@ -144,6 +144,9 @@ public class OutlookController : ControllerBase
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
 
+        if (string.IsNullOrWhiteSpace(body))
+            return Ok();
+
         await _webhookService.HandleNotificationAsync(body);
 
         return Ok();

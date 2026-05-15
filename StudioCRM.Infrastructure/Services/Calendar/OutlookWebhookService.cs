@@ -32,6 +32,9 @@ public class OutlookWebhookService : IOutlookWebhookService
 
     public async Task HandleNotificationAsync(string requestBody)
     {
+        if (string.IsNullOrWhiteSpace(requestBody))
+            return;
+
         using var doc = JsonDocument.Parse(requestBody);
 
         if (!doc.RootElement.TryGetProperty("value", out var value))
