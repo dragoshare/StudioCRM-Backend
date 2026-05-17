@@ -18,8 +18,6 @@ public class ClientPortalMeDto
 
     public string? Goal { get; set; }
 
-    public int ProgressPercent { get; set; }
-
     public string Status { get; set; } = string.Empty;
 
     public string BillingStatus { get; set; } = string.Empty;

@@ -33,7 +33,6 @@ public class ClientPortalService : IClientPortalService
                 PhoneNumber = c.PhoneNumber,
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
-                ProgressPercent = c.ProgressPercent,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
                 LocationName = c.Location.Name,

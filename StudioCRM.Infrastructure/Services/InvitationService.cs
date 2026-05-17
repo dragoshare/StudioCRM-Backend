@@ -366,7 +366,6 @@ public class InvitationService : IInvitationService
             LocationId = invitation.LocationId,
             Status = "New",
             BillingStatus = "Pending",
-            ProgressPercent = 0,
             SubscriptionAutoRenewEnabled = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,

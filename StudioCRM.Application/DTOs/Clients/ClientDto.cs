@@ -28,8 +28,6 @@ public class ClientDto
 
     public string? Notes { get; set; }
 
-    public int ProgressPercent { get; set; }
-
     public string BillingStatus { get; set; } = string.Empty;
 
     public string Status { get; set; } = string.Empty;

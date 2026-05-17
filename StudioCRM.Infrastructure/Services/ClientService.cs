@@ -41,7 +41,7 @@ public class ClientService : IClientService
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
 
-        if (_currentUser.IsTrainer)
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             if (!_currentUser.UserId.HasValue)
                 throw new InvalidOperationException("Current trainer user is invalid.");
@@ -68,7 +68,6 @@ public class ClientService : IClientService
             PhoneNumber = request.PhoneNumber,
             Goal = request.Goal,
             Notes = request.Notes,
-            ProgressPercent = request.ProgressPercent,
             BillingStatus = request.BillingStatus ?? "Pending",
             Status = request.Status ?? "New",
             NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
@@ -168,7 +167,7 @@ public class ClientService : IClientService
         if (client is null)
             return null;
 
-        if (_currentUser.IsTrainer)
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             if (!_currentUser.UserId.HasValue)
                 throw new InvalidOperationException("Current trainer user is invalid.");
@@ -193,7 +192,6 @@ public class ClientService : IClientService
         client.PhoneNumber = request.PhoneNumber;
         client.Goal = request.Goal;
         client.Notes = request.Notes;
-        client.ProgressPercent = request.ProgressPercent;
         client.BillingStatus = request.BillingStatus;
         client.Status = request.Status;
         client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
@@ -296,7 +294,6 @@ public class ClientService : IClientService
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
-                ProgressPercent = c.ProgressPercent,
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
@@ -465,7 +462,6 @@ public class ClientService : IClientService
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
-                ProgressPercent = c.ProgressPercent,
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
@@ -483,7 +479,7 @@ public class ClientService : IClientService
         if (_currentUser.IsOwner)
             return query;
 
-        if (_currentUser.IsTrainer && _currentUser.UserId.HasValue)
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner && _currentUser.UserId.HasValue)
         {
             return query.Where(c =>
                 c.TrainerId != null &&

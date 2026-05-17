@@ -22,8 +22,6 @@ public class TrainerPortalClientDto
 
     public string BillingStatus { get; set; } = string.Empty;
 
-    public int ProgressPercent { get; set; }
-
     public string LocationName { get; set; } = string.Empty;
 
     public DateTime CreatedAt { get; set; }

@@ -24,6 +24,7 @@ public static class DataSeeder
         var passwordHasher = new PasswordHasher<User>();
 
         await SeedRolesAsync(context);
+        await EnsureOwnerTrainerProfilesAsync(context);
 
         if (!seedDemoData)
             return;
@@ -100,6 +101,22 @@ public static class DataSeeder
         }
 
         await context.SaveChangesAsync();
+    }
+
+    private static async Task EnsureOwnerTrainerProfilesAsync(StudioCRMDbContext context)
+    {
+        var ownerUsers = await context.Users
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+            .Where(u => u.IsActive && u.UserRoles.Any(ur => ur.Role.Name == "Owner"))
+            .Select(u => u.Id)
+            .ToListAsync();
+
+        foreach (var ownerUserId in ownerUsers)
+        {
+            await EnsureUserRoleAsync(context, ownerUserId, "Trainer");
+            await EnsureOwnerTrainerProfileAsync(context, ownerUserId);
+        }
     }
 
     private static async Task SeedLocationsAsync(StudioCRMDbContext context)
@@ -232,6 +249,65 @@ public static class DataSeeder
             OwnerPassword);
 
         await EnsureUserRoleAsync(context, owner.Id, "Owner");
+        await EnsureUserRoleAsync(context, owner.Id, "Trainer");
+        await EnsureOwnerTrainerProfileAsync(context, owner.Id);
+    }
+
+    private static async Task EnsureOwnerTrainerProfileAsync(
+        StudioCRMDbContext context,
+        int ownerUserId)
+    {
+        var trainer = await context.Trainers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.UserId == ownerUserId);
+
+        if (trainer is null)
+        {
+            trainer = new Trainer
+            {
+                UserId = ownerUserId,
+                Bio = "Owner prowadzący własnych klientów",
+                Phone = "501100098",
+                Status = "Active",
+                ExperienceYears = 0,
+                OutlookCategoryName = "Owner",
+                OutlookCategoryColor = "preset6",
+                CreatedAt = DateTime.UtcNow,
+                CreatedBy = ownerUserId
+            };
+
+            await context.Trainers.AddAsync(trainer);
+        }
+
+        trainer.IsDeleted = false;
+        trainer.DeletedAt = null;
+        trainer.Status = "Active";
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        await context.SaveChangesAsync();
+
+        var locationIds = await context.Locations
+            .Where(l => l.IsActive)
+            .Select(l => l.Id)
+            .ToListAsync();
+
+        foreach (var locationId in locationIds)
+        {
+            var exists = await context.TrainerLocations.AnyAsync(tl =>
+                tl.TrainerId == trainer.Id &&
+                tl.LocationId == locationId);
+
+            if (!exists)
+            {
+                await context.TrainerLocations.AddAsync(new TrainerLocation
+                {
+                    TrainerId = trainer.Id,
+                    LocationId = locationId
+                });
+            }
+        }
+
+        await context.SaveChangesAsync();
     }
 
     private static async Task SeedTrainersAsync(
@@ -414,18 +490,18 @@ public static class DataSeeder
     {
         var clients = new[]
         {
-            new { Email = "anna.nowak@test.pl", FirstName = "Anna", LastName = "Nowak", Phone = "600100001", Goal = "Redukcja tkanki tłuszczowej", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "12 treningów 1:1", Billing = "Paid", Progress = 65 },
-            new { Email = "piotr.zielinski@test.pl", FirstName = "Piotr", LastName = "Zieliński", Phone = "600100002", Goal = "Budowa masy mięśniowej", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "8 treningów 1:1", Billing = "Pending", Progress = 45 },
-            new { Email = "kasia.wojcik@test.pl", FirstName = "Kasia", LastName = "Wójcik", Phone = "600100003", Goal = "Poprawa kondycji", Location = "Kłaj", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 2:1", Billing = "Paid", Progress = 72 },
-            new { Email = "michal.lis@test.pl", FirstName = "Michał", LastName = "Lis", Phone = "600100004", Goal = "Siła i hipertrofia", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "12 treningów 2:1", Billing = "Paid", Progress = 38 },
-            new { Email = "agnieszka.kaczmarek@test.pl", FirstName = "Agnieszka", LastName = "Kaczmarek", Phone = "600100005", Goal = "Powrót po kontuzji kolana", Location = "Niepołomice", TrainerEmail = "adam.trener@studiocrm.local", Package = "8 treningów 1:1", Billing = "Overdue", Progress = 25 },
-            new { Email = "pawel.mazur@test.pl", FirstName = "Paweł", LastName = "Mazur", Phone = "600100006", Goal = "Redukcja i zdrowe plecy", Location = "Niepołomice", TrainerEmail = "adam.trener@studiocrm.local", Package = "12 treningów 3:1", Billing = "Paid", Progress = 55 },
-            new { Email = "ewa.krol@test.pl", FirstName = "Ewa", LastName = "Król", Phone = "600100007", Goal = "Mobilność i sylwetka", Location = "Kłaj", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 3:1", Billing = "Pending", Progress = 41 },
-            new { Email = "tomasz.wrona@test.pl", FirstName = "Tomasz", LastName = "Wrona", Phone = "600100008", Goal = "Przygotowanie do biegu", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "8 treningów 2:1", Billing = "Paid", Progress = 80 },
-            new { Email = "magda.lewandowska@test.pl", FirstName = "Magda", LastName = "Lewandowska", Phone = "600100009", Goal = "Poprawa siły", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "4 treningi 1:1", Billing = "Paid", Progress = 30 },
-            new { Email = "rafal.sikora@test.pl", FirstName = "Rafał", LastName = "Sikora", Phone = "600100010", Goal = "Redukcja", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "12 treningów 1:1", Billing = "Pending", Progress = 50 },
-            new { Email = "ola.michalska@test.pl", FirstName = "Ola", LastName = "Michalska", Phone = "600100011", Goal = "Trening po ciąży", Location = "Niepołomice", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 1:1", Billing = "Paid", Progress = 60 },
-            new { Email = "dominik.sobczak@test.pl", FirstName = "Dominik", LastName = "Sobczak", Phone = "600100012", Goal = "Masa mięśniowa", Location = "Kłaj", TrainerEmail = "trainer@studiocrm.local", Package = "12 treningów 2:1", Billing = "Paid", Progress = 68 }
+            new { Email = "anna.nowak@test.pl", FirstName = "Anna", LastName = "Nowak", Phone = "600100001", Goal = "Redukcja tkanki tłuszczowej", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "12 treningów 1:1", Billing = "Paid" },
+            new { Email = "piotr.zielinski@test.pl", FirstName = "Piotr", LastName = "Zieliński", Phone = "600100002", Goal = "Budowa masy mięśniowej", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "8 treningów 1:1", Billing = "Pending" },
+            new { Email = "kasia.wojcik@test.pl", FirstName = "Kasia", LastName = "Wójcik", Phone = "600100003", Goal = "Poprawa kondycji", Location = "Kłaj", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 2:1", Billing = "Paid" },
+            new { Email = "michal.lis@test.pl", FirstName = "Michał", LastName = "Lis", Phone = "600100004", Goal = "Siła i hipertrofia", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "12 treningów 2:1", Billing = "Paid" },
+            new { Email = "agnieszka.kaczmarek@test.pl", FirstName = "Agnieszka", LastName = "Kaczmarek", Phone = "600100005", Goal = "Powrót po kontuzji kolana", Location = "Niepołomice", TrainerEmail = "adam.trener@studiocrm.local", Package = "8 treningów 1:1", Billing = "Overdue" },
+            new { Email = "pawel.mazur@test.pl", FirstName = "Paweł", LastName = "Mazur", Phone = "600100006", Goal = "Redukcja i zdrowe plecy", Location = "Niepołomice", TrainerEmail = "adam.trener@studiocrm.local", Package = "12 treningów 3:1", Billing = "Paid" },
+            new { Email = "ewa.krol@test.pl", FirstName = "Ewa", LastName = "Król", Phone = "600100007", Goal = "Mobilność i sylwetka", Location = "Kłaj", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 3:1", Billing = "Pending" },
+            new { Email = "tomasz.wrona@test.pl", FirstName = "Tomasz", LastName = "Wrona", Phone = "600100008", Goal = "Przygotowanie do biegu", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "8 treningów 2:1", Billing = "Paid" },
+            new { Email = "magda.lewandowska@test.pl", FirstName = "Magda", LastName = "Lewandowska", Phone = "600100009", Goal = "Poprawa siły", Location = "Niepołomice", TrainerEmail = "trainer@studiocrm.local", Package = "4 treningi 1:1", Billing = "Paid" },
+            new { Email = "rafal.sikora@test.pl", FirstName = "Rafał", LastName = "Sikora", Phone = "600100010", Goal = "Redukcja", Location = "Kłaj", TrainerEmail = "bartek.trener@studiocrm.local", Package = "12 treningów 1:1", Billing = "Pending" },
+            new { Email = "ola.michalska@test.pl", FirstName = "Ola", LastName = "Michalska", Phone = "600100011", Goal = "Trening po ciąży", Location = "Niepołomice", TrainerEmail = "karolina.trener@studiocrm.local", Package = "8 treningów 1:1", Billing = "Paid" },
+            new { Email = "dominik.sobczak@test.pl", FirstName = "Dominik", LastName = "Sobczak", Phone = "600100012", Goal = "Masa mięśniowa", Location = "Kłaj", TrainerEmail = "trainer@studiocrm.local", Package = "12 treningów 2:1", Billing = "Paid" }
         };
 
         foreach (var seed in clients)
@@ -465,7 +541,6 @@ public static class DataSeeder
                     TrainingStartDate = DateTime.UtcNow.AddDays(-Random.Shared.Next(30, 200)),
                     Notes = "Klient testowy powiązany z kontem, trenerem, lokalizacją i pakietem.",
                     Status = "Active",
-                    ProgressPercent = seed.Progress,
                     BillingStatus = seed.Billing,
                     NextSessionAt = DateTime.UtcNow.AddDays(Random.Shared.Next(1, 10)),
                     CreatedAt = DateTime.UtcNow.AddDays(-Random.Shared.Next(20, 120)),
@@ -968,7 +1043,6 @@ public static class DataSeeder
         client.Notes = notes;
         client.Status = status;
         client.BillingStatus = billingStatus;
-        client.ProgressPercent = status == "Active" ? 40 : 0;
         client.TrainingStartDate = DateTime.UtcNow.Date.AddDays(-20);
         client.GoogleDriveFolderId = $"seed-folder-{email}";
         client.TrainingPlanFileId = $"seed-plan-{email}";

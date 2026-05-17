@@ -29,8 +29,6 @@ public class Client
 
     public string? Notes { get; set; }
 
-    public int ProgressPercent { get; set; }
-
     public string BillingStatus { get; set; } = "Pending";
 
     public string Status { get; set; } = "New";

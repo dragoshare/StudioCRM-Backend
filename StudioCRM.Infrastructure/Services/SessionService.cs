@@ -74,6 +74,10 @@ public class SessionService : ISessionService
                     x.Provider == link.Provider &&
                     x.ExternalEventId == link.ExternalEventId);
 
+        var isLockedByPaidSettlement = await IsSessionLockedByPaidSettlementAsync(
+            session.TrainerId,
+            session.StartAt);
+
         return new SessionWorkspaceDto
         {
             Session = session,
@@ -87,8 +91,8 @@ public class SessionService : ISessionService
             },
             QuickActions = new SessionWorkspaceQuickActionsDto
             {
-                CanEditParticipants = session.Status != "Completed",
-                CanComplete = session.Status != "Completed" && session.Status != "Cancelled"
+                CanEditParticipants = !isLockedByPaidSettlement,
+                CanComplete = !isLockedByPaidSettlement && session.Status != "Cancelled"
             }
         };
     }
@@ -155,8 +159,20 @@ public class SessionService : ISessionService
         if (session is null)
             return null;
 
-        if (session.Status == "Completed")
-            throw new InvalidOperationException("Completed session cannot be updated.");
+        var requestedStatus = string.IsNullOrWhiteSpace(request.Status)
+            ? "Planned"
+            : request.Status;
+
+        var touchesCompletedSession =
+            session.Status == "Completed" ||
+            requestedStatus == "Completed" ||
+            session.Participants.Any(p => p.IsCountedFromPackage);
+
+        if (touchesCompletedSession)
+        {
+            await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+            await EnsureSessionIsNotLockedByPaidSettlementAsync(request.TrainerId, normalizedStartAt);
+        }
 
         await ValidateSessionRequestAsync(
             request.TrainerId,
@@ -180,11 +196,29 @@ public class SessionService : ISessionService
         session.TrainerId = request.TrainerId;
         session.LocationId = request.LocationId;
         session.StudioRoom = null;
-        session.Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status;
+        session.Status = requestedStatus;
         session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
         session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
         session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
         session.UpdatedAt = DateTime.UtcNow;
+
+        if (touchesCompletedSession && requestedStatus == "Completed")
+        {
+            EnsureCompletedSessionParticipantsWereNotChanged(session, request.Participants);
+
+            await _context.SaveChangesAsync();
+            await TrySyncSessionToOutlookAsync(session.Id);
+
+            return await GetByIdAsync(session.Id);
+        }
+
+        if (touchesCompletedSession)
+        {
+            await RevertSessionPackageAccountingAsync(session);
+            session.ActualSessionType = null;
+            session.ActualParticipantsCount = null;
+            session.CompletedAt = null;
+        }
 
         _context.SessionParticipants.RemoveRange(session.Participants);
 
@@ -203,6 +237,18 @@ public class SessionService : ISessionService
 
         if (session is null)
             return false;
+
+        var touchesCompletedSession =
+            session.Status == "Completed" ||
+            await _context.SessionParticipants.AnyAsync(p =>
+                p.SessionId == session.Id &&
+                p.IsCountedFromPackage);
+
+        if (touchesCompletedSession)
+        {
+            await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+            await RevertSessionPackageAccountingAsync(session);
+        }
 
         await TryDeleteSessionFromOutlookAsync(session.Id);
 
@@ -285,6 +331,10 @@ public class SessionService : ISessionService
 
         if (participant is null)
             throw new InvalidOperationException("Session participant not found.");
+
+        await EnsureSessionIsNotLockedByPaidSettlementAsync(
+            participant.Session.TrainerId,
+            participant.Session.StartAt);
 
         var clientPackage = await _context.ClientPackages
             .FirstOrDefaultAsync(p => p.Id == request.ClientPackageId);
@@ -418,6 +468,99 @@ public class SessionService : ISessionService
             throw new InvalidOperationException("Matched price package sessions limit must be greater than zero.");
 
         return NormalizeUnitPrice(pricePackage.Price / pricePackage.SessionsLimit);
+    }
+
+    private async Task EnsureSessionIsNotLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
+    {
+        if (await IsSessionLockedByPaidSettlementAsync(trainerId, startAt))
+        {
+            throw new InvalidOperationException(
+                "Session cannot be changed because the trainer settlement for this month has already been paid.");
+        }
+    }
+
+    private async Task<bool> IsSessionLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
+    {
+        var (year, month) = GetStudioYearMonth(startAt);
+
+        return await _context.TrainerMonthlySettlements.AnyAsync(s =>
+            s.TrainerId == trainerId &&
+            s.Year == year &&
+            s.Month == month &&
+            s.IsPaid);
+    }
+
+    private async Task RevertSessionPackageAccountingAsync(Session session)
+    {
+        var participants = await _context.SessionParticipants
+            .Where(p => p.SessionId == session.Id)
+            .ToListAsync();
+
+        var countedPackageGroups = participants
+            .Where(p => p.IsCountedFromPackage && p.ClientPackageId.HasValue)
+            .GroupBy(p => p.ClientPackageId!.Value)
+            .Select(g => new
+            {
+                ClientPackageId = g.Key,
+                SessionsCharged = g.Sum(p => Math.Max(0, p.SessionsCharged))
+            })
+            .ToList();
+
+        foreach (var countedPackage in countedPackageGroups)
+        {
+            var clientPackage = await _context.ClientPackages
+                .FirstOrDefaultAsync(cp => cp.Id == countedPackage.ClientPackageId);
+
+            if (clientPackage is not null)
+            {
+                clientPackage.UsedSessions = Math.Max(
+                    0,
+                    clientPackage.UsedSessions - countedPackage.SessionsCharged);
+            }
+        }
+
+        var adjustments = await _context.ClientBalanceTransactions
+            .Where(t =>
+                t.SessionId == session.Id &&
+                t.Type == BalanceTransactionType.PackageAdjustment)
+            .ToListAsync();
+
+        _context.ClientBalanceTransactions.RemoveRange(adjustments);
+
+        foreach (var participant in participants)
+        {
+            participant.CountsAgainstPackage = false;
+            participant.IsCountedFromPackage = false;
+            participant.ClientPackageId = null;
+            participant.PackageId = null;
+            participant.PlannedBillingType = null;
+            participant.ActualBillingType = null;
+            participant.ExpectedUnitPrice = null;
+            participant.ActualUnitPrice = null;
+            participant.BalanceDifference = null;
+            participant.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
+    private static void EnsureCompletedSessionParticipantsWereNotChanged(
+        Session session,
+        List<CreateSessionParticipantDto> requestedParticipants)
+    {
+        var existingClientIds = session.Participants
+            .Select(p => p.ClientId)
+            .OrderBy(id => id)
+            .ToList();
+
+        var requestedClientIds = requestedParticipants
+            .Select(p => p.ClientId)
+            .OrderBy(id => id)
+            .ToList();
+
+        if (!existingClientIds.SequenceEqual(requestedClientIds))
+        {
+            throw new InvalidOperationException(
+                "Use session completion to change participants or package accounting for a completed session.");
+        }
     }
 
     private static int ResolveSessionsPerWeek(ClientPackage clientPackage)
@@ -588,6 +731,16 @@ public class SessionService : ISessionService
         }
 
         return TimeZoneInfo.Utc;
+    }
+
+    private static (int Year, int Month) GetStudioYearMonth(DateTime value)
+    {
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone());
+        return (local.Year, local.Month);
     }
 
     private async Task<List<SessionDto>> MapSessionDtosAsync(List<Session> sessions)

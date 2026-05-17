@@ -96,7 +96,6 @@ public class TrainerPortalService : ITrainerPortalService
                 Goal = c.Goal,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
-                ProgressPercent = c.ProgressPercent,
                 LocationName = c.Location.Name,
                 CreatedAt = c.CreatedAt
             })
@@ -151,7 +150,6 @@ public class TrainerPortalService : ITrainerPortalService
         client.PhoneNumber = request.PhoneNumber;
         client.Goal = request.Goal;
         client.Notes = request.Notes;
-        client.ProgressPercent = request.ProgressPercent;
         client.BillingStatus = request.BillingStatus;
         client.Status = request.Status;
         client.LocationId = request.LocationId;
@@ -364,7 +362,6 @@ public class TrainerPortalService : ITrainerPortalService
                 Goal = c.Goal,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
-                ProgressPercent = c.ProgressPercent,
                 LocationName = c.Location.Name,
                 CreatedAt = c.CreatedAt
             })
@@ -384,7 +381,7 @@ public class TrainerPortalService : ITrainerPortalService
 
     public async Task<TrainerMonthlySettlementDto?> GetMyMonthlySettlementAsync(int year, int month)
     {
-        if (!_currentUser.IsTrainer)
+        if (!_currentUser.IsTrainer && !_currentUser.IsOwner)
             throw new UnauthorizedAccessException("Only trainer can access this endpoint.");
 
         var trainerId = await _context.Trainers
@@ -519,7 +516,6 @@ public class TrainerPortalService : ITrainerPortalService
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
                 Goal = c.Goal,
                 Notes = c.Notes,
-                ProgressPercent = c.ProgressPercent,
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,

@@ -21,10 +21,9 @@ public class TrainerService : ITrainerService
     public async Task<TrainerDto> CreateAsync(CreateTrainerDto request)
     {
         var existingUser = await _context.Users
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Email == request.Email);
-
-        if (existingUser is not null)
-            throw new InvalidOperationException("User with this email already exists.");
 
         if (request.LocationIds is null || request.LocationIds.Count == 0)
             throw new InvalidOperationException("Trainer must be assigned to at least one location.");
@@ -42,6 +41,13 @@ public class TrainerService : ITrainerService
 
         if (trainerRole is null)
             throw new InvalidOperationException("Trainer role does not exist.");
+
+        if (existingUser is not null)
+            return await CreateTrainerProfileForExistingOwnerAsync(
+                existingUser,
+                trainerRole,
+                request,
+                distinctLocationIds);
 
         var user = new User
         {
@@ -81,6 +87,80 @@ public class TrainerService : ITrainerService
 
         await _context.Trainers.AddAsync(trainer);
         await _context.SaveChangesAsync();
+
+        await _context.TrainerLocations.AddRangeAsync(
+            distinctLocationIds.Select(locationId => new TrainerLocation
+            {
+                TrainerId = trainer.Id,
+                LocationId = locationId
+            }));
+
+        await _context.SaveChangesAsync();
+
+        return await GetProjectedById(trainer.Id);
+    }
+
+    private async Task<TrainerDto> CreateTrainerProfileForExistingOwnerAsync(
+        User user,
+        Role trainerRole,
+        CreateTrainerDto request,
+        List<int> distinctLocationIds)
+    {
+        var isOwner = user.UserRoles.Any(ur => ur.Role.Name == "Owner");
+
+        if (!isOwner)
+            throw new InvalidOperationException("User with this email already exists.");
+
+        var existingTrainer = await _context.Trainers
+            .IgnoreQueryFilters()
+            .FirstOrDefaultAsync(t => t.UserId == user.Id);
+
+        if (existingTrainer is not null && !existingTrainer.IsDeleted)
+            throw new InvalidOperationException("User already has a trainer profile.");
+
+        var hasTrainerRole = user.UserRoles.Any(ur => ur.RoleId == trainerRole.Id);
+        if (!hasTrainerRole)
+        {
+            await _context.UserRoles.AddAsync(new UserRole
+            {
+                UserId = user.Id,
+                RoleId = trainerRole.Id
+            });
+        }
+
+        user.FirstName = request.FirstName;
+        user.LastName = request.LastName;
+        user.AvatarUrl = request.AvatarUrl;
+        user.IsActive = true;
+        user.UpdatedAt = DateTime.UtcNow;
+
+        var trainer = existingTrainer ?? new Trainer
+        {
+            UserId = user.Id,
+            CreatedAt = DateTime.UtcNow,
+            CreatedBy = request.CreatedBy
+        };
+
+        trainer.Bio = request.Bio;
+        trainer.Phone = request.Phone;
+        trainer.Status = request.Status;
+        trainer.ExperienceYears = request.ExperienceYears;
+        trainer.OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName);
+        trainer.OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor);
+        trainer.IsDeleted = false;
+        trainer.DeletedAt = null;
+        trainer.UpdatedAt = DateTime.UtcNow;
+
+        if (existingTrainer is null)
+            await _context.Trainers.AddAsync(trainer);
+
+        await _context.SaveChangesAsync();
+
+        var existingTrainerLocations = await _context.TrainerLocations
+            .Where(tl => tl.TrainerId == trainer.Id)
+            .ToListAsync();
+
+        _context.TrainerLocations.RemoveRange(existingTrainerLocations);
 
         await _context.TrainerLocations.AddRangeAsync(
             distinctLocationIds.Select(locationId => new TrainerLocation

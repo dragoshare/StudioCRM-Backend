@@ -151,7 +151,6 @@ public class AuthService : IAuthService
                 FirstName = user.FirstName,
                 LastName = user.LastName,
                 Email = user.Email,
-                ProgressPercent = 0,
                 BillingStatus = "Pending",
                 Status = "New",
                 SubscriptionAutoRenewEnabled = true,

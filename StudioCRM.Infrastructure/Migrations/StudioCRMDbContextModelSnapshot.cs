@@ -211,9 +211,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("PhoneNumber")
                         .HasColumnType("text");
 
-                    b.Property<int>("ProgressPercent")
-                        .HasColumnType("integer");
-
                     b.Property<DateTime?>("RenewalCancellationRequestedAt")
                         .HasColumnType("timestamp with time zone");
 

@@ -136,17 +136,35 @@ public class SessionParticipantService : ISessionParticipantService
         if (session is null)
             return false;
 
+        await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+
         if (session.Status == "Cancelled")
             throw new InvalidOperationException("Cancelled session cannot be completed.");
-
-        if (session.Status == "Completed")
-            throw new InvalidOperationException("Session is already completed.");
 
         if (!request.Participants.Any())
             throw new InvalidOperationException("At least one participant is required.");
 
         if (!Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))
             throw new InvalidOperationException("Invalid actual session type.");
+
+        var updatesCompletedSession =
+            session.Status == "Completed" ||
+            session.Participants.Any(p => p.IsCountedFromPackage);
+
+        if (updatesCompletedSession)
+        {
+            await RevertSessionPackageAccountingAsync(session);
+
+            var requestedClientIds = request.Participants
+                .Select(p => p.ClientId)
+                .ToHashSet();
+
+            var participantsToRemove = session.Participants
+                .Where(p => !requestedClientIds.Contains(p.ClientId))
+                .ToList();
+
+            _context.SessionParticipants.RemoveRange(participantsToRemove);
+        }
 
         var completedPackageIds = new HashSet<int>();
 
@@ -175,11 +193,6 @@ public class SessionParticipantService : ISessionParticipantService
                 await _context.SessionParticipants.AddAsync(participant);
             }
 
-            var previouslyCountedPackageId = participant.ClientPackageId;
-            var wasPreviouslyCounted = participant.IsCountedFromPackage;
-            var previouslyCharged = wasPreviouslyCounted
-                ? Math.Max(0, participant.SessionsCharged)
-                : 0;
             var requestedSessionsCharged = NormalizeSessionsCharged(participantRequest.SessionsCharged);
 
             participant.AttendanceStatus = participantRequest.AttendanceStatus;
@@ -199,12 +212,12 @@ public class SessionParticipantService : ISessionParticipantService
                     var usedSessions = await _context.SessionParticipants
                         .Where(p =>
                             p.ClientPackageId == activeClientPackage.Id &&
-                            p.IsCountedFromPackage)
+                            p.IsCountedFromPackage &&
+                            p.SessionId != session.Id)
                         .SumAsync(p => p.SessionsCharged);
 
                     var sessionsCharged = requestedSessionsCharged;
-                    var isAlreadyCountedThisPackage = previouslyCountedPackageId == activeClientPackage.Id;
-                    var newUsedSessions = usedSessions - (isAlreadyCountedThisPackage ? previouslyCharged : 0) + sessionsCharged;
+                    var newUsedSessions = usedSessions + sessionsCharged;
 
                     if (newUsedSessions > activeClientPackage.TotalSessions)
                         throw new InvalidOperationException("Client package has no remaining sessions.");
@@ -364,6 +377,71 @@ public class SessionParticipantService : ISessionParticipantService
         return decimal.Round(amount, 2);
     }
 
+    private async Task EnsureSessionIsNotLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
+    {
+        var (year, month) = GetStudioYearMonth(startAt);
+
+        var isPaid = await _context.TrainerMonthlySettlements.AnyAsync(s =>
+            s.TrainerId == trainerId &&
+            s.Year == year &&
+            s.Month == month &&
+            s.IsPaid);
+
+        if (isPaid)
+        {
+            throw new InvalidOperationException(
+                "Session cannot be changed because the trainer settlement for this month has already been paid.");
+        }
+    }
+
+    private async Task RevertSessionPackageAccountingAsync(Session session)
+    {
+        var countedPackageGroups = session.Participants
+            .Where(p => p.IsCountedFromPackage && p.ClientPackageId.HasValue)
+            .GroupBy(p => p.ClientPackageId!.Value)
+            .Select(g => new
+            {
+                ClientPackageId = g.Key,
+                SessionsCharged = g.Sum(p => Math.Max(0, p.SessionsCharged))
+            })
+            .ToList();
+
+        foreach (var countedPackage in countedPackageGroups)
+        {
+            var clientPackage = await _context.ClientPackages
+                .FirstOrDefaultAsync(cp => cp.Id == countedPackage.ClientPackageId);
+
+            if (clientPackage is not null)
+            {
+                clientPackage.UsedSessions = Math.Max(
+                    0,
+                    clientPackage.UsedSessions - countedPackage.SessionsCharged);
+            }
+        }
+
+        var adjustments = await _context.ClientBalanceTransactions
+            .Where(t =>
+                t.SessionId == session.Id &&
+                t.Type == BalanceTransactionType.PackageAdjustment)
+            .ToListAsync();
+
+        _context.ClientBalanceTransactions.RemoveRange(adjustments);
+
+        foreach (var participant in session.Participants)
+        {
+            participant.CountsAgainstPackage = false;
+            participant.IsCountedFromPackage = false;
+            participant.ClientPackageId = null;
+            participant.PackageId = null;
+            participant.PlannedBillingType = null;
+            participant.ActualBillingType = null;
+            participant.ExpectedUnitPrice = null;
+            participant.ActualUnitPrice = null;
+            participant.BalanceDifference = null;
+            participant.UpdatedAt = DateTime.UtcNow;
+        }
+    }
+
     private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)
     {
         return await _context.ClientPackages
@@ -375,6 +453,35 @@ public class SessionParticipantService : ISessionParticipantService
     private static int NormalizeSessionsCharged(int value)
     {
         return Math.Max(1, value);
+    }
+
+    private static (int Year, int Month) GetStudioYearMonth(DateTime value)
+    {
+        var utc = value.Kind == DateTimeKind.Utc
+            ? value
+            : DateTime.SpecifyKind(value, DateTimeKind.Utc);
+
+        var local = TimeZoneInfo.ConvertTimeFromUtc(utc, GetStudioTimeZone());
+        return (local.Year, local.Month);
+    }
+
+    private static TimeZoneInfo GetStudioTimeZone()
+    {
+        foreach (var id in new[] { "Europe/Warsaw", "Central European Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        return TimeZoneInfo.Utc;
     }
 
     private async Task<SessionParticipantDto> MapParticipantAsync(int participantId)

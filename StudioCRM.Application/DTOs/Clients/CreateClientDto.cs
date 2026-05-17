@@ -18,8 +18,6 @@ public class CreateClientDto
 
     public string? Notes { get; set; }
 
-    public int ProgressPercent { get; set; } = 0;
-
     public string? BillingStatus { get; set; }
 
     public string? Status { get; set; }

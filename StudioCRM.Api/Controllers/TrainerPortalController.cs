@@ -18,7 +18,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/trainer-portal")]
-[Authorize(Roles = "Trainer")]
+[Authorize(Roles = "Owner,Trainer")]
 public class TrainerPortalController : ControllerBase
 {
     private readonly ITrainerPortalService _trainerPortalService;
