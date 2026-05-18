@@ -104,6 +104,36 @@ public class OutlookEventMapperService
             return (existingLink?.Session ?? evt.Session, warnings);
         }
 
+        var matchingSession = await FindMatchingSessionAsync(evt, trainer, location, clients);
+
+        if (matchingSession is not null)
+        {
+            var sessionLink = await _context.CalendarEventLinks
+                .FirstOrDefaultAsync(x =>
+                    x.SessionId == matchingSession.Id &&
+                    x.Provider == evt.Provider);
+
+            if (sessionLink is null)
+            {
+                await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
+                {
+                    SessionId = matchingSession.Id,
+                    CalendarIntegrationId = evt.CalendarIntegrationId,
+                    Provider = evt.Provider,
+                    ExternalEventId = evt.ExternalEventId,
+                    SyncedAt = DateTime.UtcNow
+                });
+            }
+
+            evt.IsConvertedToSession = true;
+            evt.SessionId = matchingSession.Id;
+
+            warnings.Add("Event dopięto do istniejącej sesji CRM.");
+            await SaveWarningsAsync(evt, warnings);
+
+            return (matchingSession, warnings);
+        }
+
         var session = new Session
         {
             Title = BuildSessionTitle(clients),
@@ -245,6 +275,39 @@ public class OutlookEventMapperService
             .Count();
 
         return clientsCount + trainersCount;
+    }
+
+    private async Task<Session?> FindMatchingSessionAsync(
+        ExternalCalendarEvent evt,
+        Trainer trainer,
+        Location location,
+        List<Client> clients)
+    {
+        var clientIds = clients
+            .Select(c => c.Id)
+            .Distinct()
+            .OrderBy(id => id)
+            .ToList();
+
+        if (clientIds.Count == 0)
+            return null;
+
+        var candidates = await _context.Sessions
+            .Include(s => s.Participants)
+            .Where(s =>
+                !s.IsDeleted &&
+                s.TrainerId == trainer.Id &&
+                s.LocationId == location.Id &&
+                s.StartAt == evt.StartAt &&
+                s.EndAt == evt.EndAt)
+            .ToListAsync();
+
+        return candidates.FirstOrDefault(session =>
+            session.Participants
+                .Select(p => p.ClientId)
+                .Distinct()
+                .OrderBy(id => id)
+                .SequenceEqual(clientIds));
     }
 
     private async Task SaveWarningsAsync(ExternalCalendarEvent evt, List<string> warnings)

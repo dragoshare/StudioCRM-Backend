@@ -116,4 +116,14 @@ public class TrainersController : ControllerBase
         var result = await _trainerSettlementService.MarkAsPaidAsync(id, year, month);
         return result is null ? NotFound() : Ok(result);
     }
+
+    [HttpPost("{id:int}/settlement/reopen")]
+    public async Task<ActionResult<TrainerMonthlySettlementDto>> ReopenSettlement(
+        int id,
+        [FromQuery] int year,
+        [FromQuery] int month)
+    {
+        var result = await _trainerSettlementService.ReopenAsync(id, year, month);
+        return result is null ? NotFound() : Ok(result);
+    }
 }

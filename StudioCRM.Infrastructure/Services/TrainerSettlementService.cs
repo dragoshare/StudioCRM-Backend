@@ -152,6 +152,40 @@ public class TrainerSettlementService : ITrainerSettlementService
         return await GetMonthlySettlementAsync(trainerId, year, month);
     }
 
+    public async Task<TrainerMonthlySettlementDto?> ReopenAsync(
+        int trainerId,
+        int year,
+        int month)
+    {
+        ValidateMonth(year, month);
+
+        if (!_currentUser.IsOwner)
+            throw new UnauthorizedAccessException("Only owner can reopen settlement.");
+
+        var preview = await GetMonthlySettlementAsync(trainerId, year, month);
+
+        if (preview is null)
+            return null;
+
+        var settlement = await _context.TrainerMonthlySettlements
+            .FirstOrDefaultAsync(s =>
+                s.TrainerId == trainerId &&
+                s.Year == year &&
+                s.Month == month);
+
+        if (settlement is null)
+            return preview;
+
+        settlement.IsPaid = false;
+        settlement.PaidAt = null;
+        settlement.PaidByUserId = null;
+        settlement.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return await GetMonthlySettlementAsync(trainerId, year, month);
+    }
+
     private async Task EnsureAccessAsync(int trainerId)
     {
         if (_currentUser.IsOwner)

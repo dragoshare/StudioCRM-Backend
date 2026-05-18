@@ -59,6 +59,30 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
         if (existingLink is null)
         {
+            var existingExternalEvent = await _context.ExternalCalendarEvents
+                .FirstOrDefaultAsync(x =>
+                    x.SessionId == session.Id &&
+                    x.Provider == "Outlook" &&
+                    x.CalendarIntegrationId == integration.Id &&
+                    x.ExternalEventId != string.Empty);
+
+            if (existingExternalEvent is not null)
+            {
+                existingLink = new CalendarEventLink
+                {
+                    SessionId = session.Id,
+                    CalendarIntegrationId = integration.Id,
+                    Provider = "Outlook",
+                    ExternalEventId = existingExternalEvent.ExternalEventId,
+                    SyncedAt = DateTime.UtcNow
+                };
+
+                await _context.CalendarEventLinks.AddAsync(existingLink);
+            }
+        }
+
+        if (existingLink is null)
+        {
             var externalEventId = await CreateEventAsync(session, integration.AccessToken);
 
             var link = new CalendarEventLink

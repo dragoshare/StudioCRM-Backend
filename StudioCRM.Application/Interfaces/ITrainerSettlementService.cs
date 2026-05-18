@@ -6,4 +6,5 @@ public interface ITrainerSettlementService
 {
     Task<TrainerMonthlySettlementDto?> GetMonthlySettlementAsync(int trainerId, int year, int month);
     Task<TrainerMonthlySettlementDto?> MarkAsPaidAsync(int trainerId, int year, int month);
+    Task<TrainerMonthlySettlementDto?> ReopenAsync(int trainerId, int year, int month);
 }

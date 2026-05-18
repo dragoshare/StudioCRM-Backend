@@ -168,9 +168,19 @@ public class SessionService : ISessionService
             requestedStatus == "Completed" ||
             session.Participants.Any(p => p.IsCountedFromPackage);
 
-        if (touchesCompletedSession)
+        var locksCurrentSettlement =
+            session.Status == "Completed" ||
+            session.Participants.Any(p => p.IsCountedFromPackage);
+
+        var locksTargetSettlement = requestedStatus == "Completed";
+
+        if (locksCurrentSettlement)
         {
             await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+        }
+
+        if (locksTargetSettlement)
+        {
             await EnsureSessionIsNotLockedByPaidSettlementAsync(request.TrainerId, normalizedStartAt);
         }
 

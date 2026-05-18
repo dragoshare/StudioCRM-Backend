@@ -10,6 +10,11 @@ namespace StudioCRM.Infrastructure.Seed;
 
 public static class DataSeeder
 {
+    private static readonly HashSet<string> ProtectedTrainerSeedEmails = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "sgorzula@bsworkout.pl"
+    };
+
     private const string ClientPassword = "Client123!";
     private const string TrainerPassword = "Trainer123!";
     private const string OwnerPassword = "Admin123!";
@@ -380,19 +385,24 @@ public static class DataSeeder
 
         foreach (var seed in trainerSeeds)
         {
+            var isProtectedTrainerSeed = ProtectedTrainerSeedEmails.Contains(seed.Email);
+
             var user = await EnsureUserAsync(
                 context,
                 passwordHasher,
                 seed.Email,
                 seed.FirstName,
                 seed.LastName,
-                TrainerPassword);
+                TrainerPassword,
+                updateExisting: !isProtectedTrainerSeed);
 
             await EnsureUserRoleAsync(context, user.Id, "Trainer");
 
             var trainer = await context.Trainers
                 .IgnoreQueryFilters()
                 .FirstOrDefaultAsync(t => t.UserId == user.Id);
+
+            var isProtectedExistingTrainerSeed = isProtectedTrainerSeed && trainer is not null;
 
             if (trainer is null)
             {
@@ -406,17 +416,23 @@ public static class DataSeeder
                 await context.Trainers.AddAsync(trainer);
             }
 
-            trainer.Bio = seed.Bio;
-            trainer.Phone = seed.Phone;
-            trainer.Status = "Active";
-            trainer.ExperienceYears = seed.Experience;
-            trainer.OutlookCategoryName = seed.OutlookCategoryName;
-            trainer.OutlookCategoryColor = seed.OutlookCategoryColor;
-            trainer.IsDeleted = false;
-            trainer.DeletedAt = null;
-            trainer.UpdatedAt = DateTime.UtcNow;
+            if (!isProtectedExistingTrainerSeed)
+            {
+                trainer.Bio = seed.Bio;
+                trainer.Phone = seed.Phone;
+                trainer.Status = "Active";
+                trainer.ExperienceYears = seed.Experience;
+                trainer.OutlookCategoryName = seed.OutlookCategoryName;
+                trainer.OutlookCategoryColor = seed.OutlookCategoryColor;
+                trainer.IsDeleted = false;
+                trainer.DeletedAt = null;
+                trainer.UpdatedAt = DateTime.UtcNow;
+            }
 
             await context.SaveChangesAsync();
+
+            if (isProtectedExistingTrainerSeed)
+                continue;
 
             foreach (var locationName in seed.Locations)
             {
@@ -445,7 +461,6 @@ public static class DataSeeder
         var trainerRates = new Dictionary<string, decimal>
         {
             ["trainer@studiocrm.local"] = 70m,
-            ["sgorzula@bsworkout.pl"] = 70m,
             ["adam.trener@studiocrm.local"] = 80m,
             ["karolina.trener@studiocrm.local"] = 60m,
             ["bartek.trener@studiocrm.local"] = 75m
@@ -1640,7 +1655,8 @@ public static class DataSeeder
         string email,
         string firstName,
         string lastName,
-        string password)
+        string password,
+        bool updateExisting = true)
     {
         var user = await context.Users.FirstOrDefaultAsync(u => u.Email == email);
 
@@ -1661,7 +1677,7 @@ public static class DataSeeder
             await context.Users.AddAsync(user);
             await context.SaveChangesAsync();
         }
-        else
+        else if (updateExisting)
         {
             user.FirstName = firstName;
             user.LastName = lastName;
