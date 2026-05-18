@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
@@ -17,19 +18,22 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
     private readonly IOutlookTokenService _tokenService;
     private readonly HttpClient _httpClient;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<OutlookSubscriptionService> _logger;
 
     public OutlookSubscriptionService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         IOutlookTokenService tokenService,
         HttpClient httpClient,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<OutlookSubscriptionService> logger)
     {
         _context = context;
         _currentUser = currentUser;
         _tokenService = tokenService;
         _httpClient = httpClient;
         _configuration = configuration;
+        _logger = logger;
     }
 
     public async Task CreateSubscriptionAsync()
@@ -46,6 +50,11 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
         if (integration is null)
             throw new InvalidOperationException("Outlook is not connected.");
 
+        await CreateSubscriptionForIntegrationAsync(integration);
+    }
+
+    private async Task CreateSubscriptionForIntegrationAsync(CalendarIntegration integration)
+    {
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         var webhookUrl = _configuration["Outlook:WebhookUrl"];
@@ -138,27 +147,59 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
 
     public async Task RenewExpiringSubscriptionsAsync()
     {
-        var subscriptions = await _context.CalendarSubscriptions
-            .Include(x => x.CalendarIntegration)
+        var integrations = await _context.CalendarIntegrations
             .Where(x =>
                 x.Provider == "Outlook" &&
-                x.IsActive &&
-                x.ExpiresAt <= DateTime.UtcNow.AddHours(24))
+                x.IsActive)
             .ToListAsync();
 
-        foreach (var subscription in subscriptions)
+        foreach (var integration in integrations)
         {
             try
             {
-                await RenewSubscriptionAsync(subscription);
+                await EnsureSubscriptionForIntegrationAsync(integration);
             }
-            catch
+            catch (Exception ex)
             {
-                // Nie wyłączamy od razu subskrypcji przy chwilowym błędzie Microsoft/Render.
-                // Jeśli faktycznie wygasła, create/renew ręczny albo worker spróbuje ponownie.
-                subscription.IsActive = subscription.ExpiresAt > DateTime.UtcNow;
-                await _context.SaveChangesAsync();
+                _logger.LogWarning(
+                    ex,
+                    "Outlook subscription check failed for integration {IntegrationId}.",
+                    integration.Id);
             }
+        }
+    }
+
+    private async Task EnsureSubscriptionForIntegrationAsync(CalendarIntegration integration)
+    {
+        var subscription = await _context.CalendarSubscriptions
+            .Include(x => x.CalendarIntegration)
+            .FirstOrDefaultAsync(x =>
+                x.CalendarIntegrationId == integration.Id &&
+                x.Provider == "Outlook");
+
+        var now = DateTime.UtcNow;
+
+        if (subscription is null || !subscription.IsActive || subscription.ExpiresAt <= now)
+        {
+            await CreateSubscriptionForIntegrationAsync(integration);
+            return;
+        }
+
+        if (subscription.ExpiresAt > now.AddHours(24))
+            return;
+
+        try
+        {
+            await RenewSubscriptionAsync(subscription);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Outlook subscription renewal failed for integration {IntegrationId}; recreating subscription.",
+                integration.Id);
+
+            await CreateSubscriptionForIntegrationAsync(integration);
         }
     }
 
