@@ -167,6 +167,19 @@ public class ClientPaymentService : IClientPaymentService
 
     private async Task ApplyConfirmedPaymentAsync(ClientPayment payment, ClientPackage? clientPackage)
     {
+        var amountDue = clientPackage is null
+            ? 0
+            : Math.Max(0, clientPackage.TotalPrice - clientPackage.AmountPaid);
+
+        var appliedToPackageAmount = clientPackage is null
+            ? 0
+            : Math.Min(payment.Amount, amountDue);
+
+        var balanceCreditAmount = payment.Amount - appliedToPackageAmount;
+
+        payment.AppliedToPackageAmount = appliedToPackageAmount;
+        payment.BalanceCreditAmount = balanceCreditAmount;
+
         await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
         {
             ClientId = payment.ClientId,
@@ -177,10 +190,25 @@ public class ClientPaymentService : IClientPaymentService
             CreatedAt = DateTime.UtcNow
         });
 
+        if (balanceCreditAmount > 0)
+        {
+            await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+            {
+                ClientId = payment.ClientId,
+                ClientPackageId = payment.ClientPackageId,
+                Amount = balanceCreditAmount,
+                Type = BalanceTransactionType.PaymentOverpayment,
+                Description = clientPackage is null
+                    ? "Wpłata bez przypisanego pakietu przeniesiona na saldo klienta."
+                    : "Nadpłata za pakiet przeniesiona na saldo klienta.",
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
         if (clientPackage is null)
             return;
 
-        clientPackage.AmountPaid += payment.Amount;
+        clientPackage.AmountPaid += appliedToPackageAmount;
         clientPackage.PaidAt = clientPackage.AmountPaid >= clientPackage.TotalPrice
             ? DateTime.UtcNow
             : clientPackage.PaidAt;
@@ -411,6 +439,8 @@ public class ClientPaymentService : IClientPaymentService
             ClientPackageId = payment.ClientPackageId,
             PackageName = payment.ClientPackage != null ? payment.ClientPackage.Name : null,
             Amount = payment.Amount,
+            AppliedToPackageAmount = payment.AppliedToPackageAmount,
+            BalanceCreditAmount = payment.BalanceCreditAmount,
             Currency = payment.Currency,
             Method = payment.Method,
             Status = payment.Status,

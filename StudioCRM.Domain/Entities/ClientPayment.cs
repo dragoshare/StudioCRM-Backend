@@ -13,6 +13,8 @@ public class ClientPayment
     public ClientPackage? ClientPackage { get; set; }
 
     public decimal Amount { get; set; }
+    public decimal AppliedToPackageAmount { get; set; }
+    public decimal BalanceCreditAmount { get; set; }
     public string Currency { get; set; } = "PLN";
 
     public PaymentMethod Method { get; set; }

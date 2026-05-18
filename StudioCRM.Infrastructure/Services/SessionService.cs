@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
@@ -18,6 +19,7 @@ public class SessionService : ISessionService
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly ISessionParticipantService _sessionParticipantService;
     private readonly IOutlookCalendarSyncService _outlookCalendarSyncService;
     private readonly ILogger<SessionService> _logger;
 
@@ -25,12 +27,14 @@ public class SessionService : ISessionService
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         ISubscriptionService subscriptionService,
+        ISessionParticipantService sessionParticipantService,
         IOutlookCalendarSyncService outlookCalendarSyncService,
         ILogger<SessionService> logger)
     {
         _context = context;
         _currentUser = currentUser;
         _subscriptionService = subscriptionService;
+        _sessionParticipantService = sessionParticipantService;
         _outlookCalendarSyncService = outlookCalendarSyncService;
         _logger = logger;
     }
@@ -101,6 +105,14 @@ public class SessionService : ISessionService
     {
         var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
         var normalizedEndAt = NormalizeStudioDateTime(request.EndAt);
+        var requestedStatus = string.IsNullOrWhiteSpace(request.Status)
+            ? "Planned"
+            : request.Status;
+
+        if (requestedStatus == "Completed")
+        {
+            await EnsureSessionIsNotLockedByPaidSettlementAsync(request.TrainerId, normalizedStartAt);
+        }
 
         await ValidateSessionRequestAsync(
             request.TrainerId,
@@ -118,33 +130,70 @@ public class SessionService : ISessionService
             ? SessionTitleBuilder.Build(clients)
             : request.Title;
 
-        var session = new Session
+        var transaction = requestedStatus == "Completed"
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+        var transactionCommitted = false;
+
+        try
         {
-            Title = title,
-            Note = request.Note,
-            StartAt = normalizedStartAt,
-            EndAt = normalizedEndAt,
-            TrainerId = request.TrainerId,
-            LocationId = request.LocationId,
-            StudioRoom = null,
-            Status = string.IsNullOrWhiteSpace(request.Status) ? "Planned" : request.Status,
-            PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
-            OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
-            PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow,
-            CreatedBy = _currentUser.UserId
-        };
+            var session = new Session
+            {
+                Title = title,
+                Note = request.Note,
+                StartAt = normalizedStartAt,
+                EndAt = normalizedEndAt,
+                TrainerId = request.TrainerId,
+                LocationId = request.LocationId,
+                StudioRoom = null,
+                Status = requestedStatus,
+                PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
+                OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
+                PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow,
+                CreatedBy = _currentUser.UserId
+            };
 
-        await _context.Sessions.AddAsync(session);
-        await _context.SaveChangesAsync();
+            await _context.Sessions.AddAsync(session);
+            await _context.SaveChangesAsync();
 
-        await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
+            await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
 
-        await TrySyncSessionToOutlookAsync(session.Id);
+            if (requestedStatus == "Completed")
+            {
+                var completionRequest = BuildCompletionRequest(request);
+                var completed = await _sessionParticipantService.CompleteSessionAsync(session.Id, completionRequest);
 
-        return await GetByIdAsync(session.Id)
-            ?? throw new InvalidOperationException("Created session could not be loaded.");
+                if (!completed)
+                    throw new InvalidOperationException("Created session could not be completed.");
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                    transactionCommitted = true;
+                }
+            }
+            else if (requestedStatus != "Cancelled")
+            {
+                await TrySyncSessionToOutlookAsync(session.Id);
+            }
+
+            return await GetByIdAsync(session.Id)
+                ?? throw new InvalidOperationException("Created session could not be loaded.");
+        }
+        catch
+        {
+            if (transaction is not null && !transactionCommitted)
+                await transaction.RollbackAsync();
+
+            throw;
+        }
+        finally
+        {
+            if (transaction is not null)
+                await transaction.DisposeAsync();
+        }
     }
 
     public async Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request)
@@ -236,7 +285,14 @@ public class SessionService : ISessionService
 
         await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
 
-        await TrySyncSessionToOutlookAsync(session.Id);
+        if (requestedStatus == "Cancelled")
+        {
+            await TryDeleteSessionFromOutlookAsync(session.Id);
+        }
+        else
+        {
+            await TrySyncSessionToOutlookAsync(session.Id);
+        }
 
         return await GetByIdAsync(session.Id);
     }
@@ -678,6 +734,44 @@ public class SessionService : ISessionService
         }
 
         await _context.SaveChangesAsync();
+    }
+
+    private static CompleteSessionDto BuildCompletionRequest(CreateSessionDto request)
+    {
+        var actualSessionType = ResolveActualSessionTypeForCompletion(request);
+
+        return new CompleteSessionDto
+        {
+            ActualSessionType = actualSessionType.ToString(),
+            Participants = request.Participants
+                .Select(p => new CompleteSessionParticipantDto
+                {
+                    ClientId = p.ClientId,
+                    AttendanceStatus = "Present",
+                    CountsAgainstPackage = p.CountsAgainstPackage,
+                    SessionsCharged = NormalizeSessionsCharged(p.SessionsCharged),
+                    Note = p.Note
+                })
+                .ToList()
+        };
+    }
+
+    private static SessionBillingType ResolveActualSessionTypeForCompletion(CreateSessionDto request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.PlannedSessionType) &&
+            Enum.TryParse<SessionBillingType>(request.PlannedSessionType, out var plannedSessionType))
+        {
+            return plannedSessionType;
+        }
+
+        return request.Participants.Count switch
+        {
+            1 => SessionBillingType.OneToOne,
+            2 => SessionBillingType.TwoToOne,
+            3 => SessionBillingType.ThreeToOne,
+            4 => SessionBillingType.FourToOne,
+            _ => throw new InvalidOperationException("Completed session can have at most four billable participants.")
+        };
     }
 
     private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)

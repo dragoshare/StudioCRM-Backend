@@ -329,6 +329,12 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.Amount)
                 .HasPrecision(18, 2);
 
+            entity.Property(x => x.AppliedToPackageAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.BalanceCreditAmount)
+                .HasPrecision(18, 2);
+
             entity.Property(x => x.Currency)
                 .IsRequired()
                 .HasMaxLength(3);

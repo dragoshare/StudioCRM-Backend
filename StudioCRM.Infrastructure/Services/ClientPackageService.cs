@@ -47,8 +47,11 @@ public class ClientPackageService : IClientPackageService
         if (totalSessions <= 0)
             throw new InvalidOperationException("Total sessions must be greater than zero.");
 
-        var totalPrice = request.TotalPrice ?? package.Price;
-        var expectedUnitPrice = totalPrice / totalSessions;
+        var originalPrice = request.TotalPrice ?? package.Price;
+        var carryOverBalance = await GetCarryOverBalanceAsync(client.Id);
+        var balanceApplied = ResolveAppliedBalance(carryOverBalance, originalPrice);
+        var totalPrice = Math.Max(0, originalPrice - balanceApplied);
+        var expectedUnitPrice = originalPrice / totalSessions;
         var sessionsPerWeek = package.SessionsPerWeek > 0
             ? package.SessionsPerWeek
             : InferSessionsPerWeek(totalSessions);
@@ -69,17 +72,18 @@ public class ClientPackageService : IClientPackageService
             TotalSessions = totalSessions,
             SessionsPerWeek = sessionsPerWeek,
             TotalPrice = totalPrice,
-            OriginalPrice = package.Price,
-            BalanceApplied = 0,
+            OriginalPrice = originalPrice,
+            BalanceApplied = balanceApplied,
             AmountPaid = 0,
             ExpectedUnitPrice = expectedUnitPrice,
             Currency = package.Currency,
             LocationId = package.LocationId ?? client.LocationId,
             ExpectedBillingType = request.ExpectedBillingType ?? package.BillingType,
-            PaymentStatus = PaymentStatus.Unpaid,
+            PaymentStatus = totalPrice <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = NormalizeDateTime(request.PurchaseDate, now),
             ValidUntil = NormalizeNullableDateTime(request.ValidUntil) ?? now.Date.AddDays(45),
-            PaymentDueDate = NormalizeNullableDateTime(request.PaymentDueDate),
+            PaymentDueDate = totalPrice <= 0 ? null : NormalizeNullableDateTime(request.PaymentDueDate),
+            PaidAt = totalPrice <= 0 ? now : null,
             ActivationMode = ClientPackageActivationMode.Immediately,
             RenewalSource = "Manual",
             ActivatedAt = now,
@@ -88,8 +92,24 @@ public class ClientPackageService : IClientPackageService
         };
 
         _context.ClientPackages.Add(clientPackage);
+
+        if (balanceApplied != 0)
+        {
+            await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+            {
+                ClientId = client.Id,
+                ClientPackage = clientPackage,
+                Amount = -balanceApplied,
+                Type = BalanceTransactionType.UsedInNextPackage,
+                Description = balanceApplied > 0
+                    ? "Nadpłata wykorzystana w nowym pakiecie."
+                    : "Dopłata doliczona do nowego pakietu.",
+                CreatedAt = now
+            });
+        }
+
         client.ActivePackageId = package.Id;
-        client.BillingStatus = "Pending";
+        client.BillingStatus = clientPackage.PaymentStatus.ToString();
         client.UpdatedAt = now;
 
         await _context.SaveChangesAsync();
@@ -148,6 +168,23 @@ public class ClientPackageService : IClientPackageService
     private static int InferSessionsPerWeek(int totalSessions)
     {
         return Math.Max(1, (int)Math.Ceiling(totalSessions / 4m));
+    }
+
+    private async Task<decimal> GetCarryOverBalanceAsync(int clientId)
+    {
+        return await _context.ClientBalanceTransactions
+            .Where(t =>
+                t.ClientId == clientId &&
+                t.Type != BalanceTransactionType.PaymentCredit)
+            .SumAsync(t => t.Amount);
+    }
+
+    private static decimal ResolveAppliedBalance(decimal balance, decimal originalPrice)
+    {
+        if (balance > 0)
+            return Math.Min(balance, originalPrice);
+
+        return balance;
     }
 
     private static DateTime NormalizeDateTime(DateTime value, DateTime fallback)

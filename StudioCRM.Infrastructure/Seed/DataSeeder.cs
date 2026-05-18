@@ -659,7 +659,7 @@ public static class DataSeeder
             overpaidClient,
             "8 treningów 1:1",
             PaymentStatus.Paid,
-            amountPaid: 1200m,
+            amountPaid: 1120m,
             owner.Id);
 
         await CreateBillingScenarioPaymentAsync(context, overpaidClient, overpaidCycle, 1200m, ClientPaymentStatus.Confirmed, ClientPaymentSource.StaffEntry, owner.Id, "Płatność z nadpłatą 80 PLN.");
@@ -668,7 +668,7 @@ public static class DataSeeder
             ClientId = overpaidClient.Id,
             ClientPackageId = overpaidCycle.Id,
             Amount = 80m,
-            Type = BalanceTransactionType.ManualAdjustment,
+            Type = BalanceTransactionType.PaymentOverpayment,
             Description = "SEED: Nadpłata 80 PLN do wykorzystania w następnym cyklu.",
             CreatedAt = DateTime.UtcNow
         });
@@ -1136,11 +1136,19 @@ public static class DataSeeder
         int? userId,
         string note)
     {
+        var appliedToPackageAmount = status == ClientPaymentStatus.Confirmed
+            ? Math.Min(amount, cycle.TotalPrice)
+            : 0;
+
         await context.ClientPayments.AddAsync(new ClientPayment
         {
             ClientId = client.Id,
             ClientPackageId = cycle.Id,
             Amount = amount,
+            AppliedToPackageAmount = appliedToPackageAmount,
+            BalanceCreditAmount = status == ClientPaymentStatus.Confirmed
+                ? amount - appliedToPackageAmount
+                : 0,
             Currency = cycle.Currency,
             Method = PaymentMethod.BankTransfer,
             Status = status,
