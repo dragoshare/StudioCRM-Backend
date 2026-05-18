@@ -32,6 +32,88 @@ public class ClientPaymentService : IClientPaymentService
         return await BuildSummaryAsync(clientId);
     }
 
+    public async Task<PagedResultDto<ClientPaymentDto>> GetPaymentsAsync(ClientPaymentFilterDto filter)
+    {
+        var query = BasePaymentQuery();
+
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
+        {
+            var trainer = await GetCurrentTrainerAsync();
+            query = query.Where(p => p.Client.TrainerId == trainer.Id);
+        }
+
+        query = ApplyPaymentFilters(query, filter);
+
+        return await ToPagedPaymentResultAsync(query, filter);
+    }
+
+    public async Task<PagedResultDto<ClientPaymentDto>> GetClientPaymentsAsync(
+        int clientId,
+        ClientPaymentFilterDto filter)
+    {
+        await EnsureStaffAccessToClientAsync(clientId);
+
+        filter.ClientId = clientId;
+        var query = ApplyPaymentFilters(BasePaymentQuery(), filter);
+
+        return await ToPagedPaymentResultAsync(query, filter);
+    }
+
+    public async Task<PagedResultDto<ClientBalanceTransactionDto>> GetClientBalanceTransactionsAsync(
+        int clientId,
+        int page,
+        int pageSize)
+    {
+        await EnsureStaffAccessToClientAsync(clientId);
+
+        page = NormalizePage(page);
+        pageSize = NormalizePageSize(pageSize);
+
+        var query = _context.ClientBalanceTransactions
+            .Where(t => t.ClientId == clientId)
+            .OrderByDescending(t => t.CreatedAt)
+            .ThenByDescending(t => t.Id);
+
+        var totalCount = await query.CountAsync();
+        var items = await query
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(t => new ClientBalanceTransactionDto
+            {
+                Id = t.Id,
+                ClientId = t.ClientId,
+                ClientPackageId = t.ClientPackageId,
+                SessionId = t.SessionId,
+                Amount = t.Amount,
+                Type = t.Type.ToString(),
+                Description = t.Description,
+                CreatedAt = t.CreatedAt
+            })
+            .ToListAsync();
+
+        return new PagedResultDto<ClientBalanceTransactionDto>
+        {
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = ResolveTotalPages(totalCount, pageSize),
+            Items = items
+        };
+    }
+
+    public async Task<ClientPackageBillingDto?> GetActivePackageAsync(int clientId)
+    {
+        await EnsureStaffAccessToClientAsync(clientId);
+
+        var activePackage = await _context.ClientPackages
+            .Include(cp => cp.Location)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
+
+        return activePackage is null ? null : MapPackage(activePackage);
+    }
+
     public async Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync()
     {
         var query = _context.ClientPayments
@@ -165,6 +247,77 @@ public class ClientPaymentService : IClientPaymentService
         return await GetPaymentDtoAsync(payment.Id);
     }
 
+    public async Task<ClientPaymentDto> IssueReceiptAsync(int paymentId, IssueReceiptRequest request)
+    {
+        var payment = await _context.ClientPayments
+            .FirstOrDefaultAsync(p => p.Id == paymentId);
+
+        if (payment is null)
+            throw new InvalidOperationException("Payment not found.");
+
+        await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.Status != ClientPaymentStatus.Confirmed)
+            throw new InvalidOperationException("Only confirmed payments can receive a receipt.");
+
+        if (payment.ReceiptStatus == ReceiptStatus.Issued)
+            throw new InvalidOperationException("Receipt has already been issued for this payment.");
+
+        payment.ReceiptStatus = ReceiptStatus.Issued;
+        payment.ReceiptNumber = string.IsNullOrWhiteSpace(request.ReceiptNumber)
+            ? GenerateReceiptNumber(payment)
+            : request.ReceiptNumber.Trim();
+        payment.ReceiptIssuedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return await GetPaymentDtoAsync(payment.Id);
+    }
+
+    public async Task<ClientPaymentDto> CancelReceiptAsync(int paymentId)
+    {
+        var payment = await _context.ClientPayments
+            .FirstOrDefaultAsync(p => p.Id == paymentId);
+
+        if (payment is null)
+            throw new InvalidOperationException("Payment not found.");
+
+        await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.ReceiptStatus != ReceiptStatus.Issued)
+            throw new InvalidOperationException("Only issued receipts can be cancelled.");
+
+        payment.ReceiptStatus = ReceiptStatus.Cancelled;
+
+        await _context.SaveChangesAsync();
+
+        return await GetPaymentDtoAsync(payment.Id);
+    }
+
+    public async Task<ClientPaymentDto> ReverseAsync(int paymentId, ReverseClientPaymentRequest request)
+    {
+        var payment = await _context.ClientPayments
+            .Include(p => p.ClientPackage)
+            .FirstOrDefaultAsync(p => p.Id == paymentId);
+
+        if (payment is null)
+            throw new InvalidOperationException("Payment not found.");
+
+        await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.Status != ClientPaymentStatus.Confirmed)
+            throw new InvalidOperationException("Only confirmed payments can be reversed.");
+
+        if (payment.ReceiptStatus == ReceiptStatus.Issued)
+            throw new InvalidOperationException("Cancel the receipt before reversing this payment.");
+
+        await ReverseConfirmedPaymentAsync(payment, request);
+
+        await _context.SaveChangesAsync();
+
+        return await GetPaymentDtoAsync(payment.Id);
+    }
+
     private async Task ApplyConfirmedPaymentAsync(ClientPayment payment, ClientPackage? clientPackage)
     {
         var amountDue = clientPackage is null
@@ -215,6 +368,55 @@ public class ClientPaymentService : IClientPaymentService
 
         await RefreshPackagePaymentStatusAsync(clientPackage);
         await ActivatePackageAfterPaymentIfNeededAsync(clientPackage);
+    }
+
+    private async Task ReverseConfirmedPaymentAsync(
+        ClientPayment payment,
+        ReverseClientPaymentRequest request)
+    {
+        await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+        {
+            ClientId = payment.ClientId,
+            ClientPackageId = payment.ClientPackageId,
+            Amount = -payment.Amount,
+            Type = BalanceTransactionType.PaymentReversal,
+            Description = string.IsNullOrWhiteSpace(request.Reason)
+                ? "Cofnięcie zaksięgowanej wpłaty."
+                : $"Cofnięcie zaksięgowanej wpłaty: {request.Reason}",
+            CreatedAt = DateTime.UtcNow
+        });
+
+        if (payment.BalanceCreditAmount > 0)
+        {
+            await _context.ClientBalanceTransactions.AddAsync(new ClientBalanceTransaction
+            {
+                ClientId = payment.ClientId,
+                ClientPackageId = payment.ClientPackageId,
+                Amount = -payment.BalanceCreditAmount,
+                Type = BalanceTransactionType.PaymentOverpayment,
+                Description = string.IsNullOrWhiteSpace(request.Reason)
+                    ? "Cofnięcie nadpłaty z salda klienta."
+                    : $"Cofnięcie nadpłaty z salda klienta: {request.Reason}",
+                CreatedAt = DateTime.UtcNow
+            });
+        }
+
+        if (payment.ClientPackage is not null && payment.AppliedToPackageAmount > 0)
+        {
+            payment.ClientPackage.AmountPaid = Math.Max(
+                0,
+                payment.ClientPackage.AmountPaid - payment.AppliedToPackageAmount);
+
+            if (payment.ClientPackage.AmountPaid < payment.ClientPackage.TotalPrice)
+                payment.ClientPackage.PaidAt = null;
+
+            await RefreshPackagePaymentStatusAsync(payment.ClientPackage);
+        }
+
+        payment.Status = ClientPaymentStatus.Reversed;
+        payment.ReversedAt = DateTime.UtcNow;
+        payment.ReversedByUserId = _currentUser.UserId;
+        payment.ReversalReason = request.Reason;
     }
 
     private async Task ActivatePackageAfterPaymentIfNeededAsync(ClientPackage clientPackage)
@@ -297,33 +499,7 @@ public class ClientPaymentService : IClientPaymentService
             .ToListAsync();
 
         var clientPackages = clientPackageEntities
-            .Select(cp => new ClientPackageBillingDto
-            {
-                ClientPackageId = cp.Id,
-                PackageId = cp.PackageId,
-                PackageName = cp.Name,
-                IsActive = cp.IsActive,
-                ActivationMode = cp.ActivationMode.ToString(),
-                TotalSessions = cp.TotalSessions,
-                SessionsPerWeek = cp.SessionsPerWeek,
-                UsedSessions = cp.UsedSessions,
-                RemainingSessions = Math.Max(0, cp.TotalSessions - cp.UsedSessions),
-                TotalPrice = cp.TotalPrice,
-                OriginalPrice = cp.OriginalPrice > 0 ? cp.OriginalPrice : cp.TotalPrice,
-                BalanceApplied = cp.BalanceApplied,
-                ExpectedUnitPrice = cp.ExpectedUnitPrice,
-                AmountPaid = cp.AmountPaid,
-                AmountDue = Math.Max(0, cp.TotalPrice - cp.AmountPaid),
-                Currency = cp.Currency,
-                ExpectedBillingType = cp.ExpectedBillingType.ToString(),
-                LocationId = cp.LocationId,
-                LocationName = cp.Location != null ? cp.Location.Name : null,
-                PaymentStatus = cp.PaymentStatus.ToString(),
-                PurchaseDate = cp.PurchaseDate,
-                ValidUntil = cp.ValidUntil,
-                PaymentDueDate = cp.PaymentDueDate,
-                ActivatedAt = cp.ActivatedAt
-            })
+            .Select(MapPackage)
             .ToList();
 
         var paymentEntities = await _context.ClientPayments
@@ -336,7 +512,8 @@ public class ClientPaymentService : IClientPaymentService
         var currentBalance = await _context.ClientBalanceTransactions
             .Where(t =>
                 t.ClientId == client.Id &&
-                t.Type != BalanceTransactionType.PaymentCredit)
+                t.Type != BalanceTransactionType.PaymentCredit &&
+                t.Type != BalanceTransactionType.PaymentReversal)
             .SumAsync(t => t.Amount);
 
         return new ClientBillingSummaryDto
@@ -377,6 +554,80 @@ public class ClientPaymentService : IClientPaymentService
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
+    }
+
+    private IQueryable<ClientPayment> BasePaymentQuery()
+    {
+        return _context.ClientPayments
+            .Include(p => p.Client)
+            .Include(p => p.ClientPackage)
+            .AsQueryable();
+    }
+
+    private static IQueryable<ClientPayment> ApplyPaymentFilters(
+        IQueryable<ClientPayment> query,
+        ClientPaymentFilterDto filter)
+    {
+        if (filter.ClientId.HasValue)
+            query = query.Where(p => p.ClientId == filter.ClientId.Value);
+
+        if (filter.Status.HasValue)
+            query = query.Where(p => p.Status == filter.Status.Value);
+
+        if (filter.Source.HasValue)
+            query = query.Where(p => p.Source == filter.Source.Value);
+
+        if (filter.From.HasValue)
+        {
+            var from = NormalizeNullableDateTime(filter.From)!.Value;
+            query = query.Where(p => p.PaymentDate >= from);
+        }
+
+        if (filter.To.HasValue)
+        {
+            var to = NormalizeNullableDateTime(filter.To)!.Value;
+            query = query.Where(p => p.PaymentDate <= to);
+        }
+
+        if (filter.AmountMin.HasValue)
+            query = query.Where(p => p.Amount >= filter.AmountMin.Value);
+
+        if (filter.AmountMax.HasValue)
+            query = query.Where(p => p.Amount <= filter.AmountMax.Value);
+
+        if (filter.HasOverpayment.HasValue)
+        {
+            query = filter.HasOverpayment.Value
+                ? query.Where(p => p.BalanceCreditAmount > 0)
+                : query.Where(p => p.BalanceCreditAmount <= 0);
+        }
+
+        return query;
+    }
+
+    private static async Task<PagedResultDto<ClientPaymentDto>> ToPagedPaymentResultAsync(
+        IQueryable<ClientPayment> query,
+        ClientPaymentFilterDto filter)
+    {
+        var page = NormalizePage(filter.Page);
+        var pageSize = NormalizePageSize(filter.PageSize);
+
+        var totalCount = await query.CountAsync();
+        var payments = await query
+            .OrderByDescending(p => p.PaymentDate)
+            .ThenByDescending(p => p.Id)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+
+        return new PagedResultDto<ClientPaymentDto>
+        {
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = ResolveTotalPages(totalCount, pageSize),
+            Items = payments.Select(MapPayment).ToList()
+        };
     }
 
     private async Task<Client> GetCurrentClientAsync()
@@ -449,12 +700,73 @@ public class ClientPaymentService : IClientPaymentService
             CreatedAt = payment.CreatedAt,
             ConfirmedAt = payment.ConfirmedAt,
             RejectedAt = payment.RejectedAt,
+            ReversedAt = payment.ReversedAt,
             CreatedByUserId = payment.CreatedByUserId,
             ConfirmedByUserId = payment.ConfirmedByUserId,
             RejectedByUserId = payment.RejectedByUserId,
+            ReversedByUserId = payment.ReversedByUserId,
             Note = payment.Note,
-            RejectionReason = payment.RejectionReason
+            RejectionReason = payment.RejectionReason,
+            ReversalReason = payment.ReversalReason,
+            ReceiptStatus = payment.ReceiptStatus.ToString(),
+            ReceiptNumber = payment.ReceiptNumber,
+            ReceiptIssuedAt = payment.ReceiptIssuedAt
         };
+    }
+
+    private static ClientPackageBillingDto MapPackage(ClientPackage clientPackage)
+    {
+        return new ClientPackageBillingDto
+        {
+            ClientPackageId = clientPackage.Id,
+            PackageId = clientPackage.PackageId,
+            PackageName = clientPackage.Name,
+            IsActive = clientPackage.IsActive,
+            ActivationMode = clientPackage.ActivationMode.ToString(),
+            TotalSessions = clientPackage.TotalSessions,
+            SessionsPerWeek = clientPackage.SessionsPerWeek,
+            UsedSessions = clientPackage.UsedSessions,
+            RemainingSessions = Math.Max(0, clientPackage.TotalSessions - clientPackage.UsedSessions),
+            TotalPrice = clientPackage.TotalPrice,
+            OriginalPrice = clientPackage.OriginalPrice > 0 ? clientPackage.OriginalPrice : clientPackage.TotalPrice,
+            BalanceApplied = clientPackage.BalanceApplied,
+            ExpectedUnitPrice = clientPackage.ExpectedUnitPrice,
+            AmountPaid = clientPackage.AmountPaid,
+            AmountDue = Math.Max(0, clientPackage.TotalPrice - clientPackage.AmountPaid),
+            Currency = clientPackage.Currency,
+            ExpectedBillingType = clientPackage.ExpectedBillingType.ToString(),
+            LocationId = clientPackage.LocationId,
+            LocationName = clientPackage.Location != null ? clientPackage.Location.Name : null,
+            PaymentStatus = clientPackage.PaymentStatus.ToString(),
+            PurchaseDate = clientPackage.PurchaseDate,
+            ValidUntil = clientPackage.ValidUntil,
+            PaymentDueDate = clientPackage.PaymentDueDate,
+            ActivatedAt = clientPackage.ActivatedAt
+        };
+    }
+
+    private static string GenerateReceiptNumber(ClientPayment payment)
+    {
+        var year = DateTime.UtcNow.Year;
+        return $"RCPT/{year}/{payment.Id:D6}";
+    }
+
+    private static int NormalizePage(int page)
+    {
+        return Math.Max(1, page);
+    }
+
+    private static int NormalizePageSize(int pageSize)
+    {
+        return Math.Clamp(pageSize, 1, 100);
+    }
+
+    private static int ResolveTotalPages(int totalCount, int pageSize)
+    {
+        if (totalCount == 0)
+            return 0;
+
+        return (int)Math.Ceiling(totalCount / (decimal)pageSize);
     }
 
     private static decimal NormalizeAmount(decimal amount)

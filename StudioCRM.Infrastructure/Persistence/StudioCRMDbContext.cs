@@ -345,8 +345,14 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.RejectionReason)
                 .HasMaxLength(500);
 
+            entity.Property(x => x.ReversalReason)
+                .HasMaxLength(500);
+
             entity.Property(x => x.ExternalPaymentId)
                 .HasMaxLength(200);
+
+            entity.Property(x => x.ReceiptNumber)
+                .HasMaxLength(100);
 
             entity.HasOne(x => x.Client)
                 .WithMany()

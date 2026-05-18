@@ -175,7 +175,8 @@ public class ClientPackageService : IClientPackageService
         return await _context.ClientBalanceTransactions
             .Where(t =>
                 t.ClientId == clientId &&
-                t.Type != BalanceTransactionType.PaymentCredit)
+                t.Type != BalanceTransactionType.PaymentCredit &&
+                t.Type != BalanceTransactionType.PaymentReversal)
             .SumAsync(t => t.Amount);
     }
 

@@ -31,6 +31,33 @@ public class BillingController : ControllerBase
             Ok(await _clientPaymentService.GetPendingConfirmationsAsync()));
     }
 
+    [HttpGet("payments")]
+    public async Task<ActionResult<PagedResultDto<ClientPaymentDto>>> GetPayments(
+        [FromQuery] ClientPaymentFilterDto filter)
+    {
+        return await HandleAsync<PagedResultDto<ClientPaymentDto>>(async () =>
+            Ok(await _clientPaymentService.GetPaymentsAsync(filter)));
+    }
+
+    [HttpGet("clients/{clientId:int}/payments")]
+    public async Task<ActionResult<PagedResultDto<ClientPaymentDto>>> GetClientPayments(
+        int clientId,
+        [FromQuery] ClientPaymentFilterDto filter)
+    {
+        return await HandleAsync<PagedResultDto<ClientPaymentDto>>(async () =>
+            Ok(await _clientPaymentService.GetClientPaymentsAsync(clientId, filter)));
+    }
+
+    [HttpGet("clients/{clientId:int}/active-package")]
+    public async Task<ActionResult<ClientPackageBillingDto>> GetActivePackage(int clientId)
+    {
+        return await HandleAsync<ClientPackageBillingDto>(async () =>
+        {
+            var result = await _clientPaymentService.GetActivePackageAsync(clientId);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpPost("payments")]
     public async Task<ActionResult<ClientPaymentDto>> CreateStaffPayment(CreateClientPaymentRequest request)
     {
@@ -55,6 +82,35 @@ public class BillingController : ControllerBase
     {
         return await HandleAsync<ClientPaymentDto>(async () =>
             Ok(await _clientPaymentService.RejectAsync(paymentId, request)));
+    }
+
+    [HttpPost("payments/{paymentId:int}/receipt/issue")]
+    public async Task<ActionResult<ClientPaymentDto>> IssueReceipt(
+        int paymentId,
+        [FromBody] IssueReceiptRequest? request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.IssueReceiptAsync(
+                paymentId,
+                request ?? new IssueReceiptRequest())));
+    }
+
+    [HttpPost("payments/{paymentId:int}/receipt/cancel")]
+    public async Task<ActionResult<ClientPaymentDto>> CancelReceipt(int paymentId)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.CancelReceiptAsync(paymentId)));
+    }
+
+    [HttpPost("payments/{paymentId:int}/reverse")]
+    public async Task<ActionResult<ClientPaymentDto>> ReversePayment(
+        int paymentId,
+        [FromBody] ReverseClientPaymentRequest? request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.ReverseAsync(
+                paymentId,
+                request ?? new ReverseClientPaymentRequest())));
     }
 
     private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)

@@ -6,5 +6,6 @@ public enum BalanceTransactionType
     ManualAdjustment = 2,
     PaymentCredit = 3,
     UsedInNextPackage = 4,
-    PaymentOverpayment = 5
+    PaymentOverpayment = 5,
+    PaymentReversal = 6
 }

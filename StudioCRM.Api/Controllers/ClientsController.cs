@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Subscriptions;
 using StudioCRM.Application.DTOs.TrainingPlans;
@@ -14,13 +15,16 @@ public class ClientsController : ControllerBase
 {
     private readonly IClientService _clientService;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly IClientPaymentService _clientPaymentService;
 
     public ClientsController(
         IClientService clientService,
-        ISubscriptionService subscriptionService)
+        ISubscriptionService subscriptionService,
+        IClientPaymentService clientPaymentService)
     {
         _clientService = clientService;
         _subscriptionService = subscriptionService;
+        _clientPaymentService = clientPaymentService;
     }
 
     [HttpGet]
@@ -136,6 +140,26 @@ public class ClientsController : ControllerBase
     {
         return await HandleAsync<SubscriptionUsageDto>(async () =>
             Ok(await _subscriptionService.GetClientUsageAsync(id)));
+    }
+
+    [HttpGet("{id:int}/subscription/current-cycle")]
+    public async Task<ActionResult<ClientPackageBillingDto>> GetCurrentCycle(int id)
+    {
+        return await HandleAsync<ClientPackageBillingDto>(async () =>
+        {
+            var result = await _clientPaymentService.GetActivePackageAsync(id);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpGet("{id:int}/balance-transactions")]
+    public async Task<ActionResult<PagedResultDto<ClientBalanceTransactionDto>>> GetBalanceTransactions(
+        int id,
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 25)
+    {
+        return await HandleAsync<PagedResultDto<ClientBalanceTransactionDto>>(async () =>
+            Ok(await _clientPaymentService.GetClientBalanceTransactionsAsync(id, page, pageSize)));
     }
 
     [HttpGet("{id:int}/training-plan")]
