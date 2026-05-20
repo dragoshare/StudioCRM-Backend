@@ -212,14 +212,11 @@ public class SessionService : ISessionService
             ? "Planned"
             : request.Status;
 
-        var touchesCompletedSession =
-            session.Status == "Completed" ||
-            requestedStatus == "Completed" ||
-            session.Participants.Any(p => p.IsCountedFromPackage);
+        var currentHasPackageAccounting = session.Participants.Any(p => p.IsCountedFromPackage);
 
         var locksCurrentSettlement =
             session.Status == "Completed" ||
-            session.Participants.Any(p => p.IsCountedFromPackage);
+            currentHasPackageAccounting;
 
         var locksTargetSettlement = requestedStatus == "Completed";
 
@@ -245,56 +242,96 @@ public class SessionService : ISessionService
             request.TrainerId,
             request.OutlookCategories);
 
-        session.Title = string.IsNullOrWhiteSpace(request.Title)
-            ? SessionTitleBuilder.Build(clients)
-            : request.Title;
+        var transaction = requestedStatus == "Completed"
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+        var transactionCommitted = false;
 
-        session.Note = request.Note;
-        session.StartAt = normalizedStartAt;
-        session.EndAt = normalizedEndAt;
-        session.TrainerId = request.TrainerId;
-        session.LocationId = request.LocationId;
-        session.StudioRoom = null;
-        session.Status = requestedStatus;
-        session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
-        session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
-        session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
-        session.UpdatedAt = DateTime.UtcNow;
-
-        if (touchesCompletedSession && requestedStatus == "Completed")
+        try
         {
-            EnsureCompletedSessionParticipantsWereNotChanged(session, request.Participants);
+            session.Title = string.IsNullOrWhiteSpace(request.Title)
+                ? SessionTitleBuilder.Build(clients)
+                : request.Title;
+
+            session.Note = request.Note;
+            session.StartAt = normalizedStartAt;
+            session.EndAt = normalizedEndAt;
+            session.TrainerId = request.TrainerId;
+            session.LocationId = request.LocationId;
+            session.StudioRoom = null;
+            session.Status = requestedStatus;
+            session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
+            session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
+            session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
+            session.UpdatedAt = DateTime.UtcNow;
+
+            if (currentHasPackageAccounting && requestedStatus == "Completed")
+            {
+                EnsureCompletedSessionParticipantsWereNotChanged(session, request.Participants);
+
+                await _context.SaveChangesAsync();
+                await TrySyncSessionToOutlookAsync(session.Id);
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                    transactionCommitted = true;
+                }
+
+                return await GetByIdAsync(session.Id);
+            }
+
+            if (locksCurrentSettlement)
+            {
+                await RevertSessionPackageAccountingAsync(session);
+                session.ActualSessionType = null;
+                session.ActualParticipantsCount = null;
+                session.CompletedAt = null;
+            }
+
+            _context.SessionParticipants.RemoveRange(session.Participants);
 
             await _context.SaveChangesAsync();
-            await TrySyncSessionToOutlookAsync(session.Id);
+
+            await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
+
+            if (requestedStatus == "Completed")
+            {
+                var completionRequest = BuildCompletionRequest(request);
+                var completed = await _sessionParticipantService.CompleteSessionAsync(session.Id, completionRequest);
+
+                if (!completed)
+                    throw new InvalidOperationException("Updated session could not be completed.");
+
+                if (transaction is not null)
+                {
+                    await transaction.CommitAsync();
+                    transactionCommitted = true;
+                }
+            }
+            else if (requestedStatus == "Cancelled")
+            {
+                await TryDeleteSessionFromOutlookAsync(session.Id);
+            }
+            else
+            {
+                await TrySyncSessionToOutlookAsync(session.Id);
+            }
 
             return await GetByIdAsync(session.Id);
         }
-
-        if (touchesCompletedSession)
+        catch
         {
-            await RevertSessionPackageAccountingAsync(session);
-            session.ActualSessionType = null;
-            session.ActualParticipantsCount = null;
-            session.CompletedAt = null;
+            if (transaction is not null && !transactionCommitted)
+                await transaction.RollbackAsync();
+
+            throw;
         }
-
-        _context.SessionParticipants.RemoveRange(session.Participants);
-
-        await _context.SaveChangesAsync();
-
-        await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
-
-        if (requestedStatus == "Cancelled")
+        finally
         {
-            await TryDeleteSessionFromOutlookAsync(session.Id);
+            if (transaction is not null)
+                await transaction.DisposeAsync();
         }
-        else
-        {
-            await TrySyncSessionToOutlookAsync(session.Id);
-        }
-
-        return await GetByIdAsync(session.Id);
     }
 
     public async Task<bool> DeleteAsync(int id)
@@ -756,7 +793,45 @@ public class SessionService : ISessionService
         };
     }
 
+    private static CompleteSessionDto BuildCompletionRequest(UpdateSessionDto request)
+    {
+        var actualSessionType = ResolveActualSessionTypeForCompletion(request);
+
+        return new CompleteSessionDto
+        {
+            ActualSessionType = actualSessionType.ToString(),
+            Participants = request.Participants
+                .Select(p => new CompleteSessionParticipantDto
+                {
+                    ClientId = p.ClientId,
+                    AttendanceStatus = "Present",
+                    CountsAgainstPackage = p.CountsAgainstPackage,
+                    SessionsCharged = NormalizeSessionsCharged(p.SessionsCharged),
+                    Note = p.Note
+                })
+                .ToList()
+        };
+    }
+
     private static SessionBillingType ResolveActualSessionTypeForCompletion(CreateSessionDto request)
+    {
+        if (!string.IsNullOrWhiteSpace(request.PlannedSessionType) &&
+            Enum.TryParse<SessionBillingType>(request.PlannedSessionType, out var plannedSessionType))
+        {
+            return plannedSessionType;
+        }
+
+        return request.Participants.Count switch
+        {
+            1 => SessionBillingType.OneToOne,
+            2 => SessionBillingType.TwoToOne,
+            3 => SessionBillingType.ThreeToOne,
+            4 => SessionBillingType.FourToOne,
+            _ => throw new InvalidOperationException("Completed session can have at most four billable participants.")
+        };
+    }
+
+    private static SessionBillingType ResolveActualSessionTypeForCompletion(UpdateSessionDto request)
     {
         if (!string.IsNullOrWhiteSpace(request.PlannedSessionType) &&
             Enum.TryParse<SessionBillingType>(request.PlannedSessionType, out var plannedSessionType))
