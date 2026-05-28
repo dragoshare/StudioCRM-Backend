@@ -18,5 +18,5 @@ public class ClientTrainerContactDto
 
     public string? AvatarUrl { get; set; }
 
-    public int ExperienceYears { get; set; }
+    public DateTime? TeamJoinedDate { get; set; }
 }

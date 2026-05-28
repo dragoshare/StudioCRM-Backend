@@ -44,6 +44,7 @@ builder.Services.AddDbContext<StudioCRMDbContext>(options =>
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITrainerService, TrainerService>();
+builder.Services.AddScoped<ITrainerContractService, TrainerContractService>();
 builder.Services.AddScoped<IClientService, ClientService>();
 builder.Services.AddScoped<IPackageService, PackageService>();
 builder.Services.AddScoped<ISessionService, SessionService>();

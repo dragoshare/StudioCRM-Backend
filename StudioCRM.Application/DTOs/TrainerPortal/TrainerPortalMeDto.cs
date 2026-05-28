@@ -18,7 +18,7 @@ public class TrainerPortalMeDto
 
     public string Status { get; set; } = string.Empty;
 
-    public int ExperienceYears { get; set; }
+    public DateTime? TeamJoinedDate { get; set; }
 
     public List<int> LocationIds { get; set; } = new();
 

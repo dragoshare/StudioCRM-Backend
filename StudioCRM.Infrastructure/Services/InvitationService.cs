@@ -333,7 +333,7 @@ public class InvitationService : IInvitationService
         {
             UserId = user.Id,
             Status = "Active",
-            ExperienceYears = 0,
+            TeamJoinedDate = DateTime.UtcNow.Date,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = invitation.CreatedBy

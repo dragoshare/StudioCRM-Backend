@@ -17,6 +17,7 @@ public class StudioCRMDbContext : DbContext
     public DbSet<UserRole> UserRoles => Set<UserRole>();
 
     public DbSet<Trainer> Trainers => Set<Trainer>();
+    public DbSet<TrainerContract> TrainerContracts => Set<TrainerContract>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
@@ -115,6 +116,30 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Trainer>()
             .Property(t => t.OutlookCategoryColor)
             .HasMaxLength(32);
+
+        // =========================
+        // TRAINER CONTRACTS
+        // =========================
+
+        modelBuilder.Entity<TrainerContract>(entity =>
+        {
+            entity.HasKey(c => c.Id);
+
+            entity.Property(c => c.ContractNumber)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(c => c.Notes)
+                .HasMaxLength(1000);
+
+            entity.HasOne(c => c.Trainer)
+                .WithMany(t => t.Contracts)
+                .HasForeignKey(c => c.TrainerId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(c => new { c.TrainerId, c.ValidFrom, c.ValidTo });
+            entity.HasIndex(c => new { c.TrainerId, c.IsActive });
+        });
 
         // =========================
         // TRAINER RATES
@@ -406,6 +431,26 @@ public class StudioCRMDbContext : DbContext
         // =========================
         // LOCATIONS
         // =========================
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.PaymentRecipientName)
+            .HasMaxLength(200);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.BankAccountNumber)
+            .HasMaxLength(64);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.BlikPhoneNumber)
+            .HasMaxLength(32);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.TransferTitleTemplate)
+            .HasMaxLength(300);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.PaymentDescription)
+            .HasMaxLength(1000);
 
         modelBuilder.Entity<TrainerLocation>()
             .HasKey(tl => new { tl.TrainerId, tl.LocationId });

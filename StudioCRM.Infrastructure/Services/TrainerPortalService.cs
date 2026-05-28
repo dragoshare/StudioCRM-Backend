@@ -44,7 +44,7 @@ public class TrainerPortalService : ITrainerPortalService
                 AvatarUrl = t.User.AvatarUrl,
                 Bio = t.Bio,
                 Status = t.Status,
-                ExperienceYears = t.ExperienceYears,
+                TeamJoinedDate = t.TeamJoinedDate,
                 LocationIds = t.TrainerLocations.Select(tl => tl.LocationId).ToList(),
                 LocationNames = t.TrainerLocations.Select(tl => tl.Location.Name).ToList()
             })
@@ -67,7 +67,6 @@ public class TrainerPortalService : ITrainerPortalService
         trainer.User.UpdatedAt = DateTime.UtcNow;
         trainer.Phone = request.Phone;
         trainer.Bio = request.Bio;
-        trainer.ExperienceYears = request.ExperienceYears;
         trainer.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -197,11 +196,21 @@ public class TrainerPortalService : ITrainerPortalService
         if (trainerId is null)
             return new List<TrainerPortalSessionDto>();
 
+        var locationIds = await _context.TrainerLocations
+            .Where(tl => tl.TrainerId == trainerId.Value)
+            .Select(tl => tl.LocationId)
+            .ToListAsync();
+
+        if (locationIds.Count == 0)
+            return new List<TrainerPortalSessionDto>();
+
         var sessions = await _context.Sessions
+            .Include(s => s.Trainer)
+                .ThenInclude(t => t.User)
             .Include(s => s.Participants)
             .ThenInclude(p => p.Client)
             .Include(s => s.Location)
-            .Where(s => s.TrainerId == trainerId.Value)
+            .Where(s => locationIds.Contains(s.LocationId))
             .OrderBy(s => s.StartAt)
             .ToListAsync();
 
@@ -213,6 +222,9 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = ToStudioDisplayDateTime(s.StartAt),
                 EndAt = ToStudioDisplayDateTime(s.EndAt),
+                TrainerId = s.TrainerId,
+                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
+                CanEdit = _currentUser.IsOwner || s.TrainerId == trainerId.Value,
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 Status = s.Status
@@ -226,10 +238,9 @@ public class TrainerPortalService : ITrainerPortalService
         if (trainerId is null)
             return null;
 
-        var ownsSession = await _context.Sessions
-            .AnyAsync(s => s.Id == sessionId && s.TrainerId == trainerId.Value);
+        var canViewSession = await TrainerCanViewSessionAsync(trainerId.Value, sessionId);
 
-        if (!ownsSession)
+        if (!canViewSession)
             return null;
 
         return await _sessionService.GetByIdAsync(sessionId);
@@ -241,10 +252,9 @@ public class TrainerPortalService : ITrainerPortalService
         if (trainerId is null)
             return null;
 
-        var ownsSession = await _context.Sessions
-            .AnyAsync(s => s.Id == sessionId && s.TrainerId == trainerId.Value);
+        var canViewSession = await TrainerCanViewSessionAsync(trainerId.Value, sessionId);
 
-        if (!ownsSession)
+        if (!canViewSession)
             return null;
 
         return await _sessionService.GetWorkspaceAsync(sessionId);
@@ -321,6 +331,9 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = ToStudioDisplayDateTime(s.StartAt),
                 EndAt = ToStudioDisplayDateTime(s.EndAt),
+                TrainerId = s.TrainerId,
+                TrainerFullName = me.FullName,
+                CanEdit = true,
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 Status = s.Status
@@ -341,6 +354,9 @@ public class TrainerPortalService : ITrainerPortalService
                 Note = s.Note,
                 StartAt = ToStudioDisplayDateTime(s.StartAt),
                 EndAt = ToStudioDisplayDateTime(s.EndAt),
+                TrainerId = s.TrainerId,
+                TrainerFullName = me.FullName,
+                CanEdit = true,
                 ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
                 LocationName = s.Location.Name,
                 Status = s.Status
@@ -444,6 +460,16 @@ public class TrainerPortalService : ITrainerPortalService
 
         if (ownedClientIds.Count != clientIds.Count)
             throw new InvalidOperationException("Trainer can only add their own clients to sessions.");
+    }
+
+    private async Task<bool> TrainerCanViewSessionAsync(int trainerId, int sessionId)
+    {
+        if (_currentUser.IsOwner)
+            return true;
+
+        return await _context.Sessions.AnyAsync(s =>
+            s.Id == sessionId &&
+            s.Location.TrainerLocations.Any(tl => tl.TrainerId == trainerId));
     }
 
     private static DateTime ToStudioDisplayDateTime(DateTime value)

@@ -2,6 +2,7 @@
 using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
@@ -186,6 +187,67 @@ public class TrainerSettlementService : ITrainerSettlementService
         return await GetMonthlySettlementAsync(trainerId, year, month);
     }
 
+    public async Task<TrainerWorkHoursDocumentDto?> GenerateWorkHoursDocumentAsync(
+        int trainerId,
+        int year,
+        int month)
+    {
+        ValidateMonth(year, month);
+
+        await EnsureAccessAsync(trainerId);
+
+        var trainer = await _context.Trainers
+            .Include(t => t.User)
+            .FirstOrDefaultAsync(t => t.Id == trainerId);
+
+        if (trainer is null)
+            return null;
+
+        var from = GetStudioMonthStartUtc(year, month);
+        var nextYear = month == 12 ? year + 1 : year;
+        var nextMonth = month == 12 ? 1 : month + 1;
+        var to = GetStudioMonthStartUtc(nextYear, nextMonth);
+
+        var sessions = await _context.Sessions
+            .Include(s => s.Participants)
+            .Where(s =>
+                s.TrainerId == trainerId &&
+                s.Status == "Completed" &&
+                s.StartAt >= from &&
+                s.StartAt < to)
+            .OrderBy(s => s.StartAt)
+            .ToListAsync();
+
+        var rates = await _context.TrainerRates
+            .Where(r => r.TrainerId == trainerId)
+            .ToListAsync();
+
+        var contract = await ResolveContractForPeriodAsync(trainerId, from, to);
+        var hourlyRate = ResolveHourlyRate(rates, from);
+
+        if (hourlyRate <= 0 && sessions.Count > 0)
+            hourlyRate = ResolveHourlyRate(rates, sessions[0].StartAt);
+
+        var model = new WorkHoursDocumentModel
+        {
+            TrainerFirstName = trainer.User.FirstName,
+            TrainerLastName = trainer.User.LastName,
+            ContractType = contract.ContractType,
+            ContractNumber = contract.ContractNumber,
+            ContractSignedAt = ToStudioDisplayDateTime(contract.SignedAt),
+            Year = year,
+            Month = month,
+            HourlyRate = hourlyRate,
+            Rows = BuildWorkHourRows(sessions)
+        };
+
+        return new TrainerWorkHoursDocumentDto
+        {
+            FileName = BuildWorkHoursFileName(trainer.User.FirstName, trainer.User.LastName, year, month),
+            Content = WorkHoursDocumentBuilder.Build(model)
+        };
+    }
+
     private async Task EnsureAccessAsync(int trainerId)
     {
         if (_currentUser.IsOwner)
@@ -203,6 +265,130 @@ public class TrainerSettlementService : ITrainerSettlementService
         }
 
         throw new UnauthorizedAccessException("You do not have access to this settlement.");
+    }
+
+    private async Task<TrainerContract> ResolveContractForPeriodAsync(
+        int trainerId,
+        DateTime from,
+        DateTime to)
+    {
+        var contract = await _context.TrainerContracts
+            .Where(c =>
+                c.TrainerId == trainerId &&
+                c.IsActive &&
+                c.ValidFrom < to &&
+                (c.ValidTo == null || c.ValidTo >= from))
+            .OrderByDescending(c => c.ValidFrom)
+            .FirstOrDefaultAsync();
+
+        return contract
+            ?? throw new InvalidOperationException(
+                "Trainer does not have an active contract for this settlement month.");
+    }
+
+    private static List<WorkHoursDocumentRow> BuildWorkHourRows(List<Session> sessions)
+    {
+        var localSessions = sessions
+            .Select(session => new
+            {
+                Session = session,
+                StartAt = ToStudioDisplayDateTime(session.StartAt),
+                EndAt = ToStudioDisplayDateTime(session.EndAt),
+                SessionType = ResolveSettlementSessionType(session)
+            })
+            .Where(session => session.EndAt > session.StartAt)
+            .OrderBy(session => session.StartAt)
+            .ToList();
+
+        var rows = new List<WorkHoursDocumentRow>();
+        WorkHoursDocumentRow? current = null;
+        DateTime currentEndAt = default;
+
+        foreach (var session in localSessions)
+        {
+            var startsNewBlock = current is null;
+
+            if (current is not null)
+            {
+                startsNewBlock =
+                    session.StartAt.Date != current.Date.Date ||
+                    session.StartAt > currentEndAt;
+            }
+
+            if (startsNewBlock)
+            {
+                current = new WorkHoursDocumentRow
+                {
+                    Date = session.StartAt.Date,
+                    StartAt = session.StartAt,
+                    EndAt = session.EndAt
+                };
+
+                rows.Add(current);
+            }
+            else if (session.EndAt > current!.EndAt)
+            {
+                current.EndAt = session.EndAt;
+            }
+
+            currentEndAt = current!.EndAt;
+            ApplySemiPersonalBonus(current, session.SessionType);
+            current.Hours = ResolveClockHours(current.StartAt, current.EndAt);
+        }
+
+        return rows;
+    }
+
+    private static void ApplySemiPersonalBonus(WorkHoursDocumentRow row, string sessionType)
+    {
+        switch (sessionType)
+        {
+            case "TwoToOne":
+                row.TwoToOneBonusUnits += 1;
+                break;
+            case "ThreeToOne":
+                row.ThreeToOneBonusUnits += 1;
+                break;
+            case "FourToOne":
+                row.FourToOneBonusUnits += 1;
+                break;
+        }
+    }
+
+    private static decimal ResolveClockHours(DateTime startAt, DateTime endAt)
+    {
+        return Math.Round((decimal)(endAt - startAt).TotalHours, 2);
+    }
+
+    private static string BuildWorkHoursFileName(
+        string firstName,
+        string lastName,
+        int year,
+        int month)
+    {
+        var trainer = string.Join(
+            "-",
+            new[] { firstName, lastName }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Select(SanitizeFileNamePart));
+
+        if (string.IsNullOrWhiteSpace(trainer))
+            trainer = "trainer";
+
+        return $"ewidencja-godzin-{trainer}-{year}-{month:00}.docx";
+    }
+
+    private static string SanitizeFileNamePart(string value)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        var sanitized = new string(value
+            .Trim()
+            .Select(ch => invalidChars.Contains(ch) || char.IsWhiteSpace(ch) ? '-' : ch)
+            .ToArray());
+
+        return string.IsNullOrWhiteSpace(sanitized)
+            ? "trainer"
+            : sanitized;
     }
 
     private static void ValidateMonth(int year, int month)

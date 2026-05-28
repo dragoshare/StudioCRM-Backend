@@ -62,6 +62,8 @@ public class SessionParticipantService : ISessionParticipantService
         if (session is null)
             throw new InvalidOperationException("Session does not exist.");
 
+        await EnsureCurrentUserCanManageSessionAsync(session);
+
         if (session.Status == "Completed")
             throw new InvalidOperationException("Cannot add participant to completed session.");
 
@@ -116,6 +118,8 @@ public class SessionParticipantService : ISessionParticipantService
         if (participant is null)
             return false;
 
+        await EnsureCurrentUserCanManageSessionAsync(participant.Session);
+
         if (participant.Session.Status == "Completed")
             throw new InvalidOperationException("Cannot remove participant from completed session.");
 
@@ -135,6 +139,8 @@ public class SessionParticipantService : ISessionParticipantService
 
         if (session is null)
             return false;
+
+        await EnsureCurrentUserCanManageSessionAsync(session);
 
         await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
 
@@ -392,6 +398,21 @@ public class SessionParticipantService : ISessionParticipantService
             throw new InvalidOperationException(
                 "Session cannot be changed because the trainer settlement for this month has already been paid.");
         }
+    }
+
+    private async Task EnsureCurrentUserCanManageSessionAsync(Session session)
+    {
+        if (_currentUser.IsOwner)
+            return;
+
+        if (!_currentUser.IsTrainer || !_currentUser.UserId.HasValue)
+            throw new InvalidOperationException("Current user cannot manage this session.");
+
+        var ownsSession = await _context.Trainers
+            .AnyAsync(t => t.Id == session.TrainerId && t.UserId == _currentUser.UserId.Value);
+
+        if (!ownsSession)
+            throw new InvalidOperationException("Trainer can manage only their own sessions.");
     }
 
     private async Task RevertSessionPackageAccountingAsync(Session session)

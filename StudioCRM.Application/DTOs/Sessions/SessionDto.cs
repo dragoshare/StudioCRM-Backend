@@ -16,6 +16,8 @@ public class SessionDto
 
     public string TrainerFullName { get; set; } = string.Empty;
 
+    public bool CanEdit { get; set; }
+
     public int LocationId { get; set; }
 
     public string LocationName { get; set; } = string.Empty;

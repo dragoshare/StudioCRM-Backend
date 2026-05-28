@@ -41,7 +41,9 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetAllAsync()
     {
-        var sessions = await BaseQuery()
+        var query = await ApplySessionVisibilityAsync(BaseQuery());
+
+        var sessions = await query
             .OrderBy(s => s.StartAt)
             .ToListAsync();
 
@@ -50,7 +52,9 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto?> GetByIdAsync(int id)
     {
-        var session = await BaseQuery()
+        var query = await ApplySessionVisibilityAsync(BaseQuery());
+
+        var session = await query
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (session is null)
@@ -393,7 +397,7 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
     {
-        var query = BaseQuery();
+        var query = await ApplySessionVisibilityAsync(BaseQuery());
 
         if (filter.TrainerId.HasValue)
             query = query.Where(s => s.TrainerId == filter.TrainerId.Value);
@@ -434,6 +438,8 @@ public class SessionService : ISessionService
 
         if (participant is null)
             throw new InvalidOperationException("Session participant not found.");
+
+        await EnsureCurrentUserCanManageSessionAsync(participant.Session);
 
         await EnsureSessionIsNotLockedByPaidSettlementAsync(
             participant.Session.TrainerId,
@@ -582,6 +588,21 @@ public class SessionService : ISessionService
         }
     }
 
+    private async Task EnsureCurrentUserCanManageSessionAsync(Session session)
+    {
+        if (_currentUser.IsOwner)
+            return;
+
+        if (!_currentUser.IsTrainer || !_currentUser.UserId.HasValue)
+            throw new InvalidOperationException("Current user cannot manage this session.");
+
+        var ownsSession = await _context.Trainers
+            .AnyAsync(t => t.Id == session.TrainerId && t.UserId == _currentUser.UserId.Value);
+
+        if (!ownsSession)
+            throw new InvalidOperationException("Trainer can manage only their own sessions.");
+    }
+
     private async Task<bool> IsSessionLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
     {
         var (year, month) = GetStudioYearMonth(startAt);
@@ -693,6 +714,24 @@ public class SessionService : ISessionService
                 .ThenInclude(p => p.Package)
             .Include(s => s.Participants)
                 .ThenInclude(p => p.ClientPackage);
+    }
+
+    private async Task<IQueryable<Session>> ApplySessionVisibilityAsync(IQueryable<Session> query)
+    {
+        if (_currentUser.IsOwner)
+            return query;
+
+        if (!_currentUser.IsTrainer || !_currentUser.UserId.HasValue)
+            return query.Where(s => false);
+
+        var locationIds = await _context.TrainerLocations
+            .Where(tl => tl.Trainer.UserId == _currentUser.UserId.Value)
+            .Select(tl => tl.LocationId)
+            .ToListAsync();
+
+        return locationIds.Count == 0
+            ? query.Where(s => false)
+            : query.Where(s => locationIds.Contains(s.LocationId));
     }
 
     private async Task ValidateSessionRequestAsync(
@@ -946,6 +985,9 @@ public class SessionService : ISessionService
             s.StartAt,
             s.EndAt);
 
+        var canEdit = _currentUser.IsOwner ||
+            (_currentUser.IsTrainer && s.Trainer.UserId == _currentUser.UserId);
+
         return new SessionDto
         {
             Id = s.Id,
@@ -955,6 +997,7 @@ public class SessionService : ISessionService
             EndAt = ToStudioDisplayDateTime(s.EndAt),
             TrainerId = s.TrainerId,
             TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
+            CanEdit = canEdit,
             LocationId = s.LocationId,
             LocationName = s.Location.Name,
             Status = s.Status,

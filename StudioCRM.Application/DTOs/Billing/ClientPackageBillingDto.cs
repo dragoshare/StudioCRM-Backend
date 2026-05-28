@@ -1,3 +1,5 @@
+using StudioCRM.Application.DTOs.Payments;
+
 namespace StudioCRM.Application.DTOs.Billing;
 
 public class ClientPackageBillingDto
@@ -30,4 +32,6 @@ public class ClientPackageBillingDto
     public DateTime? ValidUntil { get; set; }
     public DateTime? PaymentDueDate { get; set; }
     public DateTime? ActivatedAt { get; set; }
+
+    public PaymentInstructionsDto? PaymentInstructions { get; set; }
 }

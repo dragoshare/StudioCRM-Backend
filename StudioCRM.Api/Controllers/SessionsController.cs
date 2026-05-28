@@ -7,7 +7,7 @@ namespace StudioCRM.Api.Controllers;
 
 [ApiController]
 [Route("api/sessions")]
-[Authorize(Roles = "Owner")]
+[Authorize(Roles = "Owner,Trainer")]
 public class SessionsController : ControllerBase
 {
     private readonly ISessionService _sessionService;
@@ -49,6 +49,7 @@ public class SessionsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionDto>> Create(CreateSessionDto request)
     {
         return await HandleAsync<SessionDto>(async () =>
@@ -59,6 +60,7 @@ public class SessionsController : ControllerBase
     }
 
     [HttpPut("{id:int}")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)
     {
         return await HandleAsync<SessionDto>(async () =>
@@ -69,6 +71,7 @@ public class SessionsController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Delete(int id)
     {
         var deleted = await _sessionService.DeleteAsync(id);
@@ -76,6 +79,7 @@ public class SessionsController : ControllerBase
         return NoContent();
     }
     [HttpPost("{id:int}/restore")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> Restore(int id)
     {
         return await HandleAsync(async () =>
@@ -86,12 +90,14 @@ public class SessionsController : ControllerBase
     }
 
     [HttpGet("deleted")]
+    [Authorize(Roles = "Owner")]
     public async Task<ActionResult<List<SessionDto>>> GetDeleted()
     {
         return Ok(await _sessionService.GetDeletedAsync());
     }
 
     [HttpPost("participants/count-from-package")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> CountFromPackage(CountSessionFromPackageRequest request)
     {
         return await HandleAsync(async () =>

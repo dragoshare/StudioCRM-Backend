@@ -12,7 +12,7 @@ public class CreateTrainerDto
     public string? Phone { get; set; }
     public string? AvatarUrl { get; set; }
     public string Status { get; set; } = "Active";
-    public int ExperienceYears { get; set; }
+    public DateTime? TeamJoinedDate { get; set; }
     public string? OutlookCategoryName { get; set; }
     public string? OutlookCategoryColor { get; set; }
 

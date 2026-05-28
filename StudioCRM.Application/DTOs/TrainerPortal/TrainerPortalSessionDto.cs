@@ -12,6 +12,12 @@ public class TrainerPortalSessionDto
 
     public DateTime EndAt { get; set; }
 
+    public int TrainerId { get; set; }
+
+    public string TrainerFullName { get; set; } = string.Empty;
+
+    public bool CanEdit { get; set; }
+
     public string ClientFullName { get; set; } = string.Empty;
 
     public string LocationName { get; set; } = string.Empty;
