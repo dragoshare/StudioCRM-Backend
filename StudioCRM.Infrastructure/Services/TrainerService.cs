@@ -77,7 +77,7 @@ public class TrainerService : ITrainerService
             Bio = request.Bio,
             Phone = request.Phone,
             Status = request.Status,
-            ExperienceYears = request.ExperienceYears,
+            TeamJoinedDate = NormalizeNullableDateTime(request.TeamJoinedDate),
             OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName),
             OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor),
             CreatedAt = DateTime.UtcNow,
@@ -144,7 +144,7 @@ public class TrainerService : ITrainerService
         trainer.Bio = request.Bio;
         trainer.Phone = request.Phone;
         trainer.Status = request.Status;
-        trainer.ExperienceYears = request.ExperienceYears;
+        trainer.TeamJoinedDate = NormalizeNullableDateTime(request.TeamJoinedDate);
         trainer.OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName);
         trainer.OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor);
         trainer.IsDeleted = false;
@@ -215,7 +215,7 @@ public class TrainerService : ITrainerService
         trainer.Bio = request.Bio;
         trainer.Phone = request.Phone;
         trainer.Status = request.Status;
-        trainer.ExperienceYears = request.ExperienceYears;
+        trainer.TeamJoinedDate = NormalizeNullableDateTime(request.TeamJoinedDate);
         trainer.OutlookCategoryName = NormalizeOutlookCategoryName(request.OutlookCategoryName);
         trainer.OutlookCategoryColor = NormalizeOutlookCategoryColor(request.OutlookCategoryColor);
         trainer.UpdatedAt = DateTime.UtcNow;
@@ -316,7 +316,7 @@ public class TrainerService : ITrainerService
                 Phone = t.Phone,
                 AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
-                ExperienceYears = t.ExperienceYears,
+                TeamJoinedDate = t.TeamJoinedDate,
                 OutlookCategoryName = t.OutlookCategoryName,
                 OutlookCategoryColor = t.OutlookCategoryColor,
                 RatingAverage = 0,
@@ -356,7 +356,7 @@ public class TrainerService : ITrainerService
                 Phone = t.Phone,
                 AvatarUrl = t.User.AvatarUrl,
                 Status = t.Status,
-                ExperienceYears = t.ExperienceYears,
+                TeamJoinedDate = t.TeamJoinedDate,
                 OutlookCategoryName = t.OutlookCategoryName,
                 OutlookCategoryColor = t.OutlookCategoryColor,
                 RatingAverage = 0,
@@ -382,6 +382,19 @@ public class TrainerService : ITrainerService
         return string.IsNullOrWhiteSpace(normalized)
             ? null
             : normalized;
+    }
+
+    private static DateTime? NormalizeNullableDateTime(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return value.Value.Kind switch
+        {
+            DateTimeKind.Utc => value.Value,
+            DateTimeKind.Local => value.Value.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
+        };
     }
 
     private static string? NormalizeOutlookCategoryColor(string? value)

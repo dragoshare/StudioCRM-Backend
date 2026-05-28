@@ -131,14 +131,24 @@ public static class DataSeeder
             "Niepołomice",
             "Niepołomice",
             "ul. Bocheńska 12",
-            "niepolomice8_studio@bsworkout.pl");
+            "niepolomice8_studio@bsworkout.pl",
+            "BS Workout Niepołomice",
+            "12 3456 7890 1234 5678 9012 3456",
+            "501100098",
+            "Pakiet {PackageName} - {ClientFullName}",
+            "W tytule przelewu wpisz nazwę pakietu i swoje imię oraz nazwisko.");
 
         await EnsureLocationAsync(
             context,
             "Kłaj",
             "Kłaj",
             "ul. Sportowa 4",
-            "klaj237_studio@bsworkout.pl");
+            "klaj237_studio@bsworkout.pl",
+            "BS Workout Kłaj",
+            "98 7654 3210 9876 5432 1098 7654",
+            "501100098",
+            "Pakiet {PackageName} - {ClientFullName}",
+            "W tytule przelewu wpisz nazwę pakietu i swoje imię oraz nazwisko.");
     }
 
     private static async Task EnsureLocationAsync(
@@ -146,7 +156,12 @@ public static class DataSeeder
         string name,
         string city,
         string address,
-        string calendarEmail)
+        string calendarEmail,
+        string paymentRecipientName,
+        string bankAccountNumber,
+        string blikPhoneNumber,
+        string transferTitleTemplate,
+        string paymentDescription)
     {
         var location = await context.Locations.FirstOrDefaultAsync(l => l.Name == name);
 
@@ -158,6 +173,11 @@ public static class DataSeeder
                 City = city,
                 Address = address,
                 CalendarEmail = calendarEmail,
+                PaymentRecipientName = paymentRecipientName,
+                BankAccountNumber = bankAccountNumber,
+                BlikPhoneNumber = blikPhoneNumber,
+                TransferTitleTemplate = transferTitleTemplate,
+                PaymentDescription = paymentDescription,
                 IsActive = true,
                 CreatedAt = DateTime.UtcNow
             });
@@ -167,6 +187,11 @@ public static class DataSeeder
             location.City = city;
             location.Address = address;
             location.CalendarEmail = calendarEmail;
+            location.PaymentRecipientName = paymentRecipientName;
+            location.BankAccountNumber = bankAccountNumber;
+            location.BlikPhoneNumber = blikPhoneNumber;
+            location.TransferTitleTemplate = transferTitleTemplate;
+            location.PaymentDescription = paymentDescription;
             location.IsActive = true;
         }
 
@@ -274,7 +299,7 @@ public static class DataSeeder
                 Bio = "Owner prowadzący własnych klientów",
                 Phone = "501100098",
                 Status = "Active",
-                ExperienceYears = 0,
+                TeamJoinedDate = DateTime.UtcNow.Date,
                 OutlookCategoryName = "Owner",
                 OutlookCategoryColor = "preset6",
                 CreatedAt = DateTime.UtcNow,
@@ -328,7 +353,7 @@ public static class DataSeeder
                 LastName = "Wójcik",
                 Bio = "Główne konto trenera do testów CRM",
                 Phone = "501100099",
-                Experience = 6,
+                TeamJoinedDate = DateTime.UtcNow.Date.AddYears(-6),
                 OutlookCategoryName = "Szymek",
                 OutlookCategoryColor = "preset5",
                 Locations = new[] { "Niepołomice", "Kłaj" }
@@ -340,7 +365,7 @@ public static class DataSeeder
                 LastName = "Kowalski",
                 Bio = "Trener siłowy i motoryczny",
                 Phone = "501100100",
-                Experience = 5,
+                TeamJoinedDate = DateTime.UtcNow.Date.AddYears(-5),
                 OutlookCategoryName = "Jan Kowalski",
                 OutlookCategoryColor = "preset7",
                 Locations = new[] { "Niepołomice", "Kłaj" }
@@ -352,7 +377,7 @@ public static class DataSeeder
                 LastName = "Nowak",
                 Bio = "Trener przygotowania motorycznego",
                 Phone = "501100101",
-                Experience = 7,
+                TeamJoinedDate = DateTime.UtcNow.Date.AddYears(-7),
                 OutlookCategoryName = "Adam Nowak",
                 OutlookCategoryColor = "preset4",
                 Locations = new[] { "Niepołomice" }
@@ -364,7 +389,7 @@ public static class DataSeeder
                 LastName = "Wójcik",
                 Bio = "Trenerka sylwetkowa i funkcjonalna",
                 Phone = "501100102",
-                Experience = 3,
+                TeamJoinedDate = DateTime.UtcNow.Date.AddYears(-3),
                 OutlookCategoryName = "Karolina Wójcik",
                 OutlookCategoryColor = "preset8",
                 Locations = new[] { "Kłaj" }
@@ -376,7 +401,7 @@ public static class DataSeeder
                 LastName = "Zieliński",
                 Bio = "Trener personalny i rehabilitacyjny",
                 Phone = "501100103",
-                Experience = 6,
+                TeamJoinedDate = DateTime.UtcNow.Date.AddYears(-6),
                 OutlookCategoryName = "Bartosz Zieliński",
                 OutlookCategoryColor = "preset1",
                 Locations = new[] { "Niepołomice", "Kłaj" }
@@ -421,7 +446,7 @@ public static class DataSeeder
                 trainer.Bio = seed.Bio;
                 trainer.Phone = seed.Phone;
                 trainer.Status = "Active";
-                trainer.ExperienceYears = seed.Experience;
+                trainer.TeamJoinedDate = seed.TeamJoinedDate;
                 trainer.OutlookCategoryName = seed.OutlookCategoryName;
                 trainer.OutlookCategoryColor = seed.OutlookCategoryColor;
                 trainer.IsDeleted = false;

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudioCRM.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260527094045_ReplaceTrainerExperienceWithPaymentInstructions")]
+    partial class ReplaceTrainerExperienceWithPaymentInstructions
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1230,56 +1233,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.ToTable("Trainers");
                 });
 
-            modelBuilder.Entity("StudioCRM.Domain.Entities.TrainerContract", b =>
-                {
-                    b.Property<int>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("integer");
-
-                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
-
-                    b.Property<string>("ContractNumber")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<int>("ContractType")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<bool>("IsActive")
-                        .HasColumnType("boolean");
-
-                    b.Property<string>("Notes")
-                        .HasMaxLength(1000)
-                        .HasColumnType("character varying(1000)");
-
-                    b.Property<DateTime>("SignedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int>("TrainerId")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime>("ValidFrom")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTime?>("ValidTo")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("TrainerId", "IsActive");
-
-                    b.HasIndex("TrainerId", "ValidFrom", "ValidTo");
-
-                    b.ToTable("TrainerContracts");
-                });
-
             modelBuilder.Entity("StudioCRM.Domain.Entities.TrainerLocation", b =>
                 {
                     b.Property<int>("TrainerId")
@@ -1760,17 +1713,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("User");
                 });
 
-            modelBuilder.Entity("StudioCRM.Domain.Entities.TrainerContract", b =>
-                {
-                    b.HasOne("StudioCRM.Domain.Entities.Trainer", "Trainer")
-                        .WithMany("Contracts")
-                        .HasForeignKey("TrainerId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("Trainer");
-                });
-
             modelBuilder.Entity("StudioCRM.Domain.Entities.TrainerLocation", b =>
                 {
                     b.HasOne("StudioCRM.Domain.Entities.Location", "Location")
@@ -1874,8 +1816,6 @@ namespace StudioCRM.Infrastructure.Migrations
             modelBuilder.Entity("StudioCRM.Domain.Entities.Trainer", b =>
                 {
                     b.Navigation("Clients");
-
-                    b.Navigation("Contracts");
 
                     b.Navigation("MonthlySettlements");
 

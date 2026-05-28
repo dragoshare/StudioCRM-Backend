@@ -12,7 +12,7 @@ public class Trainer
 
     public string Status { get; set; } = "Active";
 
-    public int ExperienceYears { get; set; }
+    public DateTime? TeamJoinedDate { get; set; }
 
     public string? OutlookCategoryName { get; set; }
 
@@ -20,6 +20,7 @@ public class Trainer
 
     public ICollection<TrainerRate> Rates { get; set; } = new List<TrainerRate>();
     public ICollection<TrainerMonthlySettlement> MonthlySettlements { get; set; } = new List<TrainerMonthlySettlement>();
+    public ICollection<TrainerContract> Contracts { get; set; } = new List<TrainerContract>();
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 

@@ -15,7 +15,7 @@ public class TrainerDto
     public string? Phone { get; set; }
     public string? AvatarUrl { get; set; }
     public string Status { get; set; } = string.Empty;
-    public int ExperienceYears { get; set; }
+    public DateTime? TeamJoinedDate { get; set; }
     public string? OutlookCategoryName { get; set; }
     public string? OutlookCategoryColor { get; set; }
 

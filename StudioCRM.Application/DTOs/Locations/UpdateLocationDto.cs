@@ -1,9 +1,7 @@
-﻿namespace StudioCRM.Domain.Entities;
+namespace StudioCRM.Application.DTOs.Locations;
 
-public class Location
+public class UpdateLocationDto
 {
-    public int Id { get; set; }
-
     public string Name { get; set; } = string.Empty;
 
     public string City { get; set; } = string.Empty;
@@ -21,13 +19,4 @@ public class Location
     public string? TransferTitleTemplate { get; set; }
 
     public string? PaymentDescription { get; set; }
-
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-
-    public ICollection<TrainerLocation> TrainerLocations { get; set; } = new List<TrainerLocation>();
-
-    public ICollection<Client> Clients { get; set; } = new List<Client>();
-
-    public ICollection<Session> Sessions { get; set; } = new List<Session>();
-    public string? CalendarEmail { get; set; }
 }

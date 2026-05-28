@@ -40,4 +40,13 @@ public class LocationsController : ControllerBase
         var result = await _locationService.CreateAsync(request);
         return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
     }
+
+    [HttpPut("{id:int}")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<LocationDto>> Update(int id, UpdateLocationDto request)
+    {
+        var result = await _locationService.UpdateAsync(id, request);
+        if (result is null) return NotFound();
+        return Ok(result);
+    }
 }

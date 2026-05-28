@@ -15,7 +15,6 @@ public class UpdateTrainerPortalProfileRequest
     public string? Phone { get; set; }
     public string? AvatarUrl { get; set; }
     public string? Bio { get; set; }
-    public int ExperienceYears { get; set; }
 }
 
 public class RequestEmailChangeDto

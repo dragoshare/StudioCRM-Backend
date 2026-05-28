@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
@@ -106,6 +107,7 @@ public class ClientPaymentService : IClientPaymentService
         await EnsureStaffAccessToClientAsync(clientId);
 
         var activePackage = await _context.ClientPackages
+            .Include(cp => cp.Client)
             .Include(cp => cp.Location)
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
@@ -499,7 +501,7 @@ public class ClientPaymentService : IClientPaymentService
             .ToListAsync();
 
         var clientPackages = clientPackageEntities
-            .Select(MapPackage)
+            .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim()))
             .ToList();
 
         var paymentEntities = await _context.ClientPayments
@@ -714,8 +716,17 @@ public class ClientPaymentService : IClientPaymentService
         };
     }
 
-    private static ClientPackageBillingDto MapPackage(ClientPackage clientPackage)
+    private static ClientPackageBillingDto MapPackage(
+        ClientPackage clientPackage,
+        string? clientFullName = null)
     {
+        var amountDue = Math.Max(0, clientPackage.TotalPrice - clientPackage.AmountPaid);
+        var resolvedClientFullName = !string.IsNullOrWhiteSpace(clientFullName)
+            ? clientFullName
+            : clientPackage.Client is null
+                ? string.Empty
+                : $"{clientPackage.Client.FirstName} {clientPackage.Client.LastName}".Trim();
+
         return new ClientPackageBillingDto
         {
             ClientPackageId = clientPackage.Id,
@@ -732,7 +743,7 @@ public class ClientPaymentService : IClientPaymentService
             BalanceApplied = clientPackage.BalanceApplied,
             ExpectedUnitPrice = clientPackage.ExpectedUnitPrice,
             AmountPaid = clientPackage.AmountPaid,
-            AmountDue = Math.Max(0, clientPackage.TotalPrice - clientPackage.AmountPaid),
+            AmountDue = amountDue,
             Currency = clientPackage.Currency,
             ExpectedBillingType = clientPackage.ExpectedBillingType.ToString(),
             LocationId = clientPackage.LocationId,
@@ -741,7 +752,16 @@ public class ClientPaymentService : IClientPaymentService
             PurchaseDate = clientPackage.PurchaseDate,
             ValidUntil = clientPackage.ValidUntil,
             PaymentDueDate = clientPackage.PaymentDueDate,
-            ActivatedAt = clientPackage.ActivatedAt
+            ActivatedAt = clientPackage.ActivatedAt,
+            PaymentInstructions = amountDue > 0
+                ? PaymentInstructionBuilder.Build(
+                    clientPackage.Location,
+                    resolvedClientFullName,
+                    clientPackage.Name,
+                    clientPackage.Id,
+                    amountDue,
+                    clientPackage.Currency)
+                : null
         };
     }
 

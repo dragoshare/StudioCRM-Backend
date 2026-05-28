@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.DTOs.Profiles;
 using StudioCRM.Application.Interfaces;
@@ -248,6 +249,7 @@ public class ClientPortalService : IClientPortalService
             return null;
 
         var activePackage = await _context.ClientPackages
+            .Include(cp => cp.Location)
             .Where(cp => cp.ClientId == client.Id && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
@@ -262,14 +264,29 @@ public class ClientPortalService : IClientPortalService
             };
         }
 
+        var amountDue = Math.Max(0, activePackage.TotalPrice - activePackage.AmountPaid);
+        var location = activePackage.Location ?? client.Location;
+        var clientFullName = $"{client.FirstName} {client.LastName}".Trim();
+
         return new ClientPortalPaymentDto
         {
-            AmountDue = Math.Max(0, activePackage.TotalPrice - activePackage.AmountPaid),
+            ClientPackageId = activePackage.Id,
+            PackageName = activePackage.Name,
+            AmountDue = amountDue,
             Currency = activePackage.Currency,
             BillingStatus = activePackage.PaymentStatus.ToString(),
             PaymentDueDate = activePackage.PaymentStatus.ToString() == "Paid"
                 ? null
-                : activePackage.PaymentDueDate
+                : activePackage.PaymentDueDate,
+            Instructions = amountDue > 0
+                ? PaymentInstructionBuilder.Build(
+                    location,
+                    clientFullName,
+                    activePackage.Name,
+                    activePackage.Id,
+                    amountDue,
+                    activePackage.Currency)
+                : null
         };
     }
 
@@ -406,7 +423,7 @@ public class ClientPortalService : IClientPortalService
             PhoneContactUrl = !string.IsNullOrWhiteSpace(trainer.Phone) ? "tel:" + trainer.Phone : null,
             Bio = trainer.Bio,
             AvatarUrl = trainerUser.AvatarUrl,
-            ExperienceYears = trainer.ExperienceYears
+            TeamJoinedDate = trainer.TeamJoinedDate
         };
     }
 
