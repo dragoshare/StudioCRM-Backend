@@ -1,4 +1,5 @@
 ﻿using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Packages;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
@@ -9,10 +10,14 @@ namespace StudioCRM.Infrastructure.Services;
 public class PackageService : IPackageService
 {
     private readonly StudioCRMDbContext _context;
+    private readonly ICurrentUserService _currentUser;
 
-    public PackageService(StudioCRMDbContext context)
+    public PackageService(
+        StudioCRMDbContext context,
+        ICurrentUserService currentUser)
     {
         _context = context;
+        _currentUser = currentUser;
     }
 
     public async Task<PackageDto> CreateAsync(CreatePackageDto request)
@@ -162,6 +167,72 @@ public class PackageService : IPackageService
             .Include(p => p.Location)
             .Where(p => p.IsDeleted)
             .Select(p => MapToDto(p))
+            .ToListAsync();
+    }
+
+    public async Task<List<ClientDto>?> GetClientsAsync(int id)
+    {
+        var packageExists = await _context.Packages.AnyAsync(p => p.Id == id);
+        if (!packageExists)
+        {
+            return null;
+        }
+
+        var query = _context.Clients
+            .Include(c => c.Trainer)
+                .ThenInclude(t => t!.User)
+            .Include(c => c.Location)
+            .Where(c => c.ActivePackageId == id);
+
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
+        {
+            if (!_currentUser.UserId.HasValue)
+            {
+                return new List<ClientDto>();
+            }
+
+            var trainerId = await _context.Trainers
+                .Where(t => t.UserId == _currentUser.UserId.Value)
+                .Select(t => (int?)t.Id)
+                .FirstOrDefaultAsync();
+
+            if (!trainerId.HasValue)
+            {
+                return new List<ClientDto>();
+            }
+
+            query = query.Where(c => c.TrainerId == trainerId.Value);
+        }
+
+        return await query
+            .OrderByDescending(c => c.CreatedAt)
+            .Select(c => new ClientDto
+            {
+                Id = c.Id,
+                TrainerId = c.TrainerId,
+                ActivePackageId = c.ActivePackageId,
+                LocationId = c.LocationId,
+                LocationName = c.Location.Name,
+                FirstName = c.FirstName,
+                LastName = c.LastName,
+                FullName = c.FirstName + " " + c.LastName,
+                Email = c.Email,
+                EmailContactUrl = "mailto:" + c.Email,
+                PhoneNumber = c.PhoneNumber,
+                PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
+                AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
+                Goal = c.Goal,
+                Notes = c.Notes,
+                BillingStatus = c.BillingStatus,
+                Status = c.Status,
+                NextSessionAt = c.NextSessionAt,
+                CreatedAt = c.CreatedAt,
+                UpdatedAt = c.UpdatedAt,
+                CreatedBy = c.CreatedBy,
+                TrainerFullName = c.Trainer != null
+                    ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
+                    : null
+            })
             .ToListAsync();
     }
 

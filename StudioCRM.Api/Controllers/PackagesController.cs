@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Packages;
 using StudioCRM.Application.Interfaces;
 
@@ -32,6 +33,14 @@ public class PackagesController : ControllerBase
         var result = await _packageService.GetByIdAsync(id);
         if (result is null) return NotFound();
         return Ok(result);
+    }
+
+    [HttpGet("{id:int}/clients")]
+    [Authorize(Roles = "Owner,Trainer")]
+    public async Task<ActionResult<List<ClientDto>>> GetClients(int id)
+    {
+        var result = await _packageService.GetClientsAsync(id);
+        return result is null ? NotFound() : Ok(result);
     }
 
     [HttpPost]
