@@ -46,6 +46,9 @@ public class ClientPackageService : IClientPackageService
         if (package is null)
             throw new InvalidOperationException("Package does not exist.");
 
+        if (package.LocationId.HasValue && package.LocationId.Value != client.LocationId)
+            throw new InvalidOperationException("Package does not belong to the client's location.");
+
         var totalSessions = request.TotalSessions ?? package.SessionsLimit;
         if (totalSessions <= 0)
             throw new InvalidOperationException("Total sessions must be greater than zero.");
@@ -118,6 +121,7 @@ public class ClientPackageService : IClientPackageService
 
         client.ActivePackageId = package.Id;
         client.BillingStatus = clientPackage.PaymentStatus.ToString();
+        client.Status = "Active";
         client.UpdatedAt = now;
 
         await _context.SaveChangesAsync();
