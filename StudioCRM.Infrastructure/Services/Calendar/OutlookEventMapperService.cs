@@ -108,6 +108,10 @@ public class OutlookEventMapperService
 
         if (matchingSession is not null)
         {
+            await AddMissingClientsToSessionAsync(matchingSession, clients, warnings);
+            matchingSession.Title = await BuildSessionTitleFromParticipantsAsync(matchingSession.Id);
+            matchingSession.UpdatedAt = DateTime.UtcNow;
+
             var sessionLink = await _context.CalendarEventLinks
                 .FirstOrDefaultAsync(x =>
                     x.SessionId == matchingSession.Id &&
@@ -127,11 +131,25 @@ public class OutlookEventMapperService
 
             evt.IsConvertedToSession = true;
             evt.SessionId = matchingSession.Id;
+            matchingSession.OutlookCategoriesJson = evt.CategoriesJson;
+            matchingSession.OutlookCategoryColorsJson = evt.CategoryColorsJson;
+            matchingSession.PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson);
 
-            warnings.Add("Event dopięto do istniejącej sesji CRM.");
+            warnings.Add("Event dopięto do istniejącej sesji CRM zamiast tworzyć drugą sesję w tym samym czasie.");
             await SaveWarningsAsync(evt, warnings);
 
             return (matchingSession, warnings);
+        }
+
+        var overlappingSession = await FindOverlappingSessionAsync(evt, trainer, location);
+
+        if (overlappingSession is not null)
+        {
+            warnings.Add(
+                $"Event nakłada się z istniejącą sesją CRM #{overlappingSession.Id}, ale nie ma dokładnie tego samego czasu. Pominięto automatyczne tworzenie i dopisywanie klientów.");
+            await SaveWarningsAsync(evt, warnings);
+
+            return (null, warnings);
         }
 
         var session = new Session
@@ -145,6 +163,7 @@ public class OutlookEventMapperService
             Status = "Planned",
 
             OutlookCategoriesJson = evt.CategoriesJson,
+            OutlookCategoryColorsJson = evt.CategoryColorsJson,
             PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson),
 
             CreatedAt = DateTime.UtcNow,
@@ -157,25 +176,7 @@ public class OutlookEventMapperService
 
         foreach (var client in clients.DistinctBy(c => c.Id))
         {
-            var activeClientPackage = await _context.ClientPackages
-                .Where(cp => cp.ClientId == client.Id && cp.IsActive)
-                .OrderByDescending(cp => cp.PurchaseDate)
-                .FirstOrDefaultAsync();
-
-            await _context.SessionParticipants.AddAsync(new SessionParticipant
-            {
-                SessionId = session.Id,
-                ClientId = client.Id,
-                PackageId = activeClientPackage?.PackageId,
-                ClientPackageId = activeClientPackage?.Id,
-                AttendanceStatus = "Planned",
-                CountsAgainstPackage = true,
-                SessionsCharged = 1,
-                PlannedBillingType = activeClientPackage?.ExpectedBillingType,
-                ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow
-            });
+            await AddClientToSessionAsync(session.Id, client);
         }
 
         await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
@@ -298,16 +299,98 @@ public class OutlookEventMapperService
                 !s.IsDeleted &&
                 s.TrainerId == trainer.Id &&
                 s.LocationId == location.Id &&
+                s.Status != "Cancelled" &&
                 s.StartAt == evt.StartAt &&
                 s.EndAt == evt.EndAt)
+            .OrderBy(s => s.StartAt)
             .ToListAsync();
 
-        return candidates.FirstOrDefault(session =>
-            session.Participants
-                .Select(p => p.ClientId)
-                .Distinct()
-                .OrderBy(id => id)
-                .SequenceEqual(clientIds));
+        return candidates.FirstOrDefault();
+    }
+
+    private async Task<Session?> FindOverlappingSessionAsync(
+        ExternalCalendarEvent evt,
+        Trainer trainer,
+        Location location)
+    {
+        return await _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.TrainerId == trainer.Id &&
+                s.LocationId == location.Id &&
+                s.Status != "Cancelled" &&
+                s.StartAt < evt.EndAt &&
+                s.EndAt > evt.StartAt)
+            .OrderBy(s => s.StartAt)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task AddMissingClientsToSessionAsync(
+        Session session,
+        List<Client> clients,
+        List<string> warnings)
+    {
+        var existingClientIds = session.Participants
+            .Select(p => p.ClientId)
+            .ToHashSet();
+
+        var missingClients = clients
+            .DistinctBy(c => c.Id)
+            .Where(c => !existingClientIds.Contains(c.Id))
+            .ToList();
+
+        if (missingClients.Count == 0)
+            return;
+
+        if (session.Participants.Count + missingClients.Count > 4)
+        {
+            warnings.Add(
+                $"Nie dopisano klientów do sesji CRM #{session.Id}, bo trener może prowadzić maksymalnie 4 osoby w jednej sesji.");
+            return;
+        }
+
+        foreach (var client in missingClients)
+        {
+            await AddClientToSessionAsync(session.Id, client);
+        }
+
+        await _context.SaveChangesAsync();
+
+        warnings.Add($"Dopisano {missingClients.Count} klient(ów) do istniejącej sesji CRM #{session.Id}.");
+    }
+
+    private async Task AddClientToSessionAsync(int sessionId, Client client)
+    {
+        var activeClientPackage = await _context.ClientPackages
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .FirstOrDefaultAsync();
+
+        await _context.SessionParticipants.AddAsync(new SessionParticipant
+        {
+            SessionId = sessionId,
+            ClientId = client.Id,
+            PackageId = activeClientPackage?.PackageId,
+            ClientPackageId = activeClientPackage?.Id,
+            AttendanceStatus = "Planned",
+            CountsAgainstPackage = true,
+            SessionsCharged = 1,
+            PlannedBillingType = activeClientPackage?.ExpectedBillingType,
+            ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
+    }
+
+    private async Task<string> BuildSessionTitleFromParticipantsAsync(int sessionId)
+    {
+        var clients = await _context.SessionParticipants
+            .Where(p => p.SessionId == sessionId)
+            .Include(p => p.Client)
+            .Select(p => p.Client)
+            .ToListAsync();
+
+        return BuildSessionTitle(clients);
     }
 
     private async Task SaveWarningsAsync(ExternalCalendarEvent evt, List<string> warnings)

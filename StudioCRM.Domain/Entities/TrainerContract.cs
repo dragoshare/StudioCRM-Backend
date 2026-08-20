@@ -27,4 +27,6 @@ public class TrainerContract
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 
     public Trainer Trainer { get; set; } = null!;
+
+    public ICollection<TrainerContractLocation> ContractLocations { get; set; } = new List<TrainerContractLocation>();
 }

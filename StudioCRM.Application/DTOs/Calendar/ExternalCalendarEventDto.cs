@@ -30,4 +30,5 @@ public class ExternalCalendarEventDto
 
     public List<string> Warnings { get; set; } = new();
     public List<string> Categories { get; set; } = new();
+    public List<OutlookCategoryDto> CategoryColors { get; set; } = new();
 }

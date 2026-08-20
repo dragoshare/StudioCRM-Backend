@@ -326,6 +326,32 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
     }
 
+    public async Task ChangePasswordAsync(int userId, ChangePasswordDto request)
+    {
+        if (string.IsNullOrWhiteSpace(request.CurrentPassword))
+            throw new InvalidOperationException("Current password is required.");
+
+        if (string.IsNullOrWhiteSpace(request.NewPassword))
+            throw new InvalidOperationException("New password is required.");
+
+        var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
+        if (user is null)
+            throw new InvalidOperationException("User does not exist.");
+
+        var verificationResult = _passwordHasher.VerifyHashedPassword(
+            user,
+            user.PasswordHash,
+            request.CurrentPassword);
+
+        if (verificationResult == PasswordVerificationResult.Failed)
+            throw new InvalidOperationException("Current password is incorrect.");
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
+        user.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+    }
+
     private AuthResponseDto BuildAuthResponse(User user, string refreshToken)
     {
         var roleNames = user.UserRoles

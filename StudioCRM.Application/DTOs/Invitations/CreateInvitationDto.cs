@@ -8,4 +8,5 @@ public class CreateInvitationDto
 
     public int LocationId { get; set; }
 
+    public int? TrainerId { get; set; }
 }

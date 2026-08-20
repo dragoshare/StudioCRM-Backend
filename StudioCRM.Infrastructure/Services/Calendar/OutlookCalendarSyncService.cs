@@ -368,6 +368,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             await _context.ExternalCalendarEvents.AddAsync(externalEvent);
         }
 
+        var categories = ResolveGraphEventCategories(session);
+        var categoryColors = ResolveGraphEventCategoryColors(session, categories);
+
         externalEvent.Subject = session.Title;
         externalEvent.BodyPreview = session.Note;
         externalEvent.StartAt = session.StartAt;
@@ -380,10 +383,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 .Where(e => !string.IsNullOrWhiteSpace(e))
                 .Distinct()
                 .ToList());
-        externalEvent.CategoriesJson = JsonSerializer.Serialize(ResolveGraphEventCategories(session));
+        externalEvent.CategoriesJson = JsonSerializer.Serialize(categories);
+        externalEvent.CategoryColorsJson = JsonSerializer.Serialize(categoryColors);
         externalEvent.SessionId = session.Id;
         externalEvent.IsConvertedToSession = true;
         externalEvent.ImportedAt = DateTime.UtcNow;
+
+        session.OutlookCategoryColorsJson = JsonSerializer.Serialize(categoryColors);
     }
 
     private async Task EnsureTrainerMasterCategoryAsync(
@@ -499,6 +505,21 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             .ToList();
     }
 
+    private static List<OutlookCategoryColor> ResolveGraphEventCategoryColors(
+        Session session,
+        List<string> categories)
+    {
+        return categories
+            .Select(category => new OutlookCategoryColor
+            {
+                Name = category,
+                Color = string.Equals(category, session.Trainer.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
+                    ? NormalizeCategoryColor(session.Trainer.OutlookCategoryColor)
+                    : null
+            })
+            .ToList();
+    }
+
     private static string? NormalizeCategoryName(string? value)
     {
         var normalized = value?.Trim();
@@ -530,6 +551,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         {
             return new List<string>();
         }
+    }
+
+    private sealed class OutlookCategoryColor
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string? Color { get; set; }
     }
 
     private async Task EnsureAccessTokenAsync(CalendarIntegration integration)

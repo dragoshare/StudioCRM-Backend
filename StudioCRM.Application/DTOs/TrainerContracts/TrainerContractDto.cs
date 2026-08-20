@@ -16,6 +16,10 @@ public class TrainerContractDto
 
     public DateTime? ValidTo { get; set; }
 
+    public List<int> LocationIds { get; set; } = new();
+
+    public List<string> LocationNames { get; set; } = new();
+
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; }

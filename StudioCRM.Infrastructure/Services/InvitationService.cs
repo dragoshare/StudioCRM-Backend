@@ -46,12 +46,12 @@ public class InvitationService : IInvitationService
         if (role != "Trainer" && role != "Client")
             throw new InvalidOperationException("Only Trainer and Client invitations are supported.");
 
+        var trainerId = await ResolveInvitationTrainerIdAsync(role, request.LocationId, request.TrainerId);
+
         if (!_currentUser.IsOwner)
         {
             if (!_currentUser.IsTrainer || role != "Client")
                 throw new InvalidOperationException("Trainer can invite only clients.");
-
-            await EnsureTrainerCanInviteToLocationAsync(request.LocationId);
         }
 
         var location = await _context.Locations.FirstOrDefaultAsync(l => l.Id == request.LocationId);
@@ -79,6 +79,7 @@ public class InvitationService : IInvitationService
             Token = GenerateToken(),
             LocationId = request.LocationId,
             Location = location,
+            TrainerId = trainerId,
             ExpiresAt = DateTime.UtcNow.AddDays(3),
             IsAccepted = false,
             CreatedAt = DateTime.UtcNow,
@@ -92,13 +93,15 @@ public class InvitationService : IInvitationService
 
         await SendInvitationEmailAndTrackResultAsync(invitation, location.Name, inviteLink);
 
-        return MapToDto(invitation);
+        return MapToDto(await LoadInvitationForDtoAsync(invitation.Id) ?? invitation);
     }
 
     public async Task<List<InvitationDto>> GetAllAsync(InvitationFilterDto? filter = null)
     {
         var query = _context.Invitations
             .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
             .AsQueryable();
 
         if (!_currentUser.IsOwner)
@@ -119,6 +122,9 @@ public class InvitationService : IInvitationService
 
             if (filter.LocationId.HasValue)
                 query = query.Where(i => i.LocationId == filter.LocationId.Value);
+
+            if (filter.TrainerId.HasValue)
+                query = query.Where(i => i.TrainerId == filter.TrainerId.Value);
 
             if (!string.IsNullOrWhiteSpace(filter.Search))
             {
@@ -159,6 +165,8 @@ public class InvitationService : IInvitationService
     {
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Id == id);
 
         if (invitation is null)
@@ -174,6 +182,8 @@ public class InvitationService : IInvitationService
     {
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Token == token);
 
         if (invitation is null ||
@@ -188,6 +198,8 @@ public class InvitationService : IInvitationService
             Role = invitation.Role,
             LocationId = invitation.LocationId,
             LocationName = GetLocationName(invitation),
+            TrainerId = invitation.TrainerId,
+            TrainerName = GetTrainerName(invitation),
             ExpiresAt = invitation.ExpiresAt
         };
     }
@@ -205,6 +217,8 @@ public class InvitationService : IInvitationService
 
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Token == request.Token);
 
         if (invitation is null ||
@@ -265,6 +279,8 @@ public class InvitationService : IInvitationService
     {
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Id == id);
 
         if (invitation is null)
@@ -313,15 +329,59 @@ public class InvitationService : IInvitationService
         return true;
     }
 
-    private async Task EnsureTrainerCanInviteToLocationAsync(int locationId)
+    private async Task<int?> ResolveInvitationTrainerIdAsync(
+        string role,
+        int locationId,
+        int? requestedTrainerId)
     {
+        if (role != "Client")
+        {
+            if (requestedTrainerId.HasValue)
+                throw new InvalidOperationException("Trainer can be assigned only to client invitations.");
+
+            return null;
+        }
+
+        if (_currentUser.IsOwner)
+        {
+            if (!requestedTrainerId.HasValue)
+                return null;
+
+            await EnsureTrainerCanInviteToLocationAsync(requestedTrainerId.Value, locationId);
+            return requestedTrainerId.Value;
+        }
+
+        if (!_currentUser.IsTrainer || !_currentUser.UserId.HasValue)
+            throw new InvalidOperationException("Trainer can invite only clients.");
+
         var trainer = await _context.Trainers
             .Include(t => t.TrainerLocations)
-            .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId && !t.IsDeleted);
+            .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value && !t.IsDeleted);
 
         if (trainer is null)
             throw new InvalidOperationException("Trainer profile not found.");
 
+        if (requestedTrainerId.HasValue && requestedTrainerId.Value != trainer.Id)
+            throw new InvalidOperationException("Trainer can assign invitations only to themselves.");
+
+        EnsureTrainerHasLocationAccess(trainer, locationId);
+        return trainer.Id;
+    }
+
+    private async Task EnsureTrainerCanInviteToLocationAsync(int trainerId, int locationId)
+    {
+        var trainer = await _context.Trainers
+            .Include(t => t.TrainerLocations)
+            .FirstOrDefaultAsync(t => t.Id == trainerId && !t.IsDeleted);
+
+        if (trainer is null)
+            throw new InvalidOperationException("Trainer does not exist.");
+
+        EnsureTrainerHasLocationAccess(trainer, locationId);
+    }
+
+    private static void EnsureTrainerHasLocationAccess(Trainer trainer, int locationId)
+    {
         var hasLocationAccess = trainer.TrainerLocations.Any(tl => tl.LocationId == locationId);
         if (!hasLocationAccess)
             throw new InvalidOperationException("Trainer cannot invite clients to this location.");
@@ -359,7 +419,7 @@ public class InvitationService : IInvitationService
         var client = new Client
         {
             UserId = user.Id,
-            TrainerId = null,
+            TrainerId = invitation.TrainerId,
             FirstName = request.FirstName,
             LastName = request.LastName,
             Email = invitation.Email,
@@ -385,6 +445,8 @@ public class InvitationService : IInvitationService
             Role = invitation.Role,
             LocationId = invitation.LocationId,
             LocationName = GetLocationName(invitation),
+            TrainerId = invitation.TrainerId,
+            TrainerName = GetTrainerName(invitation),
             Token = invitation.Token,
             InviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}",
             ExpiresAt = invitation.ExpiresAt,
@@ -396,6 +458,15 @@ public class InvitationService : IInvitationService
             CreatedAt = invitation.CreatedAt,
             Status = GetStatus(invitation)
         };
+    }
+
+    private async Task<Invitation?> LoadInvitationForDtoAsync(int id)
+    {
+        return await _context.Invitations
+            .Include(i => i.Location)
+            .Include(i => i.Trainer)
+                .ThenInclude(t => t!.User)
+            .FirstOrDefaultAsync(i => i.Id == id);
     }
 
     private async Task SendInvitationEmailAndTrackResultAsync(
@@ -437,6 +508,13 @@ public class InvitationService : IInvitationService
     private static string GetLocationName(Invitation invitation)
     {
         return invitation.Location?.Name ?? string.Empty;
+    }
+
+    private static string? GetTrainerName(Invitation invitation)
+    {
+        return invitation.Trainer is null
+            ? null
+            : $"{invitation.Trainer.User.FirstName} {invitation.Trainer.User.LastName}";
     }
 
     private static string NormalizeEmail(string? email)

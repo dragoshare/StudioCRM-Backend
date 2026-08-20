@@ -29,5 +29,8 @@ public class Location
     public ICollection<Client> Clients { get; set; } = new List<Client>();
 
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
+
+    public ICollection<TrainerContractLocation> TrainerContractLocations { get; set; } = new List<TrainerContractLocation>();
+
     public string? CalendarEmail { get; set; }
 }

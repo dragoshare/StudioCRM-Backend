@@ -63,6 +63,7 @@ builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
 builder.Services.AddScoped<IClientPaymentService, ClientPaymentService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOperationalAlertService, OperationalAlertService>();
+builder.Services.AddScoped<IStudioSettingsService, StudioSettingsService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
 builder.Services.AddScoped<ISessionAutoCompletionService, SessionAutoCompletionService>();
 // Authentication

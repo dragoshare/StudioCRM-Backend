@@ -18,6 +18,7 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<Trainer> Trainers => Set<Trainer>();
     public DbSet<TrainerContract> TrainerContracts => Set<TrainerContract>();
+    public DbSet<TrainerContractLocation> TrainerContractLocations => Set<TrainerContractLocation>();
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
@@ -43,6 +44,7 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<TrainerRate> TrainerRates => Set<TrainerRate>();
     public DbSet<TrainerMonthlySettlement> TrainerMonthlySettlements => Set<TrainerMonthlySettlement>();
+    public DbSet<SystemSetting> SystemSettings => Set<SystemSetting>();
 
     public DbSet<MilestoneDefinition> MilestoneDefinitions => Set<MilestoneDefinition>();
     public DbSet<ClientMilestone> ClientMilestones => Set<ClientMilestone>();
@@ -141,6 +143,23 @@ public class StudioCRMDbContext : DbContext
             entity.HasIndex(c => new { c.TrainerId, c.IsActive });
         });
 
+        modelBuilder.Entity<TrainerContractLocation>(entity =>
+        {
+            entity.HasKey(cl => new { cl.TrainerContractId, cl.LocationId });
+
+            entity.HasOne(cl => cl.TrainerContract)
+                .WithMany(c => c.ContractLocations)
+                .HasForeignKey(cl => cl.TrainerContractId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(cl => cl.Location)
+                .WithMany(l => l.TrainerContractLocations)
+                .HasForeignKey(cl => cl.LocationId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(cl => cl.LocationId);
+        });
+
         // =========================
         // TRAINER RATES
         // =========================
@@ -184,6 +203,52 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<TrainerMonthlySettlement>()
             .HasIndex(s => new { s.TrainerId, s.Year, s.Month })
             .IsUnique();
+
+        // =========================
+        // SYSTEM SETTINGS
+        // =========================
+
+        modelBuilder.Entity<SystemSetting>(entity =>
+        {
+            entity.HasKey(s => s.Id);
+
+            entity.Property(s => s.Key)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(s => s.Value)
+                .IsRequired()
+                .HasMaxLength(500);
+
+            entity.HasIndex(s => s.Key)
+                .IsUnique();
+
+            entity.HasData(
+                new SystemSetting
+                {
+                    Id = 1,
+                    Key = "DefaultPackageValidityDays",
+                    Value = "45",
+                    CreatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc),
+                    UpdatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new SystemSetting
+                {
+                    Id = 2,
+                    Key = "DefaultSessionDurationMinutes",
+                    Value = "60",
+                    CreatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc),
+                    UpdatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc)
+                },
+                new SystemSetting
+                {
+                    Id = 3,
+                    Key = "DefaultPaymentDueDays",
+                    Value = "7",
+                    CreatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc),
+                    UpdatedAt = new DateTime(2026, 8, 20, 0, 0, 0, DateTimeKind.Utc)
+                });
+        });
 
         // =========================
         // CLIENTS
@@ -552,8 +617,17 @@ public class StudioCRMDbContext : DbContext
             .OnDelete(DeleteBehavior.Restrict);
 
         modelBuilder.Entity<Invitation>()
+            .HasOne(i => i.Trainer)
+            .WithMany()
+            .HasForeignKey(i => i.TrainerId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        modelBuilder.Entity<Invitation>()
             .HasIndex(i => i.Token)
             .IsUnique();
+
+        modelBuilder.Entity<Invitation>()
+            .HasIndex(i => i.TrainerId);
 
         modelBuilder.Entity<Invitation>()
             .Property(i => i.LastSendError)

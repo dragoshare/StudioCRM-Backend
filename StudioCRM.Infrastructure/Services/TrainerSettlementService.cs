@@ -50,6 +50,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 s.Month == month);
 
         var sessions = await _context.Sessions
+            .Include(s => s.Location)
             .Include(s => s.Participants)
             .Where(s =>
                 s.TrainerId == trainerId &&
@@ -63,29 +64,15 @@ public class TrainerSettlementService : ITrainerSettlementService
             .Where(r => r.TrainerId == trainerId)
             .ToListAsync();
 
-        var items = new List<TrainerSettlementItemDto>();
-
-        foreach (var session in sessions)
-        {
-            var sessionType = ResolveSettlementSessionType(session);
-            var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
-            var rate = ResolveHourlyRate(rates, session.StartAt);
-
-            var amount = hours * rate;
-
-            items.Add(new TrainerSettlementItemDto
-            {
-                SessionId = session.Id,
-                StartAt = ToStudioDisplayDateTime(session.StartAt),
-                EndAt = ToStudioDisplayDateTime(session.EndAt),
-                Title = session.Title,
-                SessionType = sessionType,
-                Hours = hours,
-                Rate = rate,
-                Amount = amount,
-                ParticipantsCount = session.ActualParticipantsCount ?? session.Participants.Count
-            });
-        }
+        var contractCoverage = BuildContractLocationCoverage(
+            await GetContractsForPeriodAsync(trainerId, from, to));
+        var items = BuildSettlementItems(sessions, rates, contractCoverage);
+        var contractedItems = items
+            .Where(i => i.IsCoveredByContract)
+            .ToList();
+        var nonContractedItems = items
+            .Where(i => !i.IsCoveredByContract)
+            .ToList();
 
         return new TrainerMonthlySettlementDto
         {
@@ -93,14 +80,20 @@ public class TrainerSettlementService : ITrainerSettlementService
             TrainerFullName = $"{trainer.User.FirstName} {trainer.User.LastName}",
             Year = year,
             Month = month,
-            TotalHours = items.Sum(i => i.Hours),
-            TotalSessions = items.Count,
-            TotalAmount = items.Sum(i => i.Amount),
+            TotalHours = contractedItems.Sum(i => i.Hours),
+            TotalSessions = contractedItems.Count,
+            TotalAmount = contractedItems.Sum(i => i.Amount),
+            ContractedTotalHours = contractedItems.Sum(i => i.Hours),
+            ContractedTotalSessions = contractedItems.Count,
+            ContractedTotalAmount = contractedItems.Sum(i => i.Amount),
+            NonContractedTotalHours = nonContractedItems.Sum(i => i.Hours),
+            NonContractedTotalSessions = nonContractedItems.Count,
             IsPaid = savedSettlement?.IsPaid ?? false,
             PaidAt = savedSettlement?.PaidAt.HasValue == true
                 ? ToStudioDisplayDateTime(savedSettlement.PaidAt.Value)
                 : null,
-            Items = items
+            Items = contractedItems,
+            NonContractedItems = nonContractedItems
         };
     }
 
@@ -209,6 +202,7 @@ public class TrainerSettlementService : ITrainerSettlementService
         var to = GetStudioMonthStartUtc(nextYear, nextMonth);
 
         var sessions = await _context.Sessions
+            .Include(s => s.Location)
             .Include(s => s.Participants)
             .Where(s =>
                 s.TrainerId == trainerId &&
@@ -222,11 +216,16 @@ public class TrainerSettlementService : ITrainerSettlementService
             .Where(r => r.TrainerId == trainerId)
             .ToListAsync();
 
-        var contract = await ResolveContractForPeriodAsync(trainerId, from, to);
+        var contracts = await GetContractsForPeriodAsync(trainerId, from, to);
+        var contractCoverage = BuildContractLocationCoverage(contracts);
+        var contractedSessions = sessions
+            .Where(s => contractCoverage.ContainsKey(s.LocationId))
+            .ToList();
+        var contract = ResolveDocumentContract(contracts, contractedSessions, contractCoverage);
         var hourlyRate = ResolveHourlyRate(rates, from);
 
-        if (hourlyRate <= 0 && sessions.Count > 0)
-            hourlyRate = ResolveHourlyRate(rates, sessions[0].StartAt);
+        if (hourlyRate <= 0 && contractedSessions.Count > 0)
+            hourlyRate = ResolveHourlyRate(rates, contractedSessions[0].StartAt);
 
         var model = new WorkHoursDocumentModel
         {
@@ -238,7 +237,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             Year = year,
             Month = month,
             HourlyRate = hourlyRate,
-            Rows = BuildWorkHourRows(sessions)
+            Rows = BuildWorkHourRows(contractedSessions)
         };
 
         return new TrainerWorkHoursDocumentDto
@@ -267,23 +266,105 @@ public class TrainerSettlementService : ITrainerSettlementService
         throw new UnauthorizedAccessException("You do not have access to this settlement.");
     }
 
-    private async Task<TrainerContract> ResolveContractForPeriodAsync(
+    private async Task<List<TrainerContract>> GetContractsForPeriodAsync(
         int trainerId,
         DateTime from,
         DateTime to)
     {
-        var contract = await _context.TrainerContracts
+        return await _context.TrainerContracts
+            .Include(c => c.ContractLocations)
+                .ThenInclude(cl => cl.Location)
             .Where(c =>
                 c.TrainerId == trainerId &&
                 c.IsActive &&
                 c.ValidFrom < to &&
                 (c.ValidTo == null || c.ValidTo >= from))
             .OrderByDescending(c => c.ValidFrom)
-            .FirstOrDefaultAsync();
+            .ThenByDescending(c => c.Id)
+            .ToListAsync();
+    }
 
-        return contract
-            ?? throw new InvalidOperationException(
+    private static TrainerContract ResolveDocumentContract(
+        List<TrainerContract> contracts,
+        List<Session> contractedSessions,
+        Dictionary<int, TrainerContract> contractCoverage)
+    {
+        if (contracts.Count == 0)
+        {
+            throw new InvalidOperationException(
                 "Trainer does not have an active contract for this settlement month.");
+        }
+
+        if (contractedSessions.Count == 0)
+        {
+            return contracts[0];
+        }
+
+        var contractsUsed = contractedSessions
+            .Select(s => contractCoverage[s.LocationId])
+            .DistinctBy(c => c.Id)
+            .ToList();
+
+        if (contractsUsed.Count > 1)
+        {
+            throw new InvalidOperationException(
+                "Work-hours document can only be generated when the month's contracted sessions belong to one contract.");
+        }
+
+        return contractsUsed[0];
+    }
+
+    private static Dictionary<int, TrainerContract> BuildContractLocationCoverage(
+        List<TrainerContract> contracts)
+    {
+        var result = new Dictionary<int, TrainerContract>();
+
+        foreach (var contract in contracts)
+        {
+            foreach (var contractLocation in contract.ContractLocations)
+            {
+                result.TryAdd(contractLocation.LocationId, contract);
+            }
+        }
+
+        return result;
+    }
+
+    private static List<TrainerSettlementItemDto> BuildSettlementItems(
+        List<Session> sessions,
+        List<TrainerRate> rates,
+        Dictionary<int, TrainerContract> contractCoverage)
+    {
+        var items = new List<TrainerSettlementItemDto>();
+
+        foreach (var session in sessions)
+        {
+            var sessionType = ResolveSettlementSessionType(session);
+            var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
+            var rate = ResolveHourlyRate(rates, session.StartAt);
+            var amount = hours * rate;
+            var isCovered = contractCoverage.TryGetValue(session.LocationId, out var contract);
+
+            items.Add(new TrainerSettlementItemDto
+            {
+                SessionId = session.Id,
+                StartAt = ToStudioDisplayDateTime(session.StartAt),
+                EndAt = ToStudioDisplayDateTime(session.EndAt),
+                Title = session.Title,
+                SessionType = sessionType,
+                LocationId = session.LocationId,
+                LocationName = session.Location.Name,
+                IsCoveredByContract = isCovered,
+                ContractId = contract?.Id,
+                ContractNumber = contract?.ContractNumber,
+                Hours = hours,
+                Rate = rate,
+                Amount = amount,
+                ParticipantsCount = session.ActualParticipantsCount ?? session.Participants.Count
+            });
+        }
+
+        return items;
     }
 
     private static List<WorkHoursDocumentRow> BuildWorkHourRows(List<Session> sessions)

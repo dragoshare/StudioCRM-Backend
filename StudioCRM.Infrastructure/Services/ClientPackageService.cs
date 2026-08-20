@@ -11,13 +11,16 @@ public class ClientPackageService : IClientPackageService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IStudioSettingsService _settingsService;
 
     public ClientPackageService(
         StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        IStudioSettingsService settingsService)
     {
         _context = context;
         _currentUser = currentUser;
+        _settingsService = settingsService;
     }
 
     public async Task<int> CreateAsync(CreateClientPackageRequest request)
@@ -63,6 +66,7 @@ public class ClientPackageService : IClientPackageService
             throw new InvalidOperationException("Client already has an active subscription cycle. Use subscription next-package endpoint to schedule package changes.");
 
         var now = DateTime.UtcNow;
+        var settings = await _settingsService.GetOwnerSettingsAsync();
 
         var clientPackage = new ClientPackage
         {
@@ -81,8 +85,12 @@ public class ClientPackageService : IClientPackageService
             ExpectedBillingType = request.ExpectedBillingType ?? package.BillingType,
             PaymentStatus = totalPrice <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = NormalizeDateTime(request.PurchaseDate, now),
-            ValidUntil = NormalizeNullableDateTime(request.ValidUntil) ?? now.Date.AddDays(45),
-            PaymentDueDate = totalPrice <= 0 ? null : NormalizeNullableDateTime(request.PaymentDueDate),
+            ValidUntil = NormalizeNullableDateTime(request.ValidUntil)
+                ?? now.Date.AddDays(settings.DefaultPackageValidityDays),
+            PaymentDueDate = totalPrice <= 0
+                ? null
+                : NormalizeNullableDateTime(request.PaymentDueDate)
+                    ?? now.Date.AddDays(settings.DefaultPaymentDueDays),
             PaidAt = totalPrice <= 0 ? now : null,
             ActivationMode = ClientPackageActivationMode.Immediately,
             RenewalSource = "Manual",

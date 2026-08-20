@@ -8,7 +8,7 @@ public class CreateSessionDto
 
     public DateTime StartAt { get; set; }
 
-    public DateTime EndAt { get; set; }
+    public DateTime? EndAt { get; set; }
 
     public int TrainerId { get; set; }
 

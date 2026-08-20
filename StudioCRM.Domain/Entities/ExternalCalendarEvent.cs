@@ -47,4 +47,6 @@ public class ExternalCalendarEvent
     public Session? Session { get; set; }
     public string? CategoriesJson { get; set; }
 
+    public string? CategoryColorsJson { get; set; }
+
 }

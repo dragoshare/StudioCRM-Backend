@@ -1,4 +1,6 @@
-﻿namespace StudioCRM.Application.DTOs.Sessions;
+using StudioCRM.Application.DTOs.Calendar;
+
+namespace StudioCRM.Application.DTOs.Sessions;
 
 public class SessionDto
 {
@@ -43,10 +45,18 @@ public class SessionDto
     public DateTime UpdatedAt { get; set; }
 
     public int? CreatedBy { get; set; }
+
     public int LocationParticipantsCount { get; set; }
+
     public int LocationLimit { get; set; } = 8;
+
     public bool IsLocationLimitExceeded { get; set; }
+
     public List<string> OutlookCategories { get; set; } = new();
 
+    public List<OutlookCategoryDto> OutlookCategoryColors { get; set; } = new();
+
     public string? PrimaryOutlookCategory { get; set; }
+
+    public string? PrimaryOutlookCategoryColor { get; set; }
 }

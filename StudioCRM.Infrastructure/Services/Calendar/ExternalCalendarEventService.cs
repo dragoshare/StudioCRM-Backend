@@ -54,6 +54,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             SeriesMasterId = x.SeriesMasterId,
             ImportedAt = x.ImportedAt,
             Categories = ReadStringList(x.CategoriesJson),
+            CategoryColors = ReadOutlookCategoryColors(x.CategoryColorsJson),
             Warnings = ReadWarnings(x.MappingWarningsJson)
         }).ToList();
     }
@@ -305,6 +306,22 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         catch
         {
             return new List<string>();
+        }
+    }
+
+    private static List<OutlookCategoryDto> ReadOutlookCategoryColors(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new List<OutlookCategoryDto>();
+
+        try
+        {
+            return JsonSerializer.Deserialize<List<OutlookCategoryDto>>(json)
+                ?? new List<OutlookCategoryDto>();
+        }
+        catch
+        {
+            return new List<OutlookCategoryDto>();
         }
     }
 

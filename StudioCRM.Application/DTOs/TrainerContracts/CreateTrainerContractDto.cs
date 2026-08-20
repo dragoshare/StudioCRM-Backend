@@ -12,5 +12,7 @@ public class CreateTrainerContractDto
 
     public DateTime? ValidTo { get; set; }
 
+    public List<int> LocationIds { get; set; } = new();
+
     public string? Notes { get; set; }
 }

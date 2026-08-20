@@ -10,5 +10,9 @@ public class ValidateInvitationDto
 
     public string LocationName { get; set; } = string.Empty;
 
+    public int? TrainerId { get; set; }
+
+    public string? TrainerName { get; set; }
+
     public DateTime ExpiresAt { get; set; }
 }

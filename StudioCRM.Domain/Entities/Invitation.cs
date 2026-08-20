@@ -12,6 +12,8 @@ public class Invitation
 
     public int LocationId { get; set; }
 
+    public int? TrainerId { get; set; }
+
     public DateTime ExpiresAt { get; set; }
 
     public bool IsAccepted { get; set; } = false;
@@ -29,4 +31,6 @@ public class Invitation
     public int CreatedBy { get; set; }
 
     public Location Location { get; set; } = null!;
+
+    public Trainer? Trainer { get; set; }
 }

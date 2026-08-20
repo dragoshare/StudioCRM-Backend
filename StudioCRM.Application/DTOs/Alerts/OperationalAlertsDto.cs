@@ -22,6 +22,10 @@ public class OperationalAlertDto
     public int? SessionId { get; set; }
     public int? PaymentId { get; set; }
     public int? InvitationId { get; set; }
+    public int? TrainerContractId { get; set; }
+    public int? SettlementId { get; set; }
+    public int? Year { get; set; }
+    public int? Month { get; set; }
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }
     public DateTime CreatedAt { get; set; }

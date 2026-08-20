@@ -12,6 +12,8 @@ public class UpdateTrainerContractDto
 
     public DateTime? ValidTo { get; set; }
 
+    public List<int> LocationIds { get; set; } = new();
+
     public string? Notes { get; set; }
 
     public bool IsActive { get; set; } = true;

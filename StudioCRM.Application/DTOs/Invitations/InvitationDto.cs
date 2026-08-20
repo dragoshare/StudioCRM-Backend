@@ -12,6 +12,10 @@ public class InvitationDto
 
     public string LocationName { get; set; } = string.Empty;
 
+    public int? TrainerId { get; set; }
+
+    public string? TrainerName { get; set; }
+
     public string Token { get; set; } = string.Empty;
 
     public string InviteLink { get; set; } = string.Empty;

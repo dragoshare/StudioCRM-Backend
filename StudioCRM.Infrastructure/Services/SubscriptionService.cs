@@ -10,15 +10,18 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class SubscriptionService : ISubscriptionService
 {
-    private const int DefaultPackageValidityDays = 45;
-
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IStudioSettingsService _settingsService;
 
-    public SubscriptionService(StudioCRMDbContext context, ICurrentUserService currentUser)
+    public SubscriptionService(
+        StudioCRMDbContext context,
+        ICurrentUserService currentUser,
+        IStudioSettingsService settingsService)
     {
         _context = context;
         _currentUser = currentUser;
+        _settingsService = settingsService;
     }
 
     public async Task<SubscriptionDto> GetCurrentClientSubscriptionAsync()
@@ -227,6 +230,7 @@ public class SubscriptionService : ISubscriptionService
         var balanceApplied = ResolveAppliedBalance(carryOverBalance, originalPrice);
         var amountToPay = Math.Max(0, originalPrice - balanceApplied);
         var now = DateTime.UtcNow;
+        var settings = await _settingsService.GetOwnerSettingsAsync();
 
         var nextCycle = new ClientPackage
         {
@@ -246,8 +250,8 @@ public class SubscriptionService : ISubscriptionService
             ExpectedBillingType = package.BillingType,
             PaymentStatus = amountToPay <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = now,
-            ValidUntil = now.Date.AddDays(DefaultPackageValidityDays),
-            PaymentDueDate = amountToPay <= 0 ? null : now.Date.AddDays(7),
+            ValidUntil = now.Date.AddDays(settings.DefaultPackageValidityDays),
+            PaymentDueDate = amountToPay <= 0 ? null : now.Date.AddDays(settings.DefaultPaymentDueDays),
             PaidAt = amountToPay <= 0 ? now : null,
             ActivatedAt = now,
             ActivatedByUserId = _currentUser.UserId,

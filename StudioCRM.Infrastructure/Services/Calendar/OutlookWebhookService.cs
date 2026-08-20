@@ -152,6 +152,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var attendeeEmails = ReadAttendeeEmails(root);
         var categories = ReadCategories(root);
+        var categoryColors = await ResolveCategoryColorsAsync(integration, categories);
 
         var resolvedLocationEmail = await ResolveLocationEmailAsync(
             attendeeEmails,
@@ -192,6 +193,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.EndAt = endAtValue;
         existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
         existing.CategoriesJson = JsonSerializer.Serialize(categories);
+        existing.CategoryColorsJson = JsonSerializer.Serialize(categoryColors);
         existing.SeriesMasterId = seriesMasterId;
         existing.IsRecurring = isRecurring;
         existing.ImportedAt = DateTime.UtcNow;
@@ -284,6 +286,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         }
 
         session.OutlookCategoriesJson = evt.CategoriesJson;
+        session.OutlookCategoryColorsJson = evt.CategoryColorsJson;
         session.PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson);
 
         await SyncSessionParticipantsFromOutlookAsync(session, evt);
@@ -630,6 +633,72 @@ public class OutlookWebhookService : IOutlookWebhookService
         return categories.Distinct().ToList();
     }
 
+    private async Task<List<OutlookCategoryColor>> ResolveCategoryColorsAsync(
+        CalendarIntegration integration,
+        List<string> categories)
+    {
+        if (categories.Count == 0)
+            return new List<OutlookCategoryColor>();
+
+        var masterCategoryColors = await ReadMasterCategoryColorsAsync(integration);
+
+        return categories
+            .Select(category => new OutlookCategoryColor
+            {
+                Name = category,
+                Color = masterCategoryColors.TryGetValue(category, out var color) ? color : null
+            })
+            .ToList();
+    }
+
+    private async Task<Dictionary<string, string>> ReadMasterCategoryColorsAsync(
+        CalendarIntegration integration)
+    {
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            "https://graph.microsoft.com/v1.0/me/outlook/masterCategories?$select=displayName,color");
+
+        request.Headers.Authorization =
+            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+
+        var response = await _httpClient.SendAsync(request);
+
+        if (!response.IsSuccessStatusCode)
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var body = await response.Content.ReadAsStringAsync();
+        using var doc = JsonDocument.Parse(body);
+
+        if (!doc.RootElement.TryGetProperty("value", out var value) ||
+            value.ValueKind != JsonValueKind.Array)
+        {
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        var result = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var category in value.EnumerateArray())
+        {
+            var displayName = category.TryGetProperty("displayName", out var displayNameElement)
+                ? displayNameElement.GetString()
+                : null;
+
+            var color = category.TryGetProperty("color", out var colorElement)
+                ? colorElement.GetString()
+                : null;
+
+            if (!string.IsNullOrWhiteSpace(displayName) &&
+                !string.IsNullOrWhiteSpace(color))
+            {
+                result[displayName.Trim()] = color.Trim();
+            }
+        }
+
+        return result;
+    }
+
     private static List<string> ReadAttendeeEmailsFromJson(string? attendeesJson)
     {
         if (string.IsNullOrWhiteSpace(attendeesJson))
@@ -751,5 +820,12 @@ public class OutlookWebhookService : IOutlookWebhookService
         }
 
         return TimeZoneInfo.Utc;
+    }
+
+    private sealed class OutlookCategoryColor
+    {
+        public string Name { get; set; } = string.Empty;
+
+        public string? Color { get; set; }
     }
 }

@@ -1,6 +1,7 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
+using StudioCRM.Application.DTOs.Calendar;
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces;
@@ -21,6 +22,7 @@ public class SessionService : ISessionService
     private readonly ISubscriptionService _subscriptionService;
     private readonly ISessionParticipantService _sessionParticipantService;
     private readonly IOutlookCalendarSyncService _outlookCalendarSyncService;
+    private readonly IStudioSettingsService _settingsService;
     private readonly ILogger<SessionService> _logger;
 
     public SessionService(
@@ -29,6 +31,7 @@ public class SessionService : ISessionService
         ISubscriptionService subscriptionService,
         ISessionParticipantService sessionParticipantService,
         IOutlookCalendarSyncService outlookCalendarSyncService,
+        IStudioSettingsService settingsService,
         ILogger<SessionService> logger)
     {
         _context = context;
@@ -36,6 +39,7 @@ public class SessionService : ISessionService
         _subscriptionService = subscriptionService;
         _sessionParticipantService = sessionParticipantService;
         _outlookCalendarSyncService = outlookCalendarSyncService;
+        _settingsService = settingsService;
         _logger = logger;
     }
 
@@ -108,7 +112,7 @@ public class SessionService : ISessionService
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
         var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
-        var normalizedEndAt = NormalizeStudioDateTime(request.EndAt);
+        var normalizedEndAt = await ResolveCreateSessionEndAtAsync(request.EndAt, normalizedStartAt);
         var requestedStatus = string.IsNullOrWhiteSpace(request.Status)
             ? "Planned"
             : request.Status;
@@ -123,12 +127,16 @@ public class SessionService : ISessionService
             request.LocationId,
             normalizedStartAt,
             normalizedEndAt,
-            request.Participants);
+            request.Participants,
+            excludedSessionId: null);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories);
+        var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
+            request.TrainerId,
+            outlookCategories);
 
         var title = string.IsNullOrWhiteSpace(request.Title)
             ? SessionTitleBuilder.Build(clients)
@@ -153,6 +161,7 @@ public class SessionService : ISessionService
                 Status = requestedStatus,
                 PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
+                OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors),
                 PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
@@ -239,12 +248,16 @@ public class SessionService : ISessionService
             request.LocationId,
             normalizedStartAt,
             normalizedEndAt,
-            request.Participants);
+            request.Participants,
+            excludedSessionId: id);
 
         var clients = await GetClientsForParticipantsAsync(request.Participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories);
+        var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
+            request.TrainerId,
+            outlookCategories);
 
         var transaction = requestedStatus == "Completed"
             ? await _context.Database.BeginTransactionAsync()
@@ -266,6 +279,7 @@ public class SessionService : ISessionService
             session.Status = requestedStatus;
             session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
             session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
+            session.OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors);
             session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
             session.UpdatedAt = DateTime.UtcNow;
 
@@ -739,7 +753,8 @@ public class SessionService : ISessionService
         int locationId,
         DateTime startAt,
         DateTime endAt,
-        List<CreateSessionParticipantDto> participants)
+        List<CreateSessionParticipantDto> participants,
+        int? excludedSessionId)
     {
         if (endAt <= startAt)
             throw new InvalidOperationException("End date must be later than start date.");
@@ -761,6 +776,33 @@ public class SessionService : ISessionService
         if (clientIds.Count != distinctClientIds.Count)
             throw new InvalidOperationException("Duplicated clients in session participants.");
 
+        if (distinctClientIds.Count > 4)
+            throw new InvalidOperationException("A trainer can run a session for at most four participants.");
+
+        var duplicateSlotSession = await _context.Sessions
+            .Where(s =>
+                s.TrainerId == trainerId &&
+                s.Status != "Cancelled" &&
+                s.StartAt == startAt &&
+                s.EndAt == endAt &&
+                (!excludedSessionId.HasValue || s.Id != excludedSessionId.Value))
+            .OrderBy(s => s.StartAt)
+            .Select(s => new
+            {
+                s.Id,
+                s.StartAt,
+                s.EndAt
+            })
+            .FirstOrDefaultAsync();
+
+        if (duplicateSlotSession is not null)
+        {
+            var start = ToStudioDisplayDateTime(duplicateSlotSession.StartAt);
+            var end = ToStudioDisplayDateTime(duplicateSlotSession.EndAt);
+
+            throw new InvalidOperationException(
+                $"Trainer already has a session in this exact time slot ({start:yyyy-MM-dd HH:mm}-{end:HH:mm}, session #{duplicateSlotSession.Id}). Add participants to the existing session instead of creating another one.");
+        }
     }
 
     private async Task<List<Client>> GetClientsForParticipantsAsync(List<CreateSessionParticipantDto> participants)
@@ -830,6 +872,15 @@ public class SessionService : ISessionService
                 })
                 .ToList()
         };
+    }
+
+    private async Task<DateTime> ResolveCreateSessionEndAtAsync(DateTime? endAt, DateTime normalizedStartAt)
+    {
+        if (endAt.HasValue)
+            return NormalizeStudioDateTime(endAt.Value);
+
+        var settings = await _settingsService.GetOwnerSettingsAsync();
+        return normalizedStartAt.AddMinutes(settings.DefaultSessionDurationMinutes);
     }
 
     private static CompleteSessionDto BuildCompletionRequest(UpdateSessionDto request)
@@ -979,6 +1030,13 @@ public class SessionService : ISessionService
             .OrderBy(p => p.Client.FirstName)
             .ThenBy(p => p.Client.LastName)
             .ToList();
+        var outlookCategories = ReadStringList(s.OutlookCategoriesJson);
+        var outlookCategoryColors = ReadOutlookCategoryColors(
+            s.OutlookCategoryColorsJson,
+            outlookCategories,
+            s.Trainer.OutlookCategoryName,
+            s.Trainer.OutlookCategoryColor);
+        var primaryOutlookCategory = s.PrimaryOutlookCategory ?? outlookCategories.FirstOrDefault();
 
         var locationParticipantsCount = await CountPeopleInLocationForTimeRangeAsync(
             s.LocationId,
@@ -1032,8 +1090,12 @@ public class SessionService : ISessionService
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,
             CreatedBy = s.CreatedBy,
-            OutlookCategories = ReadStringList(s.OutlookCategoriesJson),
-            PrimaryOutlookCategory = s.PrimaryOutlookCategory
+            OutlookCategories = outlookCategories,
+            OutlookCategoryColors = outlookCategoryColors,
+            PrimaryOutlookCategory = primaryOutlookCategory,
+            PrimaryOutlookCategoryColor = outlookCategoryColors
+                .FirstOrDefault(c => string.Equals(c.Name, primaryOutlookCategory, StringComparison.OrdinalIgnoreCase))
+                ?.Color
         };
     }
 
@@ -1061,6 +1123,15 @@ public class SessionService : ISessionService
             : JsonSerializer.Serialize(normalized);
     }
 
+    private static string? SerializeOutlookCategoryColors(List<OutlookCategoryDto>? categoryColors)
+    {
+        var normalized = NormalizeOutlookCategoryColors(categoryColors);
+
+        return normalized.Count == 0
+            ? null
+            : JsonSerializer.Serialize(normalized);
+    }
+
     private static string? GetPrimaryOutlookCategory(List<string>? categories)
     {
         return NormalizeOutlookCategories(categories).FirstOrDefault();
@@ -1073,6 +1144,61 @@ public class SessionService : ISessionService
             .Where(c => !string.IsNullOrWhiteSpace(c))
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList() ?? new List<string>();
+    }
+
+    private static List<OutlookCategoryDto> NormalizeOutlookCategoryColors(
+        List<OutlookCategoryDto>? categoryColors)
+    {
+        return categoryColors?
+            .Select(c => new OutlookCategoryDto
+            {
+                Name = c.Name.Trim(),
+                Color = string.IsNullOrWhiteSpace(c.Color) ? null : c.Color.Trim()
+            })
+            .Where(c => !string.IsNullOrWhiteSpace(c.Name))
+            .GroupBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(g => g.First())
+            .ToList() ?? new List<OutlookCategoryDto>();
+    }
+
+    private static List<OutlookCategoryDto> ReadOutlookCategoryColors(
+        string? json,
+        List<string> categories,
+        string? trainerCategoryName,
+        string? trainerCategoryColor)
+    {
+        var result = new List<OutlookCategoryDto>();
+
+        if (!string.IsNullOrWhiteSpace(json))
+        {
+            try
+            {
+                result = JsonSerializer.Deserialize<List<OutlookCategoryDto>>(json)
+                    ?? new List<OutlookCategoryDto>();
+            }
+            catch
+            {
+                result = new List<OutlookCategoryDto>();
+            }
+        }
+
+        result = NormalizeOutlookCategoryColors(result);
+
+        foreach (var category in categories)
+        {
+            if (result.Any(c => string.Equals(c.Name, category, StringComparison.OrdinalIgnoreCase)))
+                continue;
+
+            result.Add(new OutlookCategoryDto
+            {
+                Name = category,
+                Color = string.Equals(category, trainerCategoryName, StringComparison.OrdinalIgnoreCase)
+                    ? NormalizeOutlookCategoryColor(trainerCategoryColor)
+                    : null
+            });
+        }
+
+        return NormalizeOutlookCategoryColors(result);
     }
 
     private async Task<List<string>> ResolveOutlookCategoriesForTrainerAsync(
@@ -1092,6 +1218,40 @@ public class SessionService : ISessionService
         categories.AddRange(requestedCategories ?? new List<string>());
 
         return NormalizeOutlookCategories(categories);
+    }
+
+    private async Task<List<OutlookCategoryDto>> ResolveOutlookCategoryColorsForTrainerAsync(
+        int trainerId,
+        List<string> categories)
+    {
+        var trainerCategory = await _context.Trainers
+            .Where(t => t.Id == trainerId)
+            .Select(t => new
+            {
+                t.OutlookCategoryName,
+                t.OutlookCategoryColor
+            })
+            .FirstOrDefaultAsync();
+
+        return categories
+            .Select(category => new OutlookCategoryDto
+            {
+                Name = category,
+                Color = trainerCategory is not null &&
+                    string.Equals(category, trainerCategory.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
+                    ? NormalizeOutlookCategoryColor(trainerCategory.OutlookCategoryColor)
+                    : null
+            })
+            .ToList();
+    }
+
+    private static string? NormalizeOutlookCategoryColor(string? value)
+    {
+        var normalized = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(normalized)
+            ? null
+            : normalized;
     }
 
     private static DateTime ToStudioDisplayDateTime(DateTime value)
