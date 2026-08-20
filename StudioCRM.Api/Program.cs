@@ -264,7 +264,7 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<StudioCRMDbContext>();
     var seedDemoData = builder.Configuration.GetValue<bool?>("Seed:DemoData")
-        ?? app.Environment.IsDevelopment();
+        ?? false;
 
     await DataSeeder.SeedAsync(dbContext, seedDemoData);
 }
