@@ -29,11 +29,11 @@ public static class DataSeeder
         var passwordHasher = new PasswordHasher<User>();
 
         await SeedRolesAsync(context);
-        await EnsureOwnerTrainerProfilesAsync(context);
 
         if (!seedDemoData)
             return;
 
+        await EnsureOwnerTrainerProfilesAsync(context);
         await CleanupGeneratedDemoDataAsync(context);
         await SeedLocationsAsync(context);
         await SeedPackagesAsync(context);
