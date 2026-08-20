@@ -1,6 +1,7 @@
 ﻿using System.Collections.Generic;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.TrainerRates;
 using StudioCRM.Application.DTOs.TrainerContracts;
 using StudioCRM.Application.DTOs.TrainerSettlements;
@@ -119,6 +120,24 @@ public class TrainersController : ControllerBase
             var result = await _trainerContractService.UpdateAsync(id, contractId, request);
             return result is null ? NotFound() : Ok(result);
         });
+    }
+
+    [HttpDelete("{id:int}/contracts/{contractId:int}")]
+    public async Task<IActionResult> DeleteContract(int id, int contractId)
+    {
+        try
+        {
+            var deleted = await _trainerContractService.DeleteAsync(id, contractId);
+            return deleted ? NoContent() : NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateException)
+        {
+            return Conflict(new { message = "Contract could not be deleted because of a database conflict." });
+        }
     }
 
     [HttpGet("{id:int}/rates")]

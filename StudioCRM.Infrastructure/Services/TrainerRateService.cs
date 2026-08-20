@@ -47,11 +47,16 @@ public class TrainerRateService : ITrainerRateService
         var activeRates = await _context.TrainerRates
             .Where(r => r.TrainerId == trainerId && r.IsActive)
             .ToListAsync();
+        var hasAnyHourlyRate = await _context.TrainerRates
+            .AnyAsync(r => r.TrainerId == trainerId && r.SessionType == "Hourly");
+        var validFrom = hasAnyHourlyRate
+            ? now
+            : await ResolveInitialRateValidFromAsync(trainerId, now);
 
         foreach (var oldRate in activeRates)
         {
             oldRate.IsActive = false;
-            oldRate.ValidTo = now;
+            oldRate.ValidTo = validFrom;
             oldRate.UpdatedAt = now;
         }
 
@@ -60,7 +65,7 @@ public class TrainerRateService : ITrainerRateService
             TrainerId = trainerId,
             SessionType = "Hourly",
             Rate = request.HourlyRate!.Value,
-            ValidFrom = now,
+            ValidFrom = validFrom,
             IsActive = true,
             CreatedAt = now,
             UpdatedAt = now
@@ -71,6 +76,17 @@ public class TrainerRateService : ITrainerRateService
         await _context.SaveChangesAsync();
 
         return await GetByTrainerIdAsync(trainerId);
+    }
+
+    private async Task<DateTime> ResolveInitialRateValidFromAsync(int trainerId, DateTime fallback)
+    {
+        var firstSessionDate = await _context.Sessions
+            .Where(s => s.TrainerId == trainerId)
+            .OrderBy(s => s.StartAt)
+            .Select(s => (DateTime?)s.StartAt)
+            .FirstOrDefaultAsync();
+
+        return firstSessionDate ?? fallback;
     }
 
     private static void ValidateRates(UpdateTrainerRatesDto request)

@@ -534,6 +534,14 @@ public class TrainerSettlementService : ITrainerSettlementService
             .OrderByDescending(r => r.ValidFrom)
             .FirstOrDefault();
 
+        if (rate?.Rate > 0)
+            return rate.Rate;
+
+        rate = rates
+            .Where(r => r.SessionType == "Hourly" && r.IsActive && r.Rate > 0)
+            .OrderByDescending(r => r.ValidFrom)
+            .FirstOrDefault();
+
         return rate?.Rate ?? 0;
     }
 

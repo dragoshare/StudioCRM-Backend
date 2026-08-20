@@ -8,4 +8,5 @@ public interface ITrainerContractService
     Task<TrainerContractDto?> GetByIdAsync(int trainerId, int contractId);
     Task<TrainerContractDto> CreateAsync(int trainerId, CreateTrainerContractDto request);
     Task<TrainerContractDto?> UpdateAsync(int trainerId, int contractId, UpdateTrainerContractDto request);
+    Task<bool> DeleteAsync(int trainerId, int contractId);
 }

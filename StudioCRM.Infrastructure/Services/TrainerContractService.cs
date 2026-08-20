@@ -118,12 +118,53 @@ public class TrainerContractService : ITrainerContractService
         return MapContract(contract);
     }
 
+    public async Task<bool> DeleteAsync(int trainerId, int contractId)
+    {
+        var contract = await _context.TrainerContracts
+            .FirstOrDefaultAsync(c => c.Id == contractId && c.TrainerId == trainerId);
+
+        if (contract is null)
+            return false;
+
+        if (await HasPaidSettlementInContractPeriodAsync(contract))
+            throw new InvalidOperationException("Contract cannot be deleted because a paid trainer settlement exists in its validity period.");
+
+        _context.TrainerContracts.Remove(contract);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     private async Task EnsureTrainerExistsAsync(int trainerId)
     {
         var exists = await _context.Trainers.AnyAsync(t => t.Id == trainerId);
 
         if (!exists)
             throw new InvalidOperationException("Trainer does not exist.");
+    }
+
+    private async Task<bool> HasPaidSettlementInContractPeriodAsync(TrainerContract contract)
+    {
+        var paidSettlements = await _context.TrainerMonthlySettlements
+            .Where(s => s.TrainerId == contract.TrainerId && s.IsPaid)
+            .Select(s => new { s.Year, s.Month })
+            .ToListAsync();
+
+        var validFromMonth = ToYearMonth(contract.ValidFrom);
+        var validToMonth = contract.ValidTo.HasValue
+            ? ToYearMonth(contract.ValidTo.Value)
+            : int.MaxValue;
+
+        return paidSettlements.Any(s =>
+        {
+            var settlementMonth = (s.Year * 100) + s.Month;
+            return settlementMonth >= validFromMonth && settlementMonth <= validToMonth;
+        });
+    }
+
+    private static int ToYearMonth(DateTime value)
+    {
+        return (value.Year * 100) + value.Month;
     }
 
     private async Task EnsureNoOverlappingActiveContractAsync(
