@@ -152,7 +152,7 @@ public class AuthService : IAuthService
                 LastName = user.LastName,
                 Email = user.Email,
                 BillingStatus = "Pending",
-                Status = "New",
+                Status = "Inactive",
                 SubscriptionAutoRenewEnabled = true,
                 CreatedAt = now,
                 UpdatedAt = now

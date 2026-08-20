@@ -424,7 +424,7 @@ public class InvitationService : IInvitationService
             LastName = request.LastName,
             Email = invitation.Email,
             LocationId = invitation.LocationId,
-            Status = "New",
+            Status = "Inactive",
             BillingStatus = "Pending",
             SubscriptionAutoRenewEnabled = true,
             CreatedAt = DateTime.UtcNow,

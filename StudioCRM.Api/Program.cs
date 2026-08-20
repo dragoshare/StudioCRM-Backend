@@ -263,8 +263,8 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<StudioCRMDbContext>();
-    var seedDemoData = builder.Configuration.GetValue<bool?>("Seed:DemoData")
-        ?? false;
+    var seedDemoData = builder.Configuration.GetValue<bool>("Seed:DemoData") &&
+                       builder.Configuration["Seed:DemoDataConfirmation"] == "ALLOW_DEMO_SEED";
 
     await DataSeeder.SeedAsync(dbContext, seedDemoData);
 }

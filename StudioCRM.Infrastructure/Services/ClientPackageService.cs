@@ -152,6 +152,7 @@ public class ClientPackageService : IClientPackageService
 
         var client = await _context.Clients.FirstAsync(c => c.Id == clientId);
         client.ActivePackageId = clientPackage.PackageId;
+        client.Status = "Active";
         client.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();

@@ -445,6 +445,7 @@ public class ClientPaymentService : IClientPaymentService
 
         var client = await _context.Clients.FirstAsync(c => c.Id == clientPackage.ClientId);
         client.ActivePackageId = clientPackage.PackageId;
+        client.Status = "Active";
         client.UpdatedAt = DateTime.UtcNow;
     }
 

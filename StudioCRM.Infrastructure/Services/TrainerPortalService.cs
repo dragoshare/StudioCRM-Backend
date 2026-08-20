@@ -143,6 +143,8 @@ public class TrainerPortalService : ITrainerPortalService
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
 
+        await EnsureActivePackageMatchesLocationAsync(client.Id, request.LocationId);
+
         client.FirstName = request.FirstName;
         client.LastName = request.LastName;
         client.Email = request.Email;
@@ -150,7 +152,7 @@ public class TrainerPortalService : ITrainerPortalService
         client.Goal = request.Goal;
         client.Notes = request.Notes;
         client.BillingStatus = request.BillingStatus;
-        client.Status = request.Status;
+        client.Status = await ResolveClientStatusAsync(client.Id);
         client.LocationId = request.LocationId;
         client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
         client.UpdatedAt = DateTime.UtcNow;
@@ -552,5 +554,26 @@ public class TrainerPortalService : ITrainerPortalService
                     ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
                     : null
             });
+    }
+
+    private async Task<string> ResolveClientStatusAsync(int clientId)
+    {
+        var hasActivePackage = await _context.ClientPackages
+            .AnyAsync(cp => cp.ClientId == clientId && cp.IsActive);
+
+        return hasActivePackage ? "Active" : "Inactive";
+    }
+
+    private async Task EnsureActivePackageMatchesLocationAsync(int clientId, int locationId)
+    {
+        var hasMismatchedActivePackage = await _context.ClientPackages
+            .AnyAsync(cp =>
+                cp.ClientId == clientId &&
+                cp.IsActive &&
+                cp.Package.LocationId.HasValue &&
+                cp.Package.LocationId.Value != locationId);
+
+        if (hasMismatchedActivePackage)
+            throw new InvalidOperationException("Client has an active package from another location. Change the package before changing the client's location.");
     }
 }

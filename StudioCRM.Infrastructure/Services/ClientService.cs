@@ -69,7 +69,7 @@ public class ClientService : IClientService
             Goal = request.Goal,
             Notes = request.Notes,
             BillingStatus = request.BillingStatus ?? "Pending",
-            Status = request.Status ?? "New",
+            Status = "Inactive",
             NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -167,6 +167,8 @@ public class ClientService : IClientService
         if (client is null)
             return null;
 
+        await EnsureActivePackageMatchesLocationAsync(client.Id, request.LocationId);
+
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             if (!_currentUser.UserId.HasValue)
@@ -193,7 +195,7 @@ public class ClientService : IClientService
         client.Goal = request.Goal;
         client.Notes = request.Notes;
         client.BillingStatus = request.BillingStatus;
-        client.Status = request.Status;
+        client.Status = await ResolveClientStatusAsync(client.Id);
         client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
         client.UpdatedAt = DateTime.UtcNow;
 
@@ -218,6 +220,7 @@ public class ClientService : IClientService
 
         client.IsDeleted = true;
         client.DeletedAt = DateTime.UtcNow;
+        client.Status = "Inactive";
         client.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -262,6 +265,7 @@ public class ClientService : IClientService
 
         client.IsDeleted = false;
         client.DeletedAt = null;
+        client.Status = await ResolveClientStatusAsync(client.Id);
         client.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -487,6 +491,27 @@ public class ClientService : IClientService
         }
 
         return query.Where(c => false);
+    }
+
+    private async Task<string> ResolveClientStatusAsync(int clientId)
+    {
+        var hasActivePackage = await _context.ClientPackages
+            .AnyAsync(cp => cp.ClientId == clientId && cp.IsActive);
+
+        return hasActivePackage ? "Active" : "Inactive";
+    }
+
+    private async Task EnsureActivePackageMatchesLocationAsync(int clientId, int locationId)
+    {
+        var hasMismatchedActivePackage = await _context.ClientPackages
+            .AnyAsync(cp =>
+                cp.ClientId == clientId &&
+                cp.IsActive &&
+                cp.Package.LocationId.HasValue &&
+                cp.Package.LocationId.Value != locationId);
+
+        if (hasMismatchedActivePackage)
+            throw new InvalidOperationException("Client has an active package from another location. Change the package before changing the client's location.");
     }
 
     private async Task<ClientDto> GetProjectedById(int id)
