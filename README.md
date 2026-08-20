@@ -6,7 +6,7 @@ Backend for StudioCRM - CRM system for training studios.
 
 - ASP.NET Core Web API
 - Entity Framework Core
-- SQL Server
+- Postgres SQL
 - Clean Architecture
 
 ## Project structure
