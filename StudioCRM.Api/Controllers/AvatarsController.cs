@@ -20,7 +20,7 @@ public class AvatarsController : ControllerBase
     [HttpPost("me")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadMyAvatar(
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken cancellationToken)
     {
         if (file is null)
@@ -50,7 +50,7 @@ public class AvatarsController : ControllerBase
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadClientAvatar(
         int clientId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken cancellationToken)
     {
         if (file is null)
@@ -84,7 +84,7 @@ public class AvatarsController : ControllerBase
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadTrainerAvatar(
         int trainerId,
-        [FromForm] IFormFile file,
+        IFormFile file,
         CancellationToken cancellationToken)
     {
         if (file is null)
