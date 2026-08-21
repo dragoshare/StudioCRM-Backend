@@ -41,14 +41,30 @@ public class InvitationsController : ControllerBase
     [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<List<InvitationDto>>> GetAll([FromQuery] InvitationFilterDto filter)
     {
-        return Ok(await _invitationService.GetAllAsync(filter));
+        try
+        {
+            return Ok(await _invitationService.GetAllAsync(filter));
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Invitation list could not be loaded because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
+        }
     }
 
     [HttpGet("{id:int}")]
     [Authorize(Roles = "Owner,Trainer")]
     public async Task<ActionResult<InvitationDto>> GetById(int id)
     {
-        var result = await _invitationService.GetByIdAsync(id);
+        InvitationDto? result;
+
+        try
+        {
+            result = await _invitationService.GetByIdAsync(id);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Invitation could not be loaded because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
+        }
 
         if (result is null)
             return NotFound();
@@ -113,7 +129,16 @@ public class InvitationsController : ControllerBase
     [AllowAnonymous]
     public async Task<ActionResult<ValidateInvitationDto>> Validate([FromQuery] string token)
     {
-        var result = await _invitationService.ValidateAsync(token);
+        ValidateInvitationDto? result;
+
+        try
+        {
+            result = await _invitationService.ValidateAsync(token);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Invitation could not be validated because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
+        }
 
         if (result is null)
             return NotFound(new { message = "Invitation is invalid or expired." });

@@ -1,5 +1,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using StudioCRM.Application.DTOs.Alerts;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
@@ -110,15 +112,29 @@ public class TrainerPortalController : ControllerBase
     [HttpGet("invitations")]
     public async Task<ActionResult<List<InvitationDto>>> GetInvitations([FromQuery] InvitationFilterDto filter)
     {
-        filter.Role = "Client";
-        return Ok(await _invitationService.GetAllAsync(filter));
+        try
+        {
+            filter.Role = "Client";
+            return Ok(await _invitationService.GetAllAsync(filter));
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Invitation list could not be loaded because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
+        }
     }
 
     [HttpGet("invitations/{id:int}")]
     public async Task<ActionResult<InvitationDto>> GetInvitation(int id)
     {
-        var result = await _invitationService.GetByIdAsync(id);
-        return result is null ? NotFound() : Ok(result);
+        try
+        {
+            var result = await _invitationService.GetByIdAsync(id);
+            return result is null ? NotFound() : Ok(result);
+        }
+        catch (PostgresException ex) when (ex.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Invitation could not be loaded because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
+        }
     }
 
     [HttpPost("invitations")]
@@ -396,6 +412,11 @@ public class TrainerPortalController : ControllerBase
         catch (InvalidOperationException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException postgresException &&
+                                          postgresException.SqlState == PostgresErrorCodes.UndefinedColumn)
+        {
+            return Conflict(new { message = "Request could not be saved because the database schema is not up to date. Wait for the latest deploy to finish and try again." });
         }
     }
 }
