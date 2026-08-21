@@ -13,6 +13,8 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class InvitationService : IInvitationService
 {
+    private const int LastSendErrorMaxLength = 2000;
+
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly PasswordHasher<User> _passwordHasher;
@@ -488,7 +490,7 @@ public class InvitationService : IInvitationService
         }
         catch (Exception ex)
         {
-            invitation.LastSendError = ex.Message;
+            invitation.LastSendError = TruncateLastSendError(ex.Message);
             await _context.SaveChangesAsync();
 
             throw new InvalidOperationException(
@@ -542,5 +544,13 @@ public class InvitationService : IInvitationService
             .Replace("+", "-")
             .Replace("/", "_")
             .Replace("=", "");
+    }
+
+    private static string TruncateLastSendError(string message)
+    {
+        if (message.Length <= LastSendErrorMaxLength)
+            return message;
+
+        return message[..LastSendErrorMaxLength];
     }
 }

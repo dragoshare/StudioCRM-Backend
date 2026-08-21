@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using StudioCRM.Application.DTOs.Invitations;
 using StudioCRM.Application.Interfaces;
 
@@ -30,9 +31,9 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            return Conflict(new { message = "Invitation could not be saved because of a database conflict." });
+            return Conflict(new { message = GetDatabaseConflictMessage(ex, "saved") });
         }
     }
 
@@ -72,9 +73,9 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            return Conflict(new { message = "Invitation could not be resent because of a database conflict." });
+            return Conflict(new { message = GetDatabaseConflictMessage(ex, "resent") });
         }
     }
 
@@ -95,9 +96,9 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            return Conflict(new { message = "Invitation could not be cancelled because of a database conflict." });
+            return Conflict(new { message = GetDatabaseConflictMessage(ex, "cancelled") });
         }
     }
 
@@ -137,9 +138,28 @@ public class InvitationsController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex)
         {
-            return Conflict(new { message = "Invitation could not be accepted because of a database conflict." });
+            return Conflict(new { message = GetDatabaseConflictMessage(ex, "accepted") });
         }
+    }
+
+    private static string GetDatabaseConflictMessage(DbUpdateException exception, string action)
+    {
+        if (exception.InnerException is PostgresException postgresException)
+        {
+            return postgresException.SqlState switch
+            {
+                PostgresErrorCodes.UndefinedColumn =>
+                    "Invitation could not be saved because the database schema is not up to date. Wait for the latest deploy to finish and try again.",
+                PostgresErrorCodes.ForeignKeyViolation =>
+                    "Invitation could not be saved because the selected location or trainer no longer exists. Refresh the page and try again.",
+                PostgresErrorCodes.UniqueViolation =>
+                    "Invitation could not be saved because of a duplicate database value. Try again.",
+                _ => $"Invitation could not be {action} because of a database conflict."
+            };
+        }
+
+        return $"Invitation could not be {action} because of a database conflict.";
     }
 }
