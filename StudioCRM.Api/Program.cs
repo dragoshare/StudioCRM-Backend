@@ -16,7 +16,9 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Infrastructure.Services.Calendar;
 using StudioCRM.Infrastructure.Services.Mail;
+using StudioCRM.Infrastructure.Services.Storage;
 using StudioCRM.Application.ClientPackages.Services;
+using StudioCRM.Application.Interfaces.Storage;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -34,6 +36,8 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
+builder.Services.Configure<CloudflareR2Settings>(
+    builder.Configuration.GetSection("CloudflareR2"));
 // Database
 var connectionString = builder.Configuration.GetConnectionString(connectionName)
     ?? throw new InvalidOperationException($"Connection string '{connectionName}' is not configured.");
@@ -66,6 +70,8 @@ builder.Services.AddScoped<IOperationalAlertService, OperationalAlertService>();
 builder.Services.AddScoped<IStudioSettingsService, StudioSettingsService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
 builder.Services.AddScoped<ISessionAutoCompletionService, SessionAutoCompletionService>();
+builder.Services.AddScoped<ITrainingPlanFileService, TrainingPlanFileService>();
+builder.Services.AddHttpClient<IObjectStorageService, CloudflareR2ObjectStorageService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddAuthentication(options =>

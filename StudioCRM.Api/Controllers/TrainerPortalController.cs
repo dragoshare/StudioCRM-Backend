@@ -29,6 +29,7 @@ public class TrainerPortalController : ControllerBase
     private readonly IOperationalAlertService _operationalAlertService;
     private readonly ISessionParticipantService _sessionParticipantService;
     private readonly ISessionService _sessionService;
+    private readonly ITrainingPlanFileService _trainingPlanFileService;
 
     public TrainerPortalController(
         ITrainerPortalService trainerPortalService,
@@ -38,7 +39,8 @@ public class TrainerPortalController : ControllerBase
         IInvitationService invitationService,
         IOperationalAlertService operationalAlertService,
         ISessionParticipantService sessionParticipantService,
-        ISessionService sessionService)
+        ISessionService sessionService,
+        ITrainingPlanFileService trainingPlanFileService)
     {
         _trainerPortalService = trainerPortalService;
         _clientPaymentService = clientPaymentService;
@@ -48,6 +50,7 @@ public class TrainerPortalController : ControllerBase
         _operationalAlertService = operationalAlertService;
         _sessionParticipantService = sessionParticipantService;
         _sessionService = sessionService;
+        _trainingPlanFileService = trainingPlanFileService;
     }
 
     [HttpGet("me")]
@@ -227,6 +230,54 @@ public class TrainerPortalController : ControllerBase
     {
         return await HandleAsync<TrainingPlanDto>(async () =>
             Ok(await _subscriptionService.UpdateTrainingPlanAsync(clientId, request)));
+    }
+
+    [HttpPost("clients/{clientId:int}/training-plan/file")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<TrainingPlanDto>> UploadClientTrainingPlanFile(
+        int clientId,
+        [FromForm] IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Training plan file is required." });
+
+        return await HandleAsync<TrainingPlanDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _trainingPlanFileService.UploadAsync(
+                clientId,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [HttpGet("clients/{clientId:int}/training-plan/file")]
+    public async Task<IActionResult> DownloadClientTrainingPlanFile(
+        int clientId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var file = await _trainingPlanFileService.DownloadAsync(clientId, cancellationToken);
+            return File(file.Content, file.ContentType, file.FileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [HttpDelete("clients/{clientId:int}/training-plan/file")]
+    public async Task<ActionResult<TrainingPlanDto>> DeleteClientTrainingPlanFile(
+        int clientId,
+        CancellationToken cancellationToken)
+    {
+        return await HandleAsync<TrainingPlanDto>(async () =>
+            Ok(await _trainingPlanFileService.DeleteAsync(clientId, cancellationToken)));
     }
 
     [HttpPost("clients/{clientId:int}/packages")]
