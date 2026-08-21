@@ -21,7 +21,6 @@ public class ClientPortalController : ControllerBase
     private readonly IClientPaymentService _clientPaymentService;
     private readonly IMilestoneService _milestoneService;
     private readonly ISubscriptionService _subscriptionService;
-    private readonly ITrainingPlanFileService _trainingPlanFileService;
     private readonly StudioCRMDbContext _context;
 
     public ClientPortalController(
@@ -29,14 +28,12 @@ public class ClientPortalController : ControllerBase
     IClientPaymentService clientPaymentService,
     IMilestoneService milestoneService,
     ISubscriptionService subscriptionService,
-    ITrainingPlanFileService trainingPlanFileService,
     StudioCRMDbContext context)
     {
         _clientPortalService = clientPortalService;
         _clientPaymentService = clientPaymentService;
         _milestoneService = milestoneService;
         _subscriptionService = subscriptionService;
-        _trainingPlanFileService = trainingPlanFileService;
         _context = context;
     }
 
@@ -125,20 +122,6 @@ public class ClientPortalController : ControllerBase
     {
         return await HandleAsync<TrainingPlanDto>(async () =>
             Ok(await _subscriptionService.GetCurrentClientTrainingPlanAsync()));
-    }
-
-    [HttpGet("training-plan/file")]
-    public async Task<IActionResult> DownloadTrainingPlanFile(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var file = await _trainingPlanFileService.DownloadCurrentClientAsync(cancellationToken);
-            return File(file.Content, file.ContentType, file.FileName);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
     }
 
     [HttpGet("billing")]

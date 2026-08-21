@@ -8,5 +8,5 @@ public class CloudflareR2Settings
     public string SecretAccessKey { get; set; } = string.Empty;
     public string BucketName { get; set; } = string.Empty;
     public string PublicBaseUrl { get; set; } = string.Empty;
-    public int MaxTrainingPlanFileSizeMb { get; set; } = 20;
+    public int MaxAvatarFileSizeMb { get; set; } = 5;
 }

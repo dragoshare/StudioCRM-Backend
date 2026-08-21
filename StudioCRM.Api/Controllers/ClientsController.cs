@@ -16,18 +16,15 @@ public class ClientsController : ControllerBase
     private readonly IClientService _clientService;
     private readonly ISubscriptionService _subscriptionService;
     private readonly IClientPaymentService _clientPaymentService;
-    private readonly ITrainingPlanFileService _trainingPlanFileService;
 
     public ClientsController(
         IClientService clientService,
         ISubscriptionService subscriptionService,
-        IClientPaymentService clientPaymentService,
-        ITrainingPlanFileService trainingPlanFileService)
+        IClientPaymentService clientPaymentService)
     {
         _clientService = clientService;
         _subscriptionService = subscriptionService;
         _clientPaymentService = clientPaymentService;
-        _trainingPlanFileService = trainingPlanFileService;
     }
 
     [HttpGet]
@@ -179,54 +176,6 @@ public class ClientsController : ControllerBase
     {
         return await HandleAsync<TrainingPlanDto>(async () =>
             Ok(await _subscriptionService.UpdateTrainingPlanAsync(id, request)));
-    }
-
-    [HttpPost("{id:int}/training-plan/file")]
-    [Consumes("multipart/form-data")]
-    public async Task<ActionResult<TrainingPlanDto>> UploadTrainingPlanFile(
-        int id,
-        [FromForm] IFormFile file,
-        CancellationToken cancellationToken)
-    {
-        if (file is null)
-            return BadRequest(new { message = "Training plan file is required." });
-
-        return await HandleAsync<TrainingPlanDto>(async () =>
-        {
-            await using var stream = file.OpenReadStream();
-            return Ok(await _trainingPlanFileService.UploadAsync(
-                id,
-                stream,
-                file.FileName,
-                file.ContentType,
-                file.Length,
-                cancellationToken));
-        });
-    }
-
-    [HttpGet("{id:int}/training-plan/file")]
-    public async Task<IActionResult> DownloadTrainingPlanFile(
-        int id,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            var file = await _trainingPlanFileService.DownloadAsync(id, cancellationToken);
-            return File(file.Content, file.ContentType, file.FileName);
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
-    }
-
-    [HttpDelete("{id:int}/training-plan/file")]
-    public async Task<ActionResult<TrainingPlanDto>> DeleteTrainingPlanFile(
-        int id,
-        CancellationToken cancellationToken)
-    {
-        return await HandleAsync<TrainingPlanDto>(async () =>
-            Ok(await _trainingPlanFileService.DeleteAsync(id, cancellationToken)));
     }
 
     [HttpGet("deleted")]
