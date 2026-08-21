@@ -6,7 +6,7 @@ namespace StudioCRM.Application.Interfaces;
 public interface IPackageService
 {
     Task<PackageDto> CreateAsync(CreatePackageDto request);
-    Task<List<PackageDto>> GetAllAsync();
+    Task<List<PackageDto>> GetAllAsync(int? locationId = null);
     Task<PackageDto?> GetByIdAsync(int id);
     Task<PackageDto?> UpdateAsync(int id, UpdatePackageDto request);
     Task<bool> DeleteAsync(int id);

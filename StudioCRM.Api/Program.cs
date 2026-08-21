@@ -246,15 +246,18 @@ app.MapMethods(
         CancellationToken cancellationToken) =>
     {
         var result = await sessionAutoCompletionService.CompleteFinishedSessionsAsync(cancellationToken);
-
-        return Results.Ok(new
+        var response = new
         {
             message = "Session auto-completion checked",
             completed = result.CompletedCount,
             skipped = result.SkippedCount,
             failed = result.FailedCount,
             utcNow = DateTime.UtcNow
-        });
+        };
+
+        return result.FailedCount > 0
+            ? Results.Json(response, statusCode: StatusCodes.Status500InternalServerError)
+            : Results.Ok(response);
     });
 
 app.MapControllers();

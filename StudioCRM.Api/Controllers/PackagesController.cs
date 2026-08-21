@@ -21,9 +21,9 @@ public class PackagesController : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = "Owner,Trainer")]
-    public async Task<ActionResult<List<PackageDto>>> GetAll()
+    public async Task<ActionResult<List<PackageDto>>> GetAll([FromQuery] int? locationId)
     {
-        return Ok(await _packageService.GetAllAsync());
+        return Ok(await _packageService.GetAllAsync(locationId));
     }
 
     [HttpGet("{id:int}")]

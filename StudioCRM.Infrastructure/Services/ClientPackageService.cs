@@ -160,6 +160,65 @@ public class ClientPackageService : IClientPackageService
         return true;
     }
 
+    public async Task<bool> DeleteAsync(int clientId, int clientPackageId)
+    {
+        var clientPackage = await _context.ClientPackages
+            .Include(cp => cp.Client)
+            .FirstOrDefaultAsync(cp => cp.Id == clientPackageId && cp.ClientId == clientId);
+
+        if (clientPackage is null)
+            return false;
+
+        await EnsureStaffAccessToClientAsync(clientId);
+
+        var hasPayments = await _context.ClientPayments
+            .AnyAsync(p => p.ClientPackageId == clientPackageId);
+
+        if (hasPayments || clientPackage.AmountPaid > 0)
+            throw new InvalidOperationException("Client package cannot be deleted because it has payment history.");
+
+        var hasBalanceTransactions = await _context.ClientBalanceTransactions
+            .AnyAsync(t => t.ClientPackageId == clientPackageId);
+
+        if (hasBalanceTransactions)
+            throw new InvalidOperationException("Client package cannot be deleted because it has balance transaction history.");
+
+        var hasCountedSessions = clientPackage.UsedSessions > 0 ||
+            await _context.SessionParticipants.AnyAsync(p =>
+                p.ClientPackageId == clientPackageId &&
+                p.IsCountedFromPackage);
+
+        if (hasCountedSessions)
+            throw new InvalidOperationException("Client package cannot be deleted because sessions have already been counted from it.");
+
+        var linkedParticipants = await _context.SessionParticipants
+            .Where(p => p.ClientPackageId == clientPackageId)
+            .ToListAsync();
+
+        foreach (var participant in linkedParticipants)
+        {
+            participant.ClientPackageId = null;
+            participant.PackageId = null;
+            participant.PlannedBillingType = null;
+            participant.ExpectedUnitPrice = null;
+            participant.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var client = clientPackage.Client;
+        if (clientPackage.IsActive)
+        {
+            client.ActivePackageId = null;
+            client.BillingStatus = "Pending";
+            client.Status = "Inactive";
+            client.UpdatedAt = DateTime.UtcNow;
+        }
+
+        _context.ClientPackages.Remove(clientPackage);
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
     private async Task EnsureStaffAccessToClientAsync(int clientId)
     {
         if (_currentUser.IsOwner)

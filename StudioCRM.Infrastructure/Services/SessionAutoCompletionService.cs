@@ -61,7 +61,7 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
 
             try
             {
-                var completed = await _sessionParticipantService.CompleteSessionAsync(sessionId, request);
+                var completed = await _sessionParticipantService.CompleteSessionAutomaticallyAsync(sessionId, request);
 
                 if (completed)
                     result.CompletedCount++;

@@ -48,6 +48,27 @@ public class ClientPackagesController : ControllerBase
         }
     }
 
+    [HttpDelete("clients/{clientId:int}/packages/{clientPackageId:int}")]
+    public async Task<IActionResult> Delete(int clientId, int clientPackageId)
+    {
+        try
+        {
+            var deleted = await _clientPackageService.DeleteAsync(clientId, clientPackageId);
+
+            if (!deleted)
+                return NotFound();
+
+            return NoContent();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
+    }
+
     private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)
     {
         try

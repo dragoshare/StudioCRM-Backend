@@ -133,6 +133,19 @@ public class SessionParticipantService : ISessionParticipantService
 
     public async Task<bool> CompleteSessionAsync(int sessionId, CompleteSessionDto request)
     {
+        return await CompleteSessionAsync(sessionId, request, skipUserAccessCheck: false);
+    }
+
+    public async Task<bool> CompleteSessionAutomaticallyAsync(int sessionId, CompleteSessionDto request)
+    {
+        return await CompleteSessionAsync(sessionId, request, skipUserAccessCheck: true);
+    }
+
+    private async Task<bool> CompleteSessionAsync(
+        int sessionId,
+        CompleteSessionDto request,
+        bool skipUserAccessCheck)
+    {
         var session = await _context.Sessions
             .Include(s => s.Participants)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
@@ -140,7 +153,10 @@ public class SessionParticipantService : ISessionParticipantService
         if (session is null)
             return false;
 
-        await EnsureCurrentUserCanManageSessionAsync(session);
+        if (!skipUserAccessCheck)
+        {
+            await EnsureCurrentUserCanManageSessionAsync(session);
+        }
 
         await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
 

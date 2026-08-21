@@ -11,4 +11,6 @@ public interface ISessionParticipantService
     Task<bool> RemoveParticipantAsync(int sessionId, int participantId);
 
     Task<bool> CompleteSessionAsync(int sessionId, CompleteSessionDto request);
+
+    Task<bool> CompleteSessionAutomaticallyAsync(int sessionId, CompleteSessionDto request);
 }

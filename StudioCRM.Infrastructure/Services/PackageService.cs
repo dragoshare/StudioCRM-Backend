@@ -53,10 +53,18 @@ public class PackageService : IPackageService
         return MapToDto(package);
     }
 
-    public async Task<List<PackageDto>> GetAllAsync()
+    public async Task<List<PackageDto>> GetAllAsync(int? locationId = null)
     {
-        return await _context.Packages
+        var query = _context.Packages
             .Include(p => p.Location)
+            .AsQueryable();
+
+        if (locationId.HasValue)
+        {
+            query = query.Where(p => p.LocationId == locationId.Value);
+        }
+
+        return await query
             .OrderByDescending(p => p.CreatedAt)
             .Select(p => MapToDto(p))
             .ToListAsync();

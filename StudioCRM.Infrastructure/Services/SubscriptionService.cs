@@ -44,11 +44,14 @@ public class SubscriptionService : ISubscriptionService
         if (client is null)
             throw new InvalidOperationException("Client not found.");
 
-        var packageExists = await _context.Packages
-            .AnyAsync(p => p.Id == request.PackageId && !p.IsDeleted && p.IsActive);
+        var nextPackage = await _context.Packages
+            .FirstOrDefaultAsync(p => p.Id == request.PackageId && !p.IsDeleted && p.IsActive);
 
-        if (!packageExists)
+        if (nextPackage is null)
             throw new InvalidOperationException("Package does not exist or is inactive.");
+
+        if (nextPackage.LocationId.HasValue && nextPackage.LocationId.Value != client.LocationId)
+            throw new InvalidOperationException("Package is not available for this client's location.");
 
         client.NextPackageId = request.PackageId;
         client.SubscriptionAutoRenewEnabled = true;
