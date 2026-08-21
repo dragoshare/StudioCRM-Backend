@@ -65,7 +65,6 @@ public class ClientPortalService : IClientPortalService
         {
             client.User.FirstName = client.FirstName;
             client.User.LastName = client.LastName;
-            client.User.AvatarUrl = request.AvatarUrl;
             client.User.UpdatedAt = DateTime.UtcNow;
         }
 

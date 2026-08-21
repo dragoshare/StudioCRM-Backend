@@ -63,7 +63,6 @@ public class TrainerPortalService : ITrainerPortalService
 
         trainer.User.FirstName = request.FirstName.Trim();
         trainer.User.LastName = request.LastName.Trim();
-        trainer.User.AvatarUrl = request.AvatarUrl;
         trainer.User.UpdatedAt = DateTime.UtcNow;
         trainer.Phone = request.Phone;
         trainer.Bio = request.Bio;
@@ -161,7 +160,6 @@ public class TrainerPortalService : ITrainerPortalService
         {
             client.User.FirstName = client.FirstName;
             client.User.LastName = client.LastName;
-            client.User.AvatarUrl = request.AvatarUrl;
             client.User.UpdatedAt = DateTime.UtcNow;
         }
 

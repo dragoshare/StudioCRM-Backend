@@ -6,6 +6,7 @@ using StudioCRM.Application.DTOs.TrainerRates;
 using StudioCRM.Application.DTOs.TrainerContracts;
 using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.DTOs.Trainers;
+using StudioCRM.Application.DTOs.Profiles;
 using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Api.Controllers;
@@ -19,17 +20,20 @@ public class TrainersController : ControllerBase
     private readonly ITrainerRateService _trainerRateService;
     private readonly ITrainerSettlementService _trainerSettlementService;
     private readonly ITrainerContractService _trainerContractService;
+    private readonly IAvatarService _avatarService;
 
     public TrainersController(
         ITrainerService trainerService,
         ITrainerRateService trainerRateService,
         ITrainerSettlementService trainerSettlementService,
-        ITrainerContractService trainerContractService)
+        ITrainerContractService trainerContractService,
+        IAvatarService avatarService)
     {
         _trainerService = trainerService;
         _trainerRateService = trainerRateService;
         _trainerSettlementService = trainerSettlementService;
         _trainerContractService = trainerContractService;
+        _avatarService = avatarService;
     }
 
     [HttpGet]
@@ -59,6 +63,38 @@ public class TrainersController : ControllerBase
         var result = await _trainerService.UpdateAsync(id, request);
         if (result is null) return NotFound();
         return Ok(result);
+    }
+
+    [HttpPost("{id:int}/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AvatarDto>> UploadAvatar(
+        int id,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Avatar file is required." });
+
+        return await HandleAsync<AvatarDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _avatarService.UploadTrainerAvatarAsync(
+                id,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [HttpDelete("{id:int}/avatar")]
+    public async Task<ActionResult<AvatarDto>> DeleteAvatar(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        return await HandleAsync<AvatarDto>(async () =>
+            Ok(await _avatarService.DeleteTrainerAvatarAsync(id, cancellationToken)));
     }
 
     [HttpPost("{id:int}/deactivate")]

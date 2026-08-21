@@ -31,6 +31,7 @@ public class TrainerPortalController : ControllerBase
     private readonly IOperationalAlertService _operationalAlertService;
     private readonly ISessionParticipantService _sessionParticipantService;
     private readonly ISessionService _sessionService;
+    private readonly IAvatarService _avatarService;
 
     public TrainerPortalController(
         ITrainerPortalService trainerPortalService,
@@ -40,7 +41,8 @@ public class TrainerPortalController : ControllerBase
         IInvitationService invitationService,
         IOperationalAlertService operationalAlertService,
         ISessionParticipantService sessionParticipantService,
-        ISessionService sessionService)
+        ISessionService sessionService,
+        IAvatarService avatarService)
     {
         _trainerPortalService = trainerPortalService;
         _clientPaymentService = clientPaymentService;
@@ -50,6 +52,7 @@ public class TrainerPortalController : ControllerBase
         _operationalAlertService = operationalAlertService;
         _sessionParticipantService = sessionParticipantService;
         _sessionService = sessionService;
+        _avatarService = avatarService;
     }
 
     [HttpGet("me")]
@@ -67,6 +70,34 @@ public class TrainerPortalController : ControllerBase
             var result = await _trainerPortalService.UpdateMeAsync(request);
             return result is null ? NotFound() : Ok(result);
         });
+    }
+
+    [HttpPost("me/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AvatarDto>> UploadMyAvatar(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Avatar file is required." });
+
+        return await HandleAsync<AvatarDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _avatarService.UploadCurrentUserAvatarAsync(
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [HttpDelete("me/avatar")]
+    public async Task<ActionResult<AvatarDto>> DeleteMyAvatar(CancellationToken cancellationToken)
+    {
+        return await HandleAsync<AvatarDto>(async () =>
+            Ok(await _avatarService.DeleteCurrentUserAvatarAsync(cancellationToken)));
     }
 
     [HttpGet("clients")]
@@ -100,6 +131,38 @@ public class TrainerPortalController : ControllerBase
             var result = await _trainerPortalService.UpdateClientAsync(clientId, request);
             return result is null ? NotFound() : Ok(result);
         });
+    }
+
+    [HttpPost("clients/{clientId:int}/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AvatarDto>> UploadClientAvatar(
+        int clientId,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Avatar file is required." });
+
+        return await HandleAsync<AvatarDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _avatarService.UploadClientAvatarAsync(
+                clientId,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [HttpDelete("clients/{clientId:int}/avatar")]
+    public async Task<ActionResult<AvatarDto>> DeleteClientAvatar(
+        int clientId,
+        CancellationToken cancellationToken)
+    {
+        return await HandleAsync<AvatarDto>(async () =>
+            Ok(await _avatarService.DeleteClientAvatarAsync(clientId, cancellationToken)));
     }
 
     [HttpPost("clients/{clientId:int}/deactivate")]

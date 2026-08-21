@@ -54,7 +54,6 @@ public class TrainerService : ITrainerService
             Email = request.Email,
             FirstName = request.FirstName,
             LastName = request.LastName,
-            AvatarUrl = request.AvatarUrl,
             IsActive = true,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -130,7 +129,6 @@ public class TrainerService : ITrainerService
 
         user.FirstName = request.FirstName;
         user.LastName = request.LastName;
-        user.AvatarUrl = request.AvatarUrl;
         user.IsActive = true;
         user.UpdatedAt = DateTime.UtcNow;
 
@@ -209,7 +207,6 @@ public class TrainerService : ITrainerService
 
         trainer.User.FirstName = request.FirstName;
         trainer.User.LastName = request.LastName;
-        trainer.User.AvatarUrl = request.AvatarUrl;
         trainer.User.UpdatedAt = DateTime.UtcNow;
 
         trainer.Bio = request.Bio;

@@ -21,6 +21,7 @@ public class ClientPortalController : ControllerBase
     private readonly IClientPaymentService _clientPaymentService;
     private readonly IMilestoneService _milestoneService;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly IAvatarService _avatarService;
     private readonly StudioCRMDbContext _context;
 
     public ClientPortalController(
@@ -28,12 +29,14 @@ public class ClientPortalController : ControllerBase
     IClientPaymentService clientPaymentService,
     IMilestoneService milestoneService,
     ISubscriptionService subscriptionService,
+    IAvatarService avatarService,
     StudioCRMDbContext context)
     {
         _clientPortalService = clientPortalService;
         _clientPaymentService = clientPaymentService;
         _milestoneService = milestoneService;
         _subscriptionService = subscriptionService;
+        _avatarService = avatarService;
         _context = context;
     }
 
@@ -56,6 +59,34 @@ public class ClientPortalController : ControllerBase
             var result = await _clientPortalService.UpdateMeAsync(request);
             return result is null ? NotFound() : Ok(result);
         });
+    }
+
+    [HttpPost("me/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AvatarDto>> UploadMyAvatar(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Avatar file is required." });
+
+        return await HandleAsync<AvatarDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _avatarService.UploadCurrentUserAvatarAsync(
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [HttpDelete("me/avatar")]
+    public async Task<ActionResult<AvatarDto>> DeleteMyAvatar(CancellationToken cancellationToken)
+    {
+        return await HandleAsync<AvatarDto>(async () =>
+            Ok(await _avatarService.DeleteCurrentUserAvatarAsync(cancellationToken)));
     }
 
     [HttpPost("email-change-requests")]
