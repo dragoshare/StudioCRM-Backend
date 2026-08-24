@@ -20,6 +20,10 @@ public class TrainerPortalMeDto
 
     public DateTime? TeamJoinedDate { get; set; }
 
+    public string? OutlookCategoryName { get; set; }
+
+    public string? OutlookCategoryColor { get; set; }
+
     public List<int> LocationIds { get; set; } = new();
 
     public List<string> LocationNames { get; set; } = new();

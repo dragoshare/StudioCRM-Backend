@@ -63,7 +63,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             if (string.IsNullOrWhiteSpace(resource))
                 continue;
 
-            var externalEventId = resource.Split('/').LastOrDefault();
+            var externalEventId = ResolveExternalEventId(notification, resource);
 
             if (string.IsNullOrWhiteSpace(externalEventId))
                 continue;
@@ -92,6 +92,12 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var response = await _httpClient.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
+
+        if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
+        {
+            await MarkDeletedAsync(integration.Id, externalEventId);
+            return;
+        }
 
         if (!response.IsSuccessStatusCode)
             return;
@@ -738,15 +744,33 @@ public class OutlookWebhookService : IOutlookWebhookService
                 x.CalendarIntegrationId == integrationId &&
                 x.ExternalEventId == externalEventId);
 
-        if (existing is null)
-            return;
+        var sessionId = existing?.SessionId;
 
-        existing.Subject = "[DELETED] " + existing.Subject;
+        var link = sessionId.HasValue
+            ? await _context.CalendarEventLinks
+                .FirstOrDefaultAsync(x =>
+                    x.CalendarIntegrationId == integrationId &&
+                    x.Provider == "Outlook" &&
+                    x.SessionId == sessionId.Value &&
+                    x.ExternalEventId == externalEventId)
+            : await _context.CalendarEventLinks
+                .FirstOrDefaultAsync(x =>
+                    x.CalendarIntegrationId == integrationId &&
+                    x.Provider == "Outlook" &&
+                    x.ExternalEventId == externalEventId);
 
-        if (existing.SessionId != null)
+        sessionId ??= link?.SessionId;
+
+        if (existing is not null &&
+            !existing.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
+        {
+            existing.Subject = "[DELETED] " + existing.Subject;
+        }
+
+        if (sessionId != null)
         {
             var session = await _context.Sessions
-                .FirstOrDefaultAsync(s => s.Id == existing.SessionId);
+                .FirstOrDefaultAsync(s => s.Id == sessionId.Value);
 
             if (session != null)
             {
@@ -755,7 +779,31 @@ public class OutlookWebhookService : IOutlookWebhookService
             }
         }
 
+        if (link is not null)
+            _context.CalendarEventLinks.Remove(link);
+
         await _context.SaveChangesAsync();
+    }
+
+    private static string? ResolveExternalEventId(JsonElement notification, string resource)
+    {
+        if (notification.TryGetProperty("resourceData", out var resourceData) &&
+            resourceData.ValueKind == JsonValueKind.Object &&
+            resourceData.TryGetProperty("id", out var resourceId))
+        {
+            var value = resourceId.GetString();
+
+            if (!string.IsNullOrWhiteSpace(value))
+                return value.Trim();
+        }
+
+        var resourceIdFromPath = resource
+            .Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .LastOrDefault();
+
+        return string.IsNullOrWhiteSpace(resourceIdFromPath)
+            ? null
+            : Uri.UnescapeDataString(resourceIdFromPath.Trim());
     }
 
     private static DateTime ReadGraphDateTime(JsonElement root, string propertyName)

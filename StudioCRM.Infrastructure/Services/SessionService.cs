@@ -15,6 +15,7 @@ namespace StudioCRM.Infrastructure.Services;
 public class SessionService : ISessionService
 {
     private const int LocationPeopleLimit = 8;
+    private const int TrainerConcurrentParticipantLimit = 4;
     private const string OutlookStudioTimeZone = "Central European Standard Time";
 
     private readonly StudioCRMDbContext _context;
@@ -776,7 +777,7 @@ public class SessionService : ISessionService
         if (clientIds.Count != distinctClientIds.Count)
             throw new InvalidOperationException("Duplicated clients in session participants.");
 
-        if (distinctClientIds.Count > 4)
+        if (distinctClientIds.Count > TrainerConcurrentParticipantLimit)
             throw new InvalidOperationException("A trainer can run a session for at most four participants.");
 
         var duplicateSlotSession = await _context.Sessions
@@ -802,6 +803,85 @@ public class SessionService : ISessionService
 
             throw new InvalidOperationException(
                 $"Trainer already has a session in this exact time slot ({start:yyyy-MM-dd HH:mm}-{end:HH:mm}, session #{duplicateSlotSession.Id}). Add participants to the existing session instead of creating another one.");
+        }
+
+        await EnsureTrainerConcurrentParticipantLimitAsync(
+            trainerId,
+            startAt,
+            endAt,
+            distinctClientIds.Count,
+            excludedSessionId);
+    }
+
+    private async Task EnsureTrainerConcurrentParticipantLimitAsync(
+        int trainerId,
+        DateTime startAt,
+        DateTime endAt,
+        int requestedParticipantsCount,
+        int? excludedSessionId)
+    {
+        var overlappingSessions = await _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.TrainerId == trainerId &&
+                s.Status != "Cancelled" &&
+                s.StartAt < endAt &&
+                s.EndAt > startAt &&
+                (!excludedSessionId.HasValue || s.Id != excludedSessionId.Value))
+            .Select(s => new TrainerCapacityInterval
+            {
+                SessionId = s.Id,
+                StartAt = s.StartAt,
+                EndAt = s.EndAt,
+                ParticipantsCount = s.Participants.Count
+            })
+            .ToListAsync();
+
+        if (overlappingSessions.Count == 0)
+            return;
+
+        var intervals = overlappingSessions
+            .Append(new TrainerCapacityInterval
+            {
+                SessionId = null,
+                StartAt = startAt,
+                EndAt = endAt,
+                ParticipantsCount = requestedParticipantsCount
+            })
+            .ToList();
+
+        var checkpoints = intervals
+            .SelectMany(i => new[] { i.StartAt, i.EndAt })
+            .Where(point => point >= startAt && point < endAt)
+            .Append(startAt)
+            .Distinct()
+            .OrderBy(point => point)
+            .ToList();
+
+        foreach (var checkpoint in checkpoints)
+        {
+            var activeIntervals = intervals
+                .Where(i => i.StartAt <= checkpoint && i.EndAt > checkpoint)
+                .ToList();
+
+            var participantsCount = activeIntervals.Sum(i => i.ParticipantsCount);
+
+            if (participantsCount <= TrainerConcurrentParticipantLimit)
+                continue;
+
+            var conflictingSessionIds = activeIntervals
+                .Where(i => i.SessionId.HasValue)
+                .Select(i => i.SessionId!.Value)
+                .OrderBy(id => id)
+                .ToList();
+
+            var conflictTime = ToStudioDisplayDateTime(checkpoint);
+            var conflictDescription = conflictingSessionIds.Count == 0
+                ? string.Empty
+                : $" Conflicting sessions: {string.Join(", ", conflictingSessionIds)}.";
+
+            throw new InvalidOperationException(
+                $"Trainer would have {participantsCount} participants at {conflictTime:yyyy-MM-dd HH:mm}. A trainer can run sessions for at most {TrainerConcurrentParticipantLimit} participants at the same time.{conflictDescription}");
         }
     }
 
@@ -1319,5 +1399,16 @@ public class SessionService : ISessionService
     private static int NormalizeSessionsCharged(int value)
     {
         return Math.Max(1, value);
+    }
+
+    private sealed class TrainerCapacityInterval
+    {
+        public int? SessionId { get; set; }
+
+        public DateTime StartAt { get; set; }
+
+        public DateTime EndAt { get; set; }
+
+        public int ParticipantsCount { get; set; }
     }
 }

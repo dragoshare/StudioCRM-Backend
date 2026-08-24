@@ -531,7 +531,7 @@ internal static class WorkHoursDocumentBuilder
     private static string FormatShortDate(DateTime? value)
     {
         return value.HasValue
-            ? value.Value.ToString("M/d/yyyy", CultureInfo.InvariantCulture)
+            ? value.Value.ToString("dd.MM.yyyy", CultureInfo.InvariantCulture)
             : string.Empty;
     }
 

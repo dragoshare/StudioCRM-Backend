@@ -64,7 +64,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                     x.SessionId == session.Id &&
                     x.Provider == "Outlook" &&
                     x.CalendarIntegrationId == integration.Id &&
-                    x.ExternalEventId != string.Empty);
+                    x.ExternalEventId != string.Empty &&
+                    !x.Subject.StartsWith("[DELETED]"));
 
             if (existingExternalEvent is not null)
             {
@@ -111,7 +112,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             }
             else
             {
-                await UpdateEventAsync(session, integration.AccessToken, existingLink.ExternalEventId);
+                var existingEventUpdated = await UpdateEventAsync(
+                    session,
+                    integration.AccessToken,
+                    existingLink.ExternalEventId);
+
+                if (!existingEventUpdated)
+                    existingLink.ExternalEventId = await CreateEventAsync(session, integration.AccessToken);
             }
 
             existingLink.SyncedAt = DateTime.UtcNow;
@@ -173,7 +180,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             ?? throw new InvalidOperationException("Graph event id is missing.");
     }
 
-    private async Task UpdateEventAsync(Session session, string accessToken, string eventId)
+    private async Task<bool> UpdateEventAsync(Session session, string accessToken, string eventId)
     {
         var categories = ResolveGraphEventCategories(session);
         await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
@@ -194,8 +201,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var response = await _httpClient.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
 
+        if (response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
+            return false;
+
         if (!response.IsSuccessStatusCode)
             throw new InvalidOperationException($"Microsoft update event error: {body}");
+
+        return true;
     }
 
     private Dictionary<string, object?> BuildGraphEventPayload(Session session, List<string> categories)

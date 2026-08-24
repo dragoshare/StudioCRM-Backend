@@ -45,6 +45,8 @@ public class TrainerPortalService : ITrainerPortalService
                 Bio = t.Bio,
                 Status = t.Status,
                 TeamJoinedDate = t.TeamJoinedDate,
+                OutlookCategoryName = t.OutlookCategoryName,
+                OutlookCategoryColor = t.OutlookCategoryColor,
                 LocationIds = t.TrainerLocations.Select(tl => tl.LocationId).ToList(),
                 LocationNames = t.TrainerLocations.Select(tl => tl.Location.Name).ToList()
             })
