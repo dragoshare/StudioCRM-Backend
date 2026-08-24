@@ -155,6 +155,7 @@ public class TrainerPortalService : ITrainerPortalService
         client.Status = await ResolveClientStatusAsync(client.Id);
         client.LocationId = request.LocationId;
         client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
+        client.TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate);
         client.UpdatedAt = DateTime.UtcNow;
 
         if (client.User is not null)
@@ -518,6 +519,14 @@ public class TrainerPortalService : ITrainerPortalService
             DateTimeKind.Local => value.Value.ToUniversalTime(),
             _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
         };
+    }
+
+    private static DateTime? NormalizeNullableDate(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Utc);
     }
 
     private IQueryable<ClientDto> BuildTrainerClientQuery(int trainerId)

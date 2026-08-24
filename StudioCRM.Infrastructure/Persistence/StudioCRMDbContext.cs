@@ -31,6 +31,7 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
@@ -605,6 +606,45 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<RefreshToken>()
             .HasIndex(rt => rt.Token)
             .IsUnique();
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.HasKey(n => n.Id);
+
+            entity.Property(n => n.Type)
+                .IsRequired()
+                .HasMaxLength(100);
+
+            entity.Property(n => n.SourceKey)
+                .IsRequired()
+                .HasMaxLength(300);
+
+            entity.Property(n => n.Severity)
+                .IsRequired()
+                .HasMaxLength(30);
+
+            entity.Property(n => n.Title)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(n => n.Message)
+                .HasMaxLength(1000);
+
+            entity.Property(n => n.RelatedEntityType)
+                .HasMaxLength(100);
+
+            entity.Property(n => n.ActionUrl)
+                .HasMaxLength(500);
+
+            entity.HasOne(n => n.User)
+                .WithMany()
+                .HasForeignKey(n => n.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasIndex(n => new { n.UserId, n.IsRead, n.CreatedAt });
+            entity.HasIndex(n => new { n.UserId, n.SourceKey })
+                .IsUnique();
+        });
 
         // =========================
         // INVITATIONS

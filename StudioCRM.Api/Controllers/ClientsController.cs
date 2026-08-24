@@ -74,18 +74,6 @@ public class ClientsController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
-    [HttpPatch("{id:int}/training-start-date")]
-    public async Task<ActionResult<ClientDto>> UpdateTrainingStartDate(
-        int id,
-        UpdateClientTrainingStartDateRequest request)
-    {
-        return await HandleAsync<ClientDto>(async () =>
-        {
-            var result = await _clientService.UpdateTrainingStartDateAsync(id, request);
-            return result is null ? NotFound() : Ok(result);
-        });
-    }
-
     [HttpPost("{id:int}/avatar")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadAvatar(

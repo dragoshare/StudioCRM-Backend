@@ -2,7 +2,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Npgsql;
-using StudioCRM.Application.DTOs.Alerts;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.ClientPackages;
@@ -24,35 +23,29 @@ namespace StudioCRM.Api.Controllers;
 public class TrainerPortalController : ControllerBase
 {
     private readonly ITrainerPortalService _trainerPortalService;
-    private readonly IClientService _clientService;
     private readonly IClientPaymentService _clientPaymentService;
     private readonly IClientPackageService _clientPackageService;
     private readonly ISubscriptionService _subscriptionService;
     private readonly IInvitationService _invitationService;
-    private readonly IOperationalAlertService _operationalAlertService;
     private readonly ISessionParticipantService _sessionParticipantService;
     private readonly ISessionService _sessionService;
     private readonly IAvatarService _avatarService;
 
     public TrainerPortalController(
         ITrainerPortalService trainerPortalService,
-        IClientService clientService,
         IClientPaymentService clientPaymentService,
         IClientPackageService clientPackageService,
         ISubscriptionService subscriptionService,
         IInvitationService invitationService,
-        IOperationalAlertService operationalAlertService,
         ISessionParticipantService sessionParticipantService,
         ISessionService sessionService,
         IAvatarService avatarService)
     {
         _trainerPortalService = trainerPortalService;
-        _clientService = clientService;
         _clientPaymentService = clientPaymentService;
         _clientPackageService = clientPackageService;
         _subscriptionService = subscriptionService;
         _invitationService = invitationService;
-        _operationalAlertService = operationalAlertService;
         _sessionParticipantService = sessionParticipantService;
         _sessionService = sessionService;
         _avatarService = avatarService;
@@ -132,18 +125,6 @@ public class TrainerPortalController : ControllerBase
         return await HandleAsync<ClientDto>(async () =>
         {
             var result = await _trainerPortalService.UpdateClientAsync(clientId, request);
-            return result is null ? NotFound() : Ok(result);
-        });
-    }
-
-    [HttpPatch("clients/{clientId:int}/training-start-date")]
-    public async Task<ActionResult<ClientDto>> UpdateClientTrainingStartDate(
-        int clientId,
-        UpdateClientTrainingStartDateRequest request)
-    {
-        return await HandleAsync<ClientDto>(async () =>
-        {
-            var result = await _clientService.UpdateTrainingStartDateAsync(clientId, request);
             return result is null ? NotFound() : Ok(result);
         });
     }
@@ -254,13 +235,6 @@ public class TrainerPortalController : ControllerBase
     public Task<IActionResult> DeleteInvitation(int id)
     {
         return CancelInvitation(id);
-    }
-
-    [HttpGet("operational-alerts")]
-    public async Task<ActionResult<OperationalAlertsDto>> GetOperationalAlerts(
-        [FromQuery] OperationalAlertFilterDto filter)
-    {
-        return Ok(await _operationalAlertService.GetAlertsAsync(filter));
     }
 
     [HttpGet("clients/{clientId:int}/billing")]

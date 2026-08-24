@@ -198,6 +198,7 @@ public class ClientService : IClientService
         client.BillingStatus = request.BillingStatus;
         client.Status = await ResolveClientStatusAsync(client.Id);
         client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
+        client.TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate);
         client.UpdatedAt = DateTime.UtcNow;
 
         if (client.User is not null)
@@ -206,37 +207,6 @@ public class ClientService : IClientService
             client.User.LastName = client.LastName;
             client.User.UpdatedAt = DateTime.UtcNow;
         }
-
-        await _context.SaveChangesAsync();
-
-        return await GetProjectedById(id);
-    }
-
-    public async Task<ClientDto?> UpdateTrainingStartDateAsync(
-        int id,
-        UpdateClientTrainingStartDateRequest request)
-    {
-        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
-        if (client is null)
-            return null;
-
-        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
-        {
-            if (!_currentUser.UserId.HasValue)
-                throw new InvalidOperationException("Current trainer user is invalid.");
-
-            var currentTrainer = await _context.Trainers
-                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
-
-            if (currentTrainer is null)
-                throw new InvalidOperationException("Trainer profile not found.");
-
-            if (client.TrainerId != currentTrainer.Id)
-                throw new InvalidOperationException("Trainer can update only their own clients.");
-        }
-
-        client.TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate);
-        client.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
 

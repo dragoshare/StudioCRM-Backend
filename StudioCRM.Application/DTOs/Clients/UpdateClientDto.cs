@@ -13,5 +13,6 @@ public class UpdateClientDto
     public string BillingStatus { get; set; } = "Pending";
     public string Status { get; set; } = "New";
     public DateTime? NextSessionAt { get; set; }
+    public DateTime? TrainingStartDate { get; set; }
     public int LocationId { get; set; }
 }
