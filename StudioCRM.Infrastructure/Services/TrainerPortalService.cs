@@ -95,6 +95,7 @@ public class TrainerPortalService : ITrainerPortalService
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
                 LocationName = c.Location.Name,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync();
@@ -379,6 +380,7 @@ public class TrainerPortalService : ITrainerPortalService
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
                 LocationName = c.Location.Name,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync();
@@ -545,6 +547,7 @@ public class TrainerPortalService : ITrainerPortalService
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
                 CreatedBy = c.CreatedBy,

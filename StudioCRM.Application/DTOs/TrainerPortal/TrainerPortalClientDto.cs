@@ -24,5 +24,7 @@ public class TrainerPortalClientDto
 
     public string LocationName { get; set; } = string.Empty;
 
+    public DateTime? TrainingStartDate { get; set; }
+
     public DateTime CreatedAt { get; set; }
 }

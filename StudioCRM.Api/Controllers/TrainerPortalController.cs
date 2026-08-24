@@ -24,6 +24,7 @@ namespace StudioCRM.Api.Controllers;
 public class TrainerPortalController : ControllerBase
 {
     private readonly ITrainerPortalService _trainerPortalService;
+    private readonly IClientService _clientService;
     private readonly IClientPaymentService _clientPaymentService;
     private readonly IClientPackageService _clientPackageService;
     private readonly ISubscriptionService _subscriptionService;
@@ -35,6 +36,7 @@ public class TrainerPortalController : ControllerBase
 
     public TrainerPortalController(
         ITrainerPortalService trainerPortalService,
+        IClientService clientService,
         IClientPaymentService clientPaymentService,
         IClientPackageService clientPackageService,
         ISubscriptionService subscriptionService,
@@ -45,6 +47,7 @@ public class TrainerPortalController : ControllerBase
         IAvatarService avatarService)
     {
         _trainerPortalService = trainerPortalService;
+        _clientService = clientService;
         _clientPaymentService = clientPaymentService;
         _clientPackageService = clientPackageService;
         _subscriptionService = subscriptionService;
@@ -129,6 +132,18 @@ public class TrainerPortalController : ControllerBase
         return await HandleAsync<ClientDto>(async () =>
         {
             var result = await _trainerPortalService.UpdateClientAsync(clientId, request);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpPatch("clients/{clientId:int}/training-start-date")]
+    public async Task<ActionResult<ClientDto>> UpdateClientTrainingStartDate(
+        int clientId,
+        UpdateClientTrainingStartDateRequest request)
+    {
+        return await HandleAsync<ClientDto>(async () =>
+        {
+            var result = await _clientService.UpdateTrainingStartDateAsync(clientId, request);
             return result is null ? NotFound() : Ok(result);
         });
     }

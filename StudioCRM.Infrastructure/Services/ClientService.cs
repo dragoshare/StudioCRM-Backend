@@ -71,6 +71,7 @@ public class ClientService : IClientService
             BillingStatus = request.BillingStatus ?? "Pending",
             Status = "Inactive",
             NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
+            TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = request.CreatedBy
@@ -211,6 +212,37 @@ public class ClientService : IClientService
         return await GetProjectedById(id);
     }
 
+    public async Task<ClientDto?> UpdateTrainingStartDateAsync(
+        int id,
+        UpdateClientTrainingStartDateRequest request)
+    {
+        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
+        if (client is null)
+            return null;
+
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
+        {
+            if (!_currentUser.UserId.HasValue)
+                throw new InvalidOperationException("Current trainer user is invalid.");
+
+            var currentTrainer = await _context.Trainers
+                .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
+
+            if (currentTrainer is null)
+                throw new InvalidOperationException("Trainer profile not found.");
+
+            if (client.TrainerId != currentTrainer.Id)
+                throw new InvalidOperationException("Trainer can update only their own clients.");
+        }
+
+        client.TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate);
+        client.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return await GetProjectedById(id);
+    }
+
     public async Task<bool> DeleteAsync(int id)
     {
         var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
@@ -300,6 +332,7 @@ public class ClientService : IClientService
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
                 CreatedBy = c.CreatedBy,
@@ -468,6 +501,7 @@ public class ClientService : IClientService
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
                 CreatedBy = c.CreatedBy,
@@ -531,5 +565,13 @@ public class ClientService : IClientService
             DateTimeKind.Local => value.Value.ToUniversalTime(),
             _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
         };
+    }
+
+    private static DateTime? NormalizeNullableDate(DateTime? value)
+    {
+        if (!value.HasValue)
+            return null;
+
+        return DateTime.SpecifyKind(value.Value.Date, DateTimeKind.Utc);
     }
 }

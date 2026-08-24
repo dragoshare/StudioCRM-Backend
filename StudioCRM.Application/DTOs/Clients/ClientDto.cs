@@ -34,6 +34,8 @@ public class ClientDto
 
     public DateTime? NextSessionAt { get; set; }
 
+    public DateTime? TrainingStartDate { get; set; }
+
     public DateTime CreatedAt { get; set; }
 
     public DateTime UpdatedAt { get; set; }

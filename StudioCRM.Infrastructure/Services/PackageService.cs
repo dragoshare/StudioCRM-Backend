@@ -234,6 +234,7 @@ public class PackageService : IPackageService
                 BillingStatus = c.BillingStatus,
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
+                TrainingStartDate = c.TrainingStartDate,
                 CreatedAt = c.CreatedAt,
                 UpdatedAt = c.UpdatedAt,
                 CreatedBy = c.CreatedBy,

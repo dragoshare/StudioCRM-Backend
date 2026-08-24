@@ -24,6 +24,8 @@ public class CreateClientDto
 
     public DateTime? NextSessionAt { get; set; }
 
+    public DateTime? TrainingStartDate { get; set; }
+
     public int? CreatedBy { get; set; }
     public int LocationId { get; set; }
 }
