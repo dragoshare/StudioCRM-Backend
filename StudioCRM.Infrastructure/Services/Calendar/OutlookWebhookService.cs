@@ -744,43 +744,75 @@ public class OutlookWebhookService : IOutlookWebhookService
                 x.CalendarIntegrationId == integrationId &&
                 x.ExternalEventId == externalEventId);
 
-        var sessionId = existing?.SessionId;
+        var deletedEvents = new List<ExternalCalendarEvent>();
 
-        var link = sessionId.HasValue
-            ? await _context.CalendarEventLinks
-                .FirstOrDefaultAsync(x =>
-                    x.CalendarIntegrationId == integrationId &&
-                    x.Provider == "Outlook" &&
-                    x.SessionId == sessionId.Value &&
-                    x.ExternalEventId == externalEventId)
-            : await _context.CalendarEventLinks
-                .FirstOrDefaultAsync(x =>
-                    x.CalendarIntegrationId == integrationId &&
-                    x.Provider == "Outlook" &&
-                    x.ExternalEventId == externalEventId);
+        if (existing is not null)
+            deletedEvents.Add(existing);
 
-        sessionId ??= link?.SessionId;
+        var seriesEvents = await _context.ExternalCalendarEvents
+            .Where(x =>
+                x.CalendarIntegrationId == integrationId &&
+                x.Provider == "Outlook" &&
+                x.SeriesMasterId == externalEventId)
+            .ToListAsync();
 
-        if (existing is not null &&
-            !existing.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
+        deletedEvents.AddRange(seriesEvents);
+        deletedEvents = deletedEvents
+            .DistinctBy(x => x.Id)
+            .ToList();
+
+        var deletedExternalEventIds = deletedEvents
+            .Select(x => x.ExternalEventId)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        deletedExternalEventIds.Add(externalEventId);
+        deletedExternalEventIds = deletedExternalEventIds
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var sessionIds = deletedEvents
+            .Where(x => x.SessionId.HasValue)
+            .Select(x => x.SessionId!.Value)
+            .Distinct()
+            .ToList();
+
+        var links = await _context.CalendarEventLinks
+            .Where(x =>
+                x.CalendarIntegrationId == integrationId &&
+                x.Provider == "Outlook" &&
+                deletedExternalEventIds.Contains(x.ExternalEventId))
+            .ToListAsync();
+
+        sessionIds.AddRange(links.Select(x => x.SessionId));
+        sessionIds = sessionIds
+            .Distinct()
+            .ToList();
+
+        foreach (var deletedEvent in deletedEvents)
         {
-            existing.Subject = "[DELETED] " + existing.Subject;
+            if (!deletedEvent.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
+                deletedEvent.Subject = "[DELETED] " + deletedEvent.Subject;
         }
 
-        if (sessionId != null)
+        if (sessionIds.Count > 0)
         {
-            var session = await _context.Sessions
-                .FirstOrDefaultAsync(s => s.Id == sessionId.Value);
+            var sessions = await _context.Sessions
+                .Where(s => sessionIds.Contains(s.Id))
+                .ToListAsync();
 
-            if (session != null)
+            foreach (var session in sessions)
             {
+                if (string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                    continue;
+
                 session.Status = "Cancelled";
                 session.UpdatedAt = DateTime.UtcNow;
             }
         }
 
-        if (link is not null)
-            _context.CalendarEventLinks.Remove(link);
+        _context.CalendarEventLinks.RemoveRange(links);
 
         await _context.SaveChangesAsync();
     }
