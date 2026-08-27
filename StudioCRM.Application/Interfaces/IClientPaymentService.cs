@@ -11,6 +11,7 @@ public interface IClientPaymentService
     Task<PagedResultDto<ClientBalanceTransactionDto>> GetClientBalanceTransactionsAsync(int clientId, int page, int pageSize);
     Task<ClientPackageBillingDto?> GetActivePackageAsync(int clientId);
     Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync();
+    Task<List<ClientPaymentDto>> GetPendingReceiptsAsync();
     Task<ClientPaymentDto> RequestPaymentAsClientAsync(CreateClientPaymentRequest request);
     Task<ClientPaymentDto> CreatePaymentAsStaffAsync(CreateClientPaymentRequest request);
     Task<ClientPaymentDto> ConfirmAsync(int paymentId);

@@ -34,6 +34,8 @@ public class StudioCRMDbContext : DbContext
     public DbSet<Notification> Notifications => Set<Notification>();
 
     public DbSet<Location> Locations => Set<Location>();
+    public DbSet<LegalEntity> LegalEntities => Set<LegalEntity>();
+    public DbSet<PaymentProviderAccount> PaymentProviderAccounts => Set<PaymentProviderAccount>();
     public DbSet<TrainerLocation> TrainerLocations => Set<TrainerLocation>();
 
     public DbSet<Invitation> Invitations => Set<Invitation>();
@@ -442,8 +444,26 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.ExternalPaymentId)
                 .HasMaxLength(200);
 
+            entity.Property(x => x.PaymentProvider)
+                .HasMaxLength(50);
+
+            entity.Property(x => x.ProviderPaymentId)
+                .HasMaxLength(200);
+
+            entity.Property(x => x.ProviderStatus)
+                .HasMaxLength(100);
+
+            entity.Property(x => x.CheckoutUrl)
+                .HasMaxLength(1000);
+
             entity.Property(x => x.ReceiptNumber)
                 .HasMaxLength(100);
+
+            entity.Property(x => x.ReceiptRequired)
+                .HasDefaultValue(true);
+
+            entity.Property(x => x.ReceiptNote)
+                .HasMaxLength(500);
 
             entity.HasOne(x => x.Client)
                 .WithMany()
@@ -455,9 +475,29 @@ public class StudioCRMDbContext : DbContext
                 .HasForeignKey(x => x.ClientPackageId)
                 .OnDelete(DeleteBehavior.Restrict);
 
+            entity.HasOne(x => x.Location)
+                .WithMany()
+                .HasForeignKey(x => x.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.LegalEntity)
+                .WithMany()
+                .HasForeignKey(x => x.LegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.PaymentProviderAccount)
+                .WithMany()
+                .HasForeignKey(x => x.PaymentProviderAccountId)
+                .OnDelete(DeleteBehavior.Restrict);
+
             entity.HasIndex(x => x.ClientId);
             entity.HasIndex(x => x.ClientPackageId);
+            entity.HasIndex(x => x.LocationId);
+            entity.HasIndex(x => x.LegalEntityId);
+            entity.HasIndex(x => x.PaymentProviderAccountId);
+            entity.HasIndex(x => x.ProviderPaymentId);
             entity.HasIndex(x => x.Status);
+            entity.HasIndex(x => x.ReceiptStatus);
         });
 
         // =========================
@@ -498,6 +538,70 @@ public class StudioCRMDbContext : DbContext
         // LOCATIONS
         // =========================
 
+        modelBuilder.Entity<LegalEntity>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Name)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(x => x.Nip)
+                .HasMaxLength(20);
+
+            entity.Property(x => x.Address)
+                .HasMaxLength(300);
+
+            entity.Property(x => x.Email)
+                .HasMaxLength(250);
+
+            entity.Property(x => x.Phone)
+                .HasMaxLength(50);
+
+            entity.HasIndex(x => x.Nip);
+        });
+
+        modelBuilder.Entity<PaymentProviderAccount>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.Provider)
+                .IsRequired()
+                .HasMaxLength(50);
+
+            entity.Property(x => x.DisplayName)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(x => x.MerchantId)
+                .HasMaxLength(200);
+
+            entity.Property(x => x.PosId)
+                .HasMaxLength(200);
+
+            entity.Property(x => x.AccountKey)
+                .HasMaxLength(100);
+
+            entity.HasOne(x => x.LegalEntity)
+                .WithMany(x => x.PaymentProviderAccounts)
+                .HasForeignKey(x => x.LegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Location)
+                .WithMany(x => x.PaymentProviderAccounts)
+                .HasForeignKey(x => x.LocationId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(x => new { x.LegalEntityId, x.Provider, x.IsActive });
+            entity.HasIndex(x => new { x.LocationId, x.Provider, x.IsActive });
+        });
+
+        modelBuilder.Entity<Location>()
+            .HasOne(l => l.LegalEntity)
+            .WithMany(le => le.Locations)
+            .HasForeignKey(l => l.LegalEntityId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         modelBuilder.Entity<Location>()
             .Property(l => l.PaymentRecipientName)
             .HasMaxLength(200);
@@ -517,6 +621,18 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Location>()
             .Property(l => l.PaymentDescription)
             .HasMaxLength(1000);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.UpdatedAt)
+            .HasDefaultValueSql("NOW()");
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.FiscalRegisterName)
+            .HasMaxLength(200);
+
+        modelBuilder.Entity<Location>()
+            .Property(l => l.FiscalRegisterNumber)
+            .HasMaxLength(100);
 
         modelBuilder.Entity<TrainerLocation>()
             .HasKey(tl => new { tl.TrainerId, tl.LocationId });

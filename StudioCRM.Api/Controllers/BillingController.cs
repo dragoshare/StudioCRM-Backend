@@ -31,6 +31,13 @@ public class BillingController : ControllerBase
             Ok(await _clientPaymentService.GetPendingConfirmationsAsync()));
     }
 
+    [HttpGet("receipts/pending")]
+    public async Task<ActionResult<List<ClientPaymentDto>>> GetPendingReceipts()
+    {
+        return await HandleAsync<List<ClientPaymentDto>>(async () =>
+            Ok(await _clientPaymentService.GetPendingReceiptsAsync()));
+    }
+
     [HttpGet("payments")]
     public async Task<ActionResult<PagedResultDto<ClientPaymentDto>>> GetPayments(
         [FromQuery] ClientPaymentFilterDto filter)

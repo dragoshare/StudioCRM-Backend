@@ -1,4 +1,6 @@
-﻿namespace StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
+
+namespace StudioCRM.Domain.Entities;
 
 public class Location
 {
@@ -12,6 +14,8 @@ public class Location
 
     public bool IsActive { get; set; } = true;
 
+    public int? LegalEntityId { get; set; }
+
     public string? PaymentRecipientName { get; set; }
 
     public string? BankAccountNumber { get; set; }
@@ -22,7 +26,17 @@ public class Location
 
     public string? PaymentDescription { get; set; }
 
+    public FiscalReceiptMode FiscalReceiptMode { get; set; } = FiscalReceiptMode.Manual;
+
+    public string? FiscalRegisterName { get; set; }
+
+    public string? FiscalRegisterNumber { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+
+    public LegalEntity? LegalEntity { get; set; }
 
     public ICollection<TrainerLocation> TrainerLocations { get; set; } = new List<TrainerLocation>();
 
@@ -31,6 +45,8 @@ public class Location
     public ICollection<Session> Sessions { get; set; } = new List<Session>();
 
     public ICollection<TrainerContractLocation> TrainerContractLocations { get; set; } = new List<TrainerContractLocation>();
+
+    public ICollection<PaymentProviderAccount> PaymentProviderAccounts { get; set; } = new List<PaymentProviderAccount>();
 
     public string? CalendarEmail { get; set; }
 }

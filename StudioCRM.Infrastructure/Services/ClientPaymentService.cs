@@ -118,9 +118,7 @@ public class ClientPaymentService : IClientPaymentService
 
     public async Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync()
     {
-        var query = _context.ClientPayments
-            .Include(p => p.Client)
-            .Include(p => p.ClientPackage)
+        var query = BasePaymentQuery()
             .Where(p => p.Status == ClientPaymentStatus.PendingConfirmation);
 
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
@@ -136,15 +134,49 @@ public class ClientPaymentService : IClientPaymentService
         return payments.Select(MapPayment).ToList();
     }
 
+    public async Task<List<ClientPaymentDto>> GetPendingReceiptsAsync()
+    {
+        var query = BasePaymentQuery()
+            .Where(p =>
+                p.Status == ClientPaymentStatus.Confirmed &&
+                p.ReceiptRequired &&
+                (
+                    p.ReceiptStatus == ReceiptStatus.Pending ||
+                    p.ReceiptStatus == ReceiptStatus.ManualRequired ||
+                    p.ReceiptStatus == ReceiptStatus.Failed
+                ));
+
+        if (_currentUser.IsTrainer && !_currentUser.IsOwner)
+        {
+            var trainer = await GetCurrentTrainerAsync();
+            query = query.Where(p => p.Client.TrainerId == trainer.Id);
+        }
+
+        var payments = await query
+            .OrderBy(p => p.ConfirmedAt ?? p.PaymentDate)
+            .ThenBy(p => p.Id)
+            .ToListAsync();
+
+        return payments.Select(MapPayment).ToList();
+    }
+
     public async Task<ClientPaymentDto> RequestPaymentAsClientAsync(CreateClientPaymentRequest request)
     {
         var client = await GetCurrentClientAsync();
         var clientPackage = await ResolveClientPackageAsync(client.Id, request.ClientPackageId);
+        var paymentContext = await ResolvePaymentContextAsync(
+            client.Id,
+            clientPackage,
+            request.Method == PaymentMethod.PaymentGateway);
 
         var payment = new ClientPayment
         {
             ClientId = client.Id,
             ClientPackageId = clientPackage?.Id,
+            LocationId = paymentContext.LocationId,
+            LegalEntityId = paymentContext.LegalEntityId,
+            PaymentProviderAccountId = paymentContext.PaymentProviderAccountId,
+            PaymentProvider = paymentContext.PaymentProvider,
             Amount = NormalizeAmount(request.Amount),
             Currency = clientPackage?.Currency ?? "PLN",
             Method = request.Method,
@@ -173,11 +205,19 @@ public class ClientPaymentService : IClientPaymentService
 
         await EnsureStaffAccessToClientAsync(request.ClientId.Value);
         var clientPackage = await ResolveClientPackageAsync(request.ClientId.Value, request.ClientPackageId);
+        var paymentContext = await ResolvePaymentContextAsync(
+            request.ClientId.Value,
+            clientPackage,
+            request.Method == PaymentMethod.PaymentGateway);
 
         var payment = new ClientPayment
         {
             ClientId = request.ClientId.Value,
             ClientPackageId = clientPackage?.Id,
+            LocationId = paymentContext.LocationId,
+            LegalEntityId = paymentContext.LegalEntityId,
+            PaymentProviderAccountId = paymentContext.PaymentProviderAccountId,
+            PaymentProvider = paymentContext.PaymentProvider,
             Amount = NormalizeAmount(request.Amount),
             Currency = clientPackage?.Currency ?? "PLN",
             Method = request.Method,
@@ -188,6 +228,8 @@ public class ClientPaymentService : IClientPaymentService
             ConfirmedAt = DateTime.UtcNow,
             CreatedByUserId = _currentUser.UserId,
             ConfirmedByUserId = _currentUser.UserId,
+            ReceiptRequired = paymentContext.ReceiptRequired,
+            ReceiptStatus = ResolveReceiptStatusAfterConfirmation(paymentContext.FiscalReceiptMode),
             Note = request.Note
         };
 
@@ -215,6 +257,7 @@ public class ClientPaymentService : IClientPaymentService
         payment.Status = ClientPaymentStatus.Confirmed;
         payment.ConfirmedAt = DateTime.UtcNow;
         payment.ConfirmedByUserId = _currentUser.UserId;
+        await ApplyPaymentContextAsync(payment, payment.ClientPackage);
 
         await ApplyConfirmedPaymentAsync(payment, payment.ClientPackage);
         await _context.SaveChangesAsync();
@@ -270,6 +313,8 @@ public class ClientPaymentService : IClientPaymentService
             ? GenerateReceiptNumber(payment)
             : request.ReceiptNumber.Trim();
         payment.ReceiptIssuedAt = DateTime.UtcNow;
+        payment.ReceiptIssuedByUserId = _currentUser.UserId;
+        payment.ReceiptNote = NormalizeOptionalText(request.ReceiptNote);
 
         await _context.SaveChangesAsync();
 
@@ -421,6 +466,73 @@ public class ClientPaymentService : IClientPaymentService
         payment.ReversalReason = request.Reason;
     }
 
+    private async Task ApplyPaymentContextAsync(ClientPayment payment, ClientPackage? clientPackage)
+    {
+        var paymentContext = await ResolvePaymentContextAsync(
+            payment.ClientId,
+            clientPackage,
+            payment.Method == PaymentMethod.PaymentGateway);
+
+        payment.LocationId ??= paymentContext.LocationId;
+        payment.LegalEntityId ??= paymentContext.LegalEntityId;
+        payment.PaymentProviderAccountId ??= paymentContext.PaymentProviderAccountId;
+        payment.PaymentProvider ??= paymentContext.PaymentProvider;
+        payment.ReceiptRequired = paymentContext.ReceiptRequired;
+
+        if (payment.ReceiptStatus == ReceiptStatus.None)
+            payment.ReceiptStatus = ResolveReceiptStatusAfterConfirmation(paymentContext.FiscalReceiptMode);
+    }
+
+    private async Task<PaymentContext> ResolvePaymentContextAsync(
+        int clientId,
+        ClientPackage? clientPackage,
+        bool resolveGatewayAccount)
+    {
+        var locationId = clientPackage?.LocationId ??
+            await _context.Clients
+                .Where(c => c.Id == clientId)
+                .Select(c => c.LocationId)
+                .FirstAsync();
+
+        var location = await _context.Locations
+            .FirstOrDefaultAsync(l => l.Id == locationId);
+
+        if (location is null)
+            throw new InvalidOperationException("Payment location does not exist.");
+
+        PaymentProviderAccount? providerAccount = null;
+
+        if (resolveGatewayAccount && location.LegalEntityId.HasValue)
+        {
+            providerAccount = await _context.PaymentProviderAccounts
+                .Where(x =>
+                    x.IsActive &&
+                    x.LegalEntityId == location.LegalEntityId.Value &&
+                    (x.LocationId == null || x.LocationId == location.Id))
+                .OrderByDescending(x => x.LocationId == location.Id)
+                .ThenBy(x => x.Id)
+                .FirstOrDefaultAsync();
+        }
+
+        return new PaymentContext(
+            LocationId: location.Id,
+            LegalEntityId: location.LegalEntityId,
+            PaymentProviderAccountId: providerAccount?.Id,
+            PaymentProvider: providerAccount?.Provider,
+            ReceiptRequired: location.FiscalReceiptMode != FiscalReceiptMode.NotRequired,
+            FiscalReceiptMode: location.FiscalReceiptMode);
+    }
+
+    private static ReceiptStatus ResolveReceiptStatusAfterConfirmation(FiscalReceiptMode fiscalReceiptMode)
+    {
+        return fiscalReceiptMode switch
+        {
+            FiscalReceiptMode.NotRequired => ReceiptStatus.None,
+            FiscalReceiptMode.Automatic => ReceiptStatus.Pending,
+            _ => ReceiptStatus.ManualRequired
+        };
+    }
+
     private async Task ActivatePackageAfterPaymentIfNeededAsync(ClientPackage clientPackage)
     {
         if (clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive)
@@ -508,6 +620,9 @@ public class ClientPaymentService : IClientPaymentService
         var paymentEntities = await _context.ClientPayments
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
+            .Include(p => p.Location)
+            .Include(p => p.LegalEntity)
+            .Include(p => p.PaymentProviderAccount)
             .Where(p => p.ClientId == client.Id)
             .OrderByDescending(p => p.PaymentDate)
             .ToListAsync();
@@ -564,6 +679,9 @@ public class ClientPaymentService : IClientPaymentService
         return _context.ClientPayments
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
+            .Include(p => p.Location)
+            .Include(p => p.LegalEntity)
+            .Include(p => p.PaymentProviderAccount)
             .AsQueryable();
     }
 
@@ -574,11 +692,26 @@ public class ClientPaymentService : IClientPaymentService
         if (filter.ClientId.HasValue)
             query = query.Where(p => p.ClientId == filter.ClientId.Value);
 
+        if (filter.LocationId.HasValue)
+            query = query.Where(p => p.LocationId == filter.LocationId.Value);
+
+        if (filter.LegalEntityId.HasValue)
+            query = query.Where(p => p.LegalEntityId == filter.LegalEntityId.Value);
+
         if (filter.Status.HasValue)
             query = query.Where(p => p.Status == filter.Status.Value);
 
         if (filter.Source.HasValue)
             query = query.Where(p => p.Source == filter.Source.Value);
+
+        if (filter.ReceiptStatus.HasValue)
+            query = query.Where(p => p.ReceiptStatus == filter.ReceiptStatus.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.PaymentProvider))
+        {
+            var provider = filter.PaymentProvider.Trim();
+            query = query.Where(p => p.PaymentProvider == provider);
+        }
 
         if (filter.From.HasValue)
         {
@@ -677,6 +810,9 @@ public class ClientPaymentService : IClientPaymentService
         var payment = await _context.ClientPayments
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
+            .Include(p => p.Location)
+            .Include(p => p.LegalEntity)
+            .Include(p => p.PaymentProviderAccount)
             .Where(p => p.Id == paymentId)
             .FirstAsync();
 
@@ -692,6 +828,12 @@ public class ClientPaymentService : IClientPaymentService
             ClientName = $"{payment.Client.FirstName} {payment.Client.LastName}".Trim(),
             ClientPackageId = payment.ClientPackageId,
             PackageName = payment.ClientPackage != null ? payment.ClientPackage.Name : null,
+            LocationId = payment.LocationId,
+            LocationName = payment.Location?.Name,
+            LegalEntityId = payment.LegalEntityId,
+            LegalEntityName = payment.LegalEntity?.Name,
+            PaymentProviderAccountId = payment.PaymentProviderAccountId,
+            PaymentProviderAccountName = payment.PaymentProviderAccount?.DisplayName,
             Amount = payment.Amount,
             AppliedToPackageAmount = payment.AppliedToPackageAmount,
             BalanceCreditAmount = payment.BalanceCreditAmount,
@@ -711,9 +853,20 @@ public class ClientPaymentService : IClientPaymentService
             Note = payment.Note,
             RejectionReason = payment.RejectionReason,
             ReversalReason = payment.ReversalReason,
+            ExternalPaymentId = payment.ExternalPaymentId,
+            PaymentProvider = payment.PaymentProvider,
+            ProviderPaymentId = payment.ProviderPaymentId,
+            ProviderStatus = payment.ProviderStatus,
+            CheckoutUrl = payment.CheckoutUrl,
+            CheckoutExpiresAt = payment.CheckoutExpiresAt,
+            WebhookReceivedAt = payment.WebhookReceivedAt,
+            ReceiptRequired = payment.ReceiptRequired,
             ReceiptStatus = payment.ReceiptStatus.ToString(),
             ReceiptNumber = payment.ReceiptNumber,
-            ReceiptIssuedAt = payment.ReceiptIssuedAt
+            ReceiptIssuedAt = payment.ReceiptIssuedAt,
+            ReceiptSentAt = payment.ReceiptSentAt,
+            ReceiptIssuedByUserId = payment.ReceiptIssuedByUserId,
+            ReceiptNote = payment.ReceiptNote
         };
     }
 
@@ -798,6 +951,12 @@ public class ClientPaymentService : IClientPaymentService
         return decimal.Round(amount, 2);
     }
 
+    private static string? NormalizeOptionalText(string? value)
+    {
+        var normalized = value?.Trim();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
+    }
+
     private static DateTime? NormalizeNullableDateTime(DateTime? value)
     {
         if (!value.HasValue)
@@ -810,4 +969,12 @@ public class ClientPaymentService : IClientPaymentService
             _ => DateTime.SpecifyKind(value.Value, DateTimeKind.Utc)
         };
     }
+
+    private sealed record PaymentContext(
+        int? LocationId,
+        int? LegalEntityId,
+        int? PaymentProviderAccountId,
+        string? PaymentProvider,
+        bool ReceiptRequired,
+        FiscalReceiptMode FiscalReceiptMode);
 }
