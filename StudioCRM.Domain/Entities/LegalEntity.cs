@@ -23,4 +23,6 @@ public class LegalEntity
     public ICollection<Location> Locations { get; set; } = new List<Location>();
 
     public ICollection<PaymentProviderAccount> PaymentProviderAccounts { get; set; } = new List<PaymentProviderAccount>();
+
+    public ICollection<CompanyExpense> Expenses { get; set; } = new List<CompanyExpense>();
 }

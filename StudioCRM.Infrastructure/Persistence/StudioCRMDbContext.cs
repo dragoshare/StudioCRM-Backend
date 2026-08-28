@@ -24,6 +24,7 @@ public class StudioCRMDbContext : DbContext
     public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
     public DbSet<ClientBalanceTransaction> ClientBalanceTransactions => Set<ClientBalanceTransaction>();
     public DbSet<ClientPayment> ClientPayments => Set<ClientPayment>();
+    public DbSet<CompanyExpense> CompanyExpenses => Set<CompanyExpense>();
     public DbSet<ClientEmailChangeRequest> ClientEmailChangeRequests => Set<ClientEmailChangeRequest>();
 
     public DbSet<Session> Sessions => Set<Session>();
@@ -532,6 +533,68 @@ public class StudioCRMDbContext : DbContext
             entity.HasIndex(x => x.ClientId);
             entity.HasIndex(x => x.ClientPackageId);
             entity.HasIndex(x => x.SessionId);
+        });
+
+        // =========================
+        // COMPANY EXPENSES
+        // =========================
+
+        modelBuilder.Entity<CompanyExpense>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+
+            entity.Property(x => x.VendorName)
+                .IsRequired()
+                .HasMaxLength(200);
+
+            entity.Property(x => x.VendorNip)
+                .HasMaxLength(20);
+
+            entity.Property(x => x.InvoiceNumber)
+                .HasMaxLength(100);
+
+            entity.Property(x => x.NetAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.VatAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.GrossAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.Currency)
+                .IsRequired()
+                .HasMaxLength(3);
+
+            entity.Property(x => x.Description)
+                .HasMaxLength(500);
+
+            entity.Property(x => x.Notes)
+                .HasMaxLength(1000);
+
+            entity.Property(x => x.AttachmentUrl)
+                .HasMaxLength(1000);
+
+            entity.Property(x => x.RecurringGroupId)
+                .HasMaxLength(100);
+
+            entity.HasOne(x => x.LegalEntity)
+                .WithMany(x => x.Expenses)
+                .HasForeignKey(x => x.LegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne(x => x.Location)
+                .WithMany(x => x.Expenses)
+                .HasForeignKey(x => x.LocationId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            entity.HasIndex(x => x.LegalEntityId);
+            entity.HasIndex(x => x.LocationId);
+            entity.HasIndex(x => x.Category);
+            entity.HasIndex(x => x.PaymentStatus);
+            entity.HasIndex(x => x.IssueDate);
+            entity.HasIndex(x => x.DueDate);
+            entity.HasIndex(x => x.InvoiceNumber);
         });
 
         // =========================

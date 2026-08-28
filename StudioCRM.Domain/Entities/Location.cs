@@ -48,5 +48,7 @@ public class Location
 
     public ICollection<PaymentProviderAccount> PaymentProviderAccounts { get; set; } = new List<PaymentProviderAccount>();
 
+    public ICollection<CompanyExpense> Expenses { get; set; } = new List<CompanyExpense>();
+
     public string? CalendarEmail { get; set; }
 }
