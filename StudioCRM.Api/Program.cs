@@ -67,6 +67,7 @@ builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
 builder.Services.AddScoped<IClientPaymentService, ClientPaymentService>();
 builder.Services.AddScoped<IPaymentConfigurationService, PaymentConfigurationService>();
 builder.Services.AddScoped<ICompanyExpenseService, CompanyExpenseService>();
+builder.Services.AddScoped<ITrainerCostAnalysisService, TrainerCostAnalysisService>();
 builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
 builder.Services.AddScoped<IOperationalAlertService, OperationalAlertService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();

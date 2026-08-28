@@ -11,10 +11,14 @@ namespace StudioCRM.Api.Controllers;
 public class BillingController : ControllerBase
 {
     private readonly IClientPaymentService _clientPaymentService;
+    private readonly ITrainerCostAnalysisService _trainerCostAnalysisService;
 
-    public BillingController(IClientPaymentService clientPaymentService)
+    public BillingController(
+        IClientPaymentService clientPaymentService,
+        ITrainerCostAnalysisService trainerCostAnalysisService)
     {
         _clientPaymentService = clientPaymentService;
+        _trainerCostAnalysisService = trainerCostAnalysisService;
     }
 
     [HttpGet("clients/{clientId:int}")]
@@ -53,6 +57,22 @@ public class BillingController : ControllerBase
     {
         return await HandleAsync<PagedResultDto<ClientPaymentDto>>(async () =>
             Ok(await _clientPaymentService.GetClientPaymentsAsync(clientId, filter)));
+    }
+
+    [HttpGet("trainer-costs/sessions")]
+    public async Task<ActionResult<PagedResultDto<TrainerSessionProfitabilityDto>>> GetTrainerCostSessions(
+        [FromQuery] TrainerCostAnalysisFilterDto filter)
+    {
+        return await HandleAsync<PagedResultDto<TrainerSessionProfitabilityDto>>(async () =>
+            Ok(await _trainerCostAnalysisService.GetSessionProfitabilityAsync(filter)));
+    }
+
+    [HttpGet("trainer-costs/statistics")]
+    public async Task<ActionResult<TrainerCostStatisticsDto>> GetTrainerCostStatistics(
+        [FromQuery] TrainerCostAnalysisFilterDto filter)
+    {
+        return await HandleAsync<TrainerCostStatisticsDto>(async () =>
+            Ok(await _trainerCostAnalysisService.GetStatisticsAsync(filter)));
     }
 
     [HttpGet("clients/{clientId:int}/active-package")]
