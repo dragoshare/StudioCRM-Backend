@@ -575,6 +575,15 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.AttachmentUrl)
                 .HasMaxLength(1000);
 
+            entity.Property(x => x.AttachmentStorageKey)
+                .HasMaxLength(500);
+
+            entity.Property(x => x.AttachmentFileName)
+                .HasMaxLength(255);
+
+            entity.Property(x => x.AttachmentContentType)
+                .HasMaxLength(100);
+
             entity.Property(x => x.RecurringGroupId)
                 .HasMaxLength(100);
 

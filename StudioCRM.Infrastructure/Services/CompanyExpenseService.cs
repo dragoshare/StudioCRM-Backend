@@ -1,6 +1,10 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Storage;
+using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
@@ -9,13 +13,34 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class CompanyExpenseService : ICompanyExpenseService
 {
+    private const int DefaultMaxExpenseAttachmentFileSizeMb = 15;
+
+    private static readonly Dictionary<string, string> AllowedAttachmentContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["application/pdf"] = ".pdf",
+        ["image/jpeg"] = ".jpg",
+        ["image/png"] = ".png",
+        ["image/webp"] = ".webp"
+    };
+
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly IObjectStorageService _storage;
+    private readonly CloudflareR2Settings _settings;
+    private readonly ILogger<CompanyExpenseService> _logger;
 
-    public CompanyExpenseService(StudioCRMDbContext context, ICurrentUserService currentUser)
+    public CompanyExpenseService(
+        StudioCRMDbContext context,
+        ICurrentUserService currentUser,
+        IObjectStorageService storage,
+        IOptions<CloudflareR2Settings> options,
+        ILogger<CompanyExpenseService> logger)
     {
         _context = context;
         _currentUser = currentUser;
+        _storage = storage;
+        _settings = options.Value;
+        _logger = logger;
     }
 
     public async Task<PagedResultDto<CompanyExpenseDto>> GetExpensesAsync(CompanyExpenseFilterDto filter)
@@ -148,6 +173,85 @@ public class CompanyExpenseService : ICompanyExpenseService
         return await GetExpenseAsync(expense.Id);
     }
 
+    public async Task<CompanyExpenseDto?> UploadAttachmentAsync(
+        int id,
+        Stream content,
+        string fileName,
+        string? contentType,
+        long contentLength,
+        CancellationToken cancellationToken = default)
+    {
+        var expense = await _context.CompanyExpenses.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (expense is null)
+            return null;
+
+        var normalizedContentType = ValidateAttachmentFile(fileName, contentType, contentLength);
+        var maxBytes = GetMaxExpenseAttachmentFileSizeBytes();
+        var bytes = await ReadFileAsync(content, maxBytes, cancellationToken);
+        var oldStorageKey = ResolveAttachmentStorageKey(expense);
+        var storageKey = BuildAttachmentStorageKey(expense, normalizedContentType);
+
+        var storedObject = await _storage.UploadAsync(
+            storageKey,
+            bytes,
+            normalizedContentType,
+            cancellationToken);
+
+        expense.AttachmentStorageKey = storedObject.Key;
+        expense.AttachmentUrl = storedObject.Url ?? storedObject.Key;
+        expense.AttachmentFileName = NormalizeFileName(fileName);
+        expense.AttachmentContentType = normalizedContentType;
+        expense.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await DeleteAttachmentObjectIfNeededAsync(oldStorageKey, storageKey, cancellationToken);
+
+        return await GetExpenseAsync(expense.Id);
+    }
+
+    public async Task<StoredObjectDownloadDto?> DownloadAttachmentAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        var expense = await _context.CompanyExpenses
+            .FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (expense is null)
+            return null;
+
+        var storageKey = ResolveAttachmentStorageKey(expense);
+        if (string.IsNullOrWhiteSpace(storageKey))
+            throw new InvalidOperationException("Expense attachment is not stored in Cloudflare R2.");
+
+        return await _storage.DownloadAsync(
+            storageKey,
+            expense.AttachmentFileName,
+            cancellationToken);
+    }
+
+    public async Task<CompanyExpenseDto?> DeleteAttachmentAsync(
+        int id,
+        CancellationToken cancellationToken = default)
+    {
+        var expense = await _context.CompanyExpenses.FirstOrDefaultAsync(x => x.Id == id, cancellationToken);
+
+        if (expense is null)
+            return null;
+
+        var oldStorageKey = ResolveAttachmentStorageKey(expense);
+        expense.AttachmentUrl = null;
+        expense.AttachmentStorageKey = null;
+        expense.AttachmentFileName = null;
+        expense.AttachmentContentType = null;
+        expense.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync(cancellationToken);
+        await DeleteAttachmentObjectIfNeededAsync(oldStorageKey, null, cancellationToken);
+
+        return await GetExpenseAsync(expense.Id);
+    }
+
     public async Task<bool> DeleteExpenseAsync(int id)
     {
         var expense = await _context.CompanyExpenses.FirstOrDefaultAsync(x => x.Id == id);
@@ -155,8 +259,10 @@ public class CompanyExpenseService : ICompanyExpenseService
         if (expense is null)
             return false;
 
+        var oldStorageKey = ResolveAttachmentStorageKey(expense);
         _context.CompanyExpenses.Remove(expense);
         await _context.SaveChangesAsync();
+        await DeleteAttachmentObjectIfNeededAsync(oldStorageKey, null, CancellationToken.None);
         return true;
     }
 
@@ -408,6 +514,8 @@ public class CompanyExpenseService : ICompanyExpenseService
             Description = expense.Description,
             Notes = expense.Notes,
             AttachmentUrl = expense.AttachmentUrl,
+            AttachmentFileName = expense.AttachmentFileName,
+            AttachmentContentType = expense.AttachmentContentType,
             IsRecurring = expense.IsRecurring,
             RecurringGroupId = expense.RecurringGroupId,
             CreatedByUserId = expense.CreatedByUserId,
@@ -477,6 +585,119 @@ public class CompanyExpenseService : ICompanyExpenseService
 
         if (Math.Abs(expectedGross - grossAmount) > 0.01m)
             throw new InvalidOperationException("Gross amount must match net amount plus VAT amount.");
+    }
+
+    private string ValidateAttachmentFile(string fileName, string? contentType, long contentLength)
+    {
+        if (contentLength <= 0)
+            throw new InvalidOperationException("Expense attachment file is empty.");
+
+        var maxBytes = GetMaxExpenseAttachmentFileSizeBytes();
+        if (contentLength > maxBytes)
+            throw new InvalidOperationException(
+                $"Expense attachment file cannot exceed {GetMaxExpenseAttachmentFileSizeMb()} MB.");
+
+        if (string.IsNullOrWhiteSpace(fileName))
+            throw new InvalidOperationException("Expense attachment file name is required.");
+
+        var normalizedContentType = contentType?.Trim() ?? string.Empty;
+        if (!AllowedAttachmentContentTypes.ContainsKey(normalizedContentType))
+            throw new InvalidOperationException("Expense attachment file must be PDF, JPG, PNG or WEBP.");
+
+        return normalizedContentType;
+    }
+
+    private static async Task<byte[]> ReadFileAsync(
+        Stream content,
+        long maxBytes,
+        CancellationToken cancellationToken)
+    {
+        using var memory = new MemoryStream();
+        var buffer = new byte[81920];
+        long totalRead = 0;
+
+        while (true)
+        {
+            var read = await content.ReadAsync(buffer, cancellationToken);
+            if (read == 0)
+                break;
+
+            totalRead += read;
+            if (totalRead > maxBytes)
+                throw new InvalidOperationException("Expense attachment file is too large.");
+
+            memory.Write(buffer, 0, read);
+        }
+
+        return memory.ToArray();
+    }
+
+    private string BuildAttachmentStorageKey(CompanyExpense expense, string contentType)
+    {
+        return $"expenses/{expense.LegalEntityId}/{expense.Id}/{Guid.NewGuid():N}{AllowedAttachmentContentTypes[contentType]}";
+    }
+
+    private string? ResolveAttachmentStorageKey(CompanyExpense expense)
+    {
+        if (!string.IsNullOrWhiteSpace(expense.AttachmentStorageKey))
+            return expense.AttachmentStorageKey;
+
+        if (string.IsNullOrWhiteSpace(expense.AttachmentUrl))
+            return null;
+
+        if (expense.AttachmentUrl.StartsWith("expenses/", StringComparison.OrdinalIgnoreCase))
+            return expense.AttachmentUrl;
+
+        if (string.IsNullOrWhiteSpace(_settings.PublicBaseUrl))
+            return null;
+
+        var publicBaseUrl = _settings.PublicBaseUrl.TrimEnd('/') + "/";
+        if (!expense.AttachmentUrl.StartsWith(publicBaseUrl, StringComparison.OrdinalIgnoreCase))
+            return null;
+
+        return Uri.UnescapeDataString(expense.AttachmentUrl[publicBaseUrl.Length..]);
+    }
+
+    private async Task DeleteAttachmentObjectIfNeededAsync(
+        string? oldStorageKey,
+        string? newStorageKey,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(oldStorageKey) || oldStorageKey == newStorageKey)
+            return;
+
+        try
+        {
+            await _storage.DeleteAsync(oldStorageKey, cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not delete old expense attachment {AttachmentKey}.", oldStorageKey);
+        }
+    }
+
+    private static string NormalizeFileName(string fileName)
+    {
+        var safeName = Path.GetFileName(fileName.Trim());
+
+        foreach (var invalidChar in Path.GetInvalidFileNameChars())
+            safeName = safeName.Replace(invalidChar, '_');
+
+        return string.IsNullOrWhiteSpace(safeName)
+            ? "invoice"
+            : safeName;
+    }
+
+    private long GetMaxExpenseAttachmentFileSizeBytes()
+    {
+        return GetMaxExpenseAttachmentFileSizeMb() * 1024L * 1024L;
+    }
+
+    private int GetMaxExpenseAttachmentFileSizeMb()
+    {
+        return _settings.MaxExpenseAttachmentFileSizeMb > 0
+            ? _settings.MaxExpenseAttachmentFileSizeMb
+            : DefaultMaxExpenseAttachmentFileSizeMb;
     }
 
     private static decimal NormalizeMoney(decimal amount, bool allowZero)

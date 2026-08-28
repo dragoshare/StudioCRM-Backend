@@ -103,6 +103,64 @@ public class ExpensesController : ControllerBase
         });
     }
 
+    [HttpPost("{id:int}/attachment")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<CompanyExpenseDto>> UploadAttachment(
+        int id,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Expense attachment file is required." });
+
+        return await HandleAsync<CompanyExpenseDto>(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            var result = await _companyExpenseService.UploadAttachmentAsync(
+                id,
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken);
+
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
+    [HttpGet("{id:int}/attachment")]
+    public async Task<IActionResult> DownloadAttachment(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await _companyExpenseService.DownloadAttachmentAsync(id, cancellationToken);
+            return result is null
+                ? NotFound()
+                : File(result.Content, result.ContentType, result.FileName);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new
+            {
+                message = ex.Message
+            });
+        }
+    }
+
+    [HttpDelete("{id:int}/attachment")]
+    public async Task<ActionResult<CompanyExpenseDto>> DeleteAttachment(
+        int id,
+        CancellationToken cancellationToken)
+    {
+        return await HandleAsync<CompanyExpenseDto>(async () =>
+        {
+            var result = await _companyExpenseService.DeleteAttachmentAsync(id, cancellationToken);
+            return result is null ? NotFound() : Ok(result);
+        });
+    }
+
     [HttpDelete("{id:int}")]
     public async Task<IActionResult> DeleteExpense(int id)
     {

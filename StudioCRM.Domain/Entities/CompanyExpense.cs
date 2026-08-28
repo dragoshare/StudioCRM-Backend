@@ -32,6 +32,9 @@ public class CompanyExpense
     public string? Description { get; set; }
     public string? Notes { get; set; }
     public string? AttachmentUrl { get; set; }
+    public string? AttachmentStorageKey { get; set; }
+    public string? AttachmentFileName { get; set; }
+    public string? AttachmentContentType { get; set; }
 
     public bool IsRecurring { get; set; }
     public string? RecurringGroupId { get; set; }

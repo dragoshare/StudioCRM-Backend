@@ -9,4 +9,5 @@ public class CloudflareR2Settings
     public string BucketName { get; set; } = string.Empty;
     public string PublicBaseUrl { get; set; } = string.Empty;
     public int MaxAvatarFileSizeMb { get; set; } = 5;
+    public int MaxExpenseAttachmentFileSizeMb { get; set; } = 15;
 }

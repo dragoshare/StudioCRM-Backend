@@ -1,4 +1,5 @@
 using StudioCRM.Application.DTOs.Billing;
+using StudioCRM.Application.Interfaces.Storage;
 
 namespace StudioCRM.Application.Interfaces;
 
@@ -9,6 +10,19 @@ public interface ICompanyExpenseService
     Task<CompanyExpenseDto> CreateExpenseAsync(CreateCompanyExpenseRequest request);
     Task<CompanyExpenseDto?> UpdateExpenseAsync(int id, UpdateCompanyExpenseRequest request);
     Task<CompanyExpenseDto?> MarkPaidAsync(int id, DateTime? paidAt = null);
+    Task<CompanyExpenseDto?> UploadAttachmentAsync(
+        int id,
+        Stream content,
+        string fileName,
+        string? contentType,
+        long contentLength,
+        CancellationToken cancellationToken = default);
+    Task<StoredObjectDownloadDto?> DownloadAttachmentAsync(
+        int id,
+        CancellationToken cancellationToken = default);
+    Task<CompanyExpenseDto?> DeleteAttachmentAsync(
+        int id,
+        CancellationToken cancellationToken = default);
     Task<bool> DeleteExpenseAsync(int id);
     Task<ExpenseStatisticsDto> GetStatisticsAsync(CompanyExpenseFilterDto filter);
 }
