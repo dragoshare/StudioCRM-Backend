@@ -8,11 +8,71 @@ namespace StudioCRM.Infrastructure.Services;
 
 public class MilestoneService : IMilestoneService
 {
+    private const int MaxNameLength = 150;
+    private const int MaxRewardNameLength = 150;
+    private const int MaxDescriptionLength = 500;
+
     private readonly StudioCRMDbContext _context;
 
     public MilestoneService(StudioCRMDbContext context)
     {
         _context = context;
+    }
+
+    public async Task<List<MilestoneDefinitionDto>> GetDefinitionsAsync(bool includeInactive = false)
+    {
+        var query = _context.MilestoneDefinitions.AsQueryable();
+
+        if (!includeInactive)
+            query = query.Where(x => x.IsActive);
+
+        var definitions = await query
+            .OrderBy(x => x.RequiredMonths)
+            .ThenBy(x => x.Id)
+            .ToListAsync();
+
+        return definitions.Select(MapDefinition).ToList();
+    }
+
+    public async Task<MilestoneDefinitionDto> CreateDefinitionAsync(UpsertMilestoneDefinitionRequest request)
+    {
+        var definition = new MilestoneDefinition();
+        ApplyDefinitionRequest(definition, request);
+
+        await _context.MilestoneDefinitions.AddAsync(definition);
+        await _context.SaveChangesAsync();
+
+        return MapDefinition(definition);
+    }
+
+    public async Task<MilestoneDefinitionDto?> UpdateDefinitionAsync(
+        int id,
+        UpsertMilestoneDefinitionRequest request)
+    {
+        var definition = await _context.MilestoneDefinitions
+            .FirstOrDefaultAsync(x => x.Id == id);
+
+        if (definition is null)
+            return null;
+
+        ApplyDefinitionRequest(definition, request);
+        await _context.SaveChangesAsync();
+
+        return MapDefinition(definition);
+    }
+
+    public async Task<MilestoneDefinitionDto?> SetDefinitionActiveAsync(int id, bool isActive)
+    {
+        var definition = await _context.MilestoneDefinitions
+            .FirstOrDefaultAsync(x => x.Id == id);
+
+        if (definition is null)
+            return null;
+
+        definition.IsActive = isActive;
+        await _context.SaveChangesAsync();
+
+        return MapDefinition(definition);
     }
 
     public async Task<ClientMilestonesSummaryDto?> GetClientMilestonesAsync(int clientId)
@@ -21,6 +81,11 @@ public class MilestoneService : IMilestoneService
             .Include(c => c.User)
             .Include(c => c.Milestones)
                 .ThenInclude(cm => cm.MilestoneDefinition)
+            .Include(c => c.Milestones)
+                .ThenInclude(cm => cm.RewardClaimedByUser)
+            .Include(c => c.Milestones)
+                .ThenInclude(cm => cm.RewardClaimedByTrainer)
+                .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(c => c.Id == clientId);
 
         if (client is null)
@@ -69,6 +134,12 @@ public class MilestoneService : IMilestoneService
                 AchievedAt = isAchieved ? existing?.AchievedAt ?? achievedAt : null,
                 IsRewardClaimed = existing?.IsRewardClaimed ?? false,
                 RewardClaimedAt = existing?.RewardClaimedAt,
+                RewardClaimedByUserId = existing?.RewardClaimedByUserId,
+                RewardClaimedByUserName = GetUserFullName(existing?.RewardClaimedByUser),
+                RewardClaimedByTrainerId = existing?.RewardClaimedByTrainerId,
+                RewardClaimedByTrainerName = existing?.RewardClaimedByTrainer is null
+                    ? null
+                    : GetUserFullName(existing.RewardClaimedByTrainer.User),
                 RewardClaimNote = existing?.RewardClaimNote
             });
         }
@@ -136,6 +207,7 @@ public class MilestoneService : IMilestoneService
         return await ClaimRewardInternalAsync(
             clientId,
             milestoneDefinitionId,
+            trainerUserId,
             trainer.Id,
             note);
     }
@@ -149,13 +221,43 @@ public class MilestoneService : IMilestoneService
         return await ClaimRewardInternalAsync(
             clientId,
             milestoneDefinitionId,
+            ownerUserId,
             null,
             note);
+    }
+
+    public async Task<bool> UnclaimRewardAsTrainerAsync(
+        int trainerUserId,
+        int clientId,
+        int milestoneDefinitionId)
+    {
+        var trainer = await _context.Trainers
+            .FirstOrDefaultAsync(t => t.UserId == trainerUserId);
+
+        if (trainer is null)
+            return false;
+
+        var clientBelongsToTrainer = await _context.Clients
+            .AnyAsync(c => c.Id == clientId && c.TrainerId == trainer.Id);
+
+        if (!clientBelongsToTrainer)
+            return false;
+
+        return await UnclaimRewardInternalAsync(clientId, milestoneDefinitionId);
+    }
+
+    public async Task<bool> UnclaimRewardAsOwnerAsync(
+        int ownerUserId,
+        int clientId,
+        int milestoneDefinitionId)
+    {
+        return await UnclaimRewardInternalAsync(clientId, milestoneDefinitionId);
     }
 
     private async Task<bool> ClaimRewardInternalAsync(
         int clientId,
         int milestoneDefinitionId,
+        int claimedByUserId,
         int? trainerId,
         string? note)
     {
@@ -189,8 +291,9 @@ public class MilestoneService : IMilestoneService
                 AchievedAt = achievedAt,
                 IsRewardClaimed = true,
                 RewardClaimedAt = DateTime.UtcNow,
+                RewardClaimedByUserId = claimedByUserId,
                 RewardClaimedByTrainerId = trainerId,
-                RewardClaimNote = note
+                RewardClaimNote = NormalizeOptionalText(note)
             };
 
             _context.ClientMilestones.Add(existing);
@@ -199,9 +302,33 @@ public class MilestoneService : IMilestoneService
         {
             existing.IsRewardClaimed = true;
             existing.RewardClaimedAt = DateTime.UtcNow;
+            existing.RewardClaimedByUserId = claimedByUserId;
             existing.RewardClaimedByTrainerId = trainerId;
-            existing.RewardClaimNote = note;
+            existing.RewardClaimNote = NormalizeOptionalText(note);
         }
+
+        await _context.SaveChangesAsync();
+
+        return true;
+    }
+
+    private async Task<bool> UnclaimRewardInternalAsync(
+        int clientId,
+        int milestoneDefinitionId)
+    {
+        var milestone = await _context.ClientMilestones
+            .FirstOrDefaultAsync(x =>
+                x.ClientId == clientId &&
+                x.MilestoneDefinitionId == milestoneDefinitionId);
+
+        if (milestone is null || !milestone.IsRewardClaimed)
+            return false;
+
+        milestone.IsRewardClaimed = false;
+        milestone.RewardClaimedAt = null;
+        milestone.RewardClaimedByUserId = null;
+        milestone.RewardClaimedByTrainerId = null;
+        milestone.RewardClaimNote = null;
 
         await _context.SaveChangesAsync();
 
@@ -254,6 +381,64 @@ public class MilestoneService : IMilestoneService
             .ToList();
     }
 
+    private static void ApplyDefinitionRequest(
+        MilestoneDefinition definition,
+        UpsertMilestoneDefinitionRequest request)
+    {
+        definition.Name = NormalizeRequiredText(request.Name, "Milestone name", MaxNameLength);
+        definition.RequiredMonths = NormalizeRequiredMonths(request.RequiredMonths);
+        definition.RewardName = NormalizeRequiredText(request.RewardName, "Reward name", MaxRewardNameLength);
+        definition.Description = NormalizeOptionalText(request.Description, MaxDescriptionLength);
+        definition.IsActive = request.IsActive;
+    }
+
+    private static MilestoneDefinitionDto MapDefinition(MilestoneDefinition definition)
+    {
+        return new MilestoneDefinitionDto
+        {
+            Id = definition.Id,
+            Name = definition.Name,
+            RequiredMonths = definition.RequiredMonths,
+            RewardName = definition.RewardName,
+            Description = definition.Description,
+            IsActive = definition.IsActive
+        };
+    }
+
+    private static int NormalizeRequiredMonths(int requiredMonths)
+    {
+        if (requiredMonths <= 0)
+            throw new InvalidOperationException("Required months must be greater than zero.");
+
+        return requiredMonths;
+    }
+
+    private static string NormalizeRequiredText(string? value, string fieldName, int maxLength)
+    {
+        var normalized = value?.Trim();
+
+        if (string.IsNullOrWhiteSpace(normalized))
+            throw new InvalidOperationException($"{fieldName} is required.");
+
+        if (normalized.Length > maxLength)
+            throw new InvalidOperationException($"{fieldName} cannot exceed {maxLength} characters.");
+
+        return normalized;
+    }
+
+    private static string? NormalizeOptionalText(string? value, int maxLength = MaxDescriptionLength)
+    {
+        var normalized = value?.Trim();
+
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        if (normalized.Length > maxLength)
+            throw new InvalidOperationException($"Text cannot exceed {maxLength} characters.");
+
+        return normalized;
+    }
+
     private static int CalculateFullMonths(DateTime startDate, DateTime endDate)
     {
         var months = ((endDate.Year - startDate.Year) * 12) + endDate.Month - startDate.Month;
@@ -268,15 +453,29 @@ public class MilestoneService : IMilestoneService
     {
         if (client.User is not null)
         {
-            var firstName = client.User.FirstName ?? string.Empty;
-            var lastName = client.User.LastName ?? string.Empty;
-
-            var fullName = $"{firstName} {lastName}".Trim();
+            var fullName = GetUserFullName(client.User);
 
             if (!string.IsNullOrWhiteSpace(fullName))
                 return fullName;
         }
 
+        var clientName = $"{client.FirstName} {client.LastName}".Trim();
+
+        if (!string.IsNullOrWhiteSpace(clientName))
+            return clientName;
+
         return $"Klient #{client.Id}";
+    }
+
+    private static string? GetUserFullName(User? user)
+    {
+        if (user is null)
+            return null;
+
+        var fullName = $"{user.FirstName} {user.LastName}".Trim();
+
+        return string.IsNullOrWhiteSpace(fullName)
+            ? user.Email
+            : fullName;
     }
 }

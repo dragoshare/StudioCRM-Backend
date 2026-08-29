@@ -935,6 +935,14 @@ public class StudioCRMDbContext : DbContext
         // Milestones
         // =========================
 
+        modelBuilder.Entity<ClientMilestone>(entity =>
+        {
+            entity.HasOne(x => x.RewardClaimedByUser)
+                .WithMany()
+                .HasForeignKey(x => x.RewardClaimedByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         modelBuilder.Entity<MilestoneDefinition>(entity =>
         {
             entity.HasKey(x => x.Id);

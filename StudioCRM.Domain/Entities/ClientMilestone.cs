@@ -16,6 +16,9 @@ public class ClientMilestone
 
     public DateTime? RewardClaimedAt { get; set; }
 
+    public int? RewardClaimedByUserId { get; set; }
+    public User? RewardClaimedByUser { get; set; }
+
     public int? RewardClaimedByTrainerId { get; set; }
     public Trainer? RewardClaimedByTrainer { get; set; }
 

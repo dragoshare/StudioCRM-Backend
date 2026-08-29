@@ -85,6 +85,35 @@ public class TrainerPortalMilestonesController : ControllerBase
         });
     }
 
+    [HttpPatch("clients/{clientId:int}/milestones/{milestoneDefinitionId:int}/unclaim")]
+    public async Task<IActionResult> UnclaimReward(
+        int clientId,
+        int milestoneDefinitionId)
+    {
+        var userId = GetCurrentUserId();
+
+        if (userId is null)
+            return Unauthorized();
+
+        var success = await _milestoneService.UnclaimRewardAsTrainerAsync(
+            userId.Value,
+            clientId,
+            milestoneDefinitionId);
+
+        if (!success)
+        {
+            return BadRequest(new
+            {
+                message = "Nie udało się cofnąć wydania nagrody. Sprawdź, czy klient należy do trenera i czy nagroda była oznaczona jako wydana."
+            });
+        }
+
+        return Ok(new
+        {
+            message = "Wydanie nagrody zostało cofnięte."
+        });
+    }
+
     private int? GetCurrentUserId()
     {
         var userIdClaim = User.FindFirstValue(ClaimTypes.NameIdentifier);
