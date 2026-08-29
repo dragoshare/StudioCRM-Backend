@@ -286,7 +286,11 @@ public class CompanyExpenseService : ICompanyExpenseService
         if (to.HasValue)
             confirmedPaymentsQuery = confirmedPaymentsQuery.Where(x => x.PaymentDate <= to.Value);
 
-        var revenueGross = await confirmedPaymentsQuery.SumAsync(x => (decimal?)x.Amount) ?? 0;
+        var confirmedPayments = await confirmedPaymentsQuery.ToListAsync();
+        var revenueGross = confirmedPayments.Sum(x => x.Amount);
+        var paymentProviderFeeAmount = confirmedPayments.Sum(x => x.ProviderFeeAmount);
+        var revenueNet = confirmedPayments.Sum(x =>
+            x.ProviderNetAmount ?? decimal.Round(x.Amount - x.ProviderFeeAmount, 2));
         var financialExpenses = filter.PaymentStatus == ExpensePaymentStatus.Cancelled
             ? expenses
             : expenses.Where(x => x.PaymentStatus != ExpensePaymentStatus.Cancelled).ToList();
@@ -316,7 +320,10 @@ public class CompanyExpenseService : ICompanyExpenseService
                 .Where(IsOverdue)
                 .Sum(x => x.GrossAmount),
             RevenueGrossAmount = revenueGross,
+            PaymentProviderFeeAmount = paymentProviderFeeAmount,
+            RevenueNetAmount = revenueNet,
             OperatingProfitGrossAmount = revenueGross - grossAmount,
+            OperatingProfitNetAmount = revenueNet - grossAmount,
             ByLegalEntity = financialExpenses
                 .GroupBy(x => new { x.LegalEntityId, x.LegalEntity.Name })
                 .Select(x => BuildBreakdown(x.Key.LegalEntityId.ToString(), x.Key.Name, x))

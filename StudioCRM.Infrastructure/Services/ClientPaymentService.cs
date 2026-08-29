@@ -48,6 +48,192 @@ public class ClientPaymentService : IClientPaymentService
         return await ToPagedPaymentResultAsync(query, filter);
     }
 
+    public async Task<RevenueStatisticsDto> GetRevenueStatisticsAsync(RevenueAnalysisFilterDto filter)
+    {
+        var from = NormalizeNullableDateTime(filter.From);
+        var to = NormalizeNullableDateTime(filter.To);
+        var payoutFrom = NormalizeNullableDateTime(filter.PayoutFrom);
+        var payoutTo = NormalizeNullableDateTime(filter.PayoutTo);
+
+        var query = _context.ClientPayments
+            .Include(p => p.Client)
+                .ThenInclude(c => c.Trainer)
+                .ThenInclude(t => t!.User)
+            .Include(p => p.ClientPackage)
+            .Include(p => p.Location)
+            .Include(p => p.LegalEntity)
+            .Where(p => p.Status == ClientPaymentStatus.Confirmed)
+            .AsQueryable();
+
+        if (filter.LocationId.HasValue)
+            query = query.Where(p => p.LocationId == filter.LocationId.Value);
+
+        if (filter.LegalEntityId.HasValue)
+            query = query.Where(p => p.LegalEntityId == filter.LegalEntityId.Value);
+
+        if (filter.TrainerId.HasValue)
+            query = query.Where(p => p.Client.TrainerId == filter.TrainerId.Value);
+
+        if (filter.ClientId.HasValue)
+            query = query.Where(p => p.ClientId == filter.ClientId.Value);
+
+        if (filter.ClientPackageId.HasValue)
+            query = query.Where(p => p.ClientPackageId == filter.ClientPackageId.Value);
+
+        if (filter.Method.HasValue)
+            query = query.Where(p => p.Method == filter.Method.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.PaymentProvider))
+        {
+            var provider = filter.PaymentProvider.Trim();
+            query = query.Where(p => p.PaymentProvider == provider);
+        }
+
+        if (filter.IsRenewal.HasValue)
+        {
+            query = filter.IsRenewal.Value
+                ? query.Where(p => p.ClientPackage != null && p.ClientPackage.PreviousClientPackageId.HasValue)
+                : query.Where(p => p.ClientPackage == null || !p.ClientPackage.PreviousClientPackageId.HasValue);
+        }
+
+        if (filter.HasProviderFee.HasValue)
+        {
+            query = filter.HasProviderFee.Value
+                ? query.Where(p => p.ProviderFeeAmount > 0)
+                : query.Where(p => p.ProviderFeeAmount <= 0);
+        }
+
+        if (filter.IsProviderSettled.HasValue)
+        {
+            query = filter.IsProviderSettled.Value
+                ? query.Where(p =>
+                    p.ProviderPayoutDate.HasValue ||
+                    p.ProviderSettledAt.HasValue ||
+                    (p.ProviderSettlementId != null && p.ProviderSettlementId != string.Empty))
+                : query.Where(p =>
+                    !p.ProviderPayoutDate.HasValue &&
+                    !p.ProviderSettledAt.HasValue &&
+                    (p.ProviderSettlementId == null || p.ProviderSettlementId == string.Empty));
+        }
+
+        if (from.HasValue)
+            query = query.Where(p => p.PaymentDate >= from.Value);
+
+        if (to.HasValue)
+            query = query.Where(p => p.PaymentDate <= to.Value);
+
+        if (payoutFrom.HasValue)
+            query = query.Where(p => p.ProviderPayoutDate >= payoutFrom.Value);
+
+        if (payoutTo.HasValue)
+            query = query.Where(p => p.ProviderPayoutDate <= payoutTo.Value);
+
+        var payments = await query.ToListAsync();
+        var grossAmount = payments.Sum(x => x.Amount);
+        var providerFeeAmount = payments.Sum(x => x.ProviderFeeAmount);
+        var netAmount = payments.Sum(ResolveProviderNetAmount);
+        var renewalPayments = payments.Where(IsRenewalPayment).ToList();
+        var newPayments = payments.Where(x => x.ClientPackage is not null && !IsRenewalPayment(x)).ToList();
+        var withoutPackagePayments = payments.Where(x => x.ClientPackage is null).ToList();
+
+        return new RevenueStatisticsDto
+        {
+            From = from,
+            To = to,
+            PayoutFrom = payoutFrom,
+            PayoutTo = payoutTo,
+            PaymentCount = payments.Count,
+            GrossAmount = grossAmount,
+            ProviderFeeAmount = providerFeeAmount,
+            NetAmount = netAmount,
+            AppliedToPackageAmount = payments.Sum(x => x.AppliedToPackageAmount),
+            BalanceCreditAmount = payments.Sum(x => x.BalanceCreditAmount),
+            NewPaymentGrossAmount = newPayments.Sum(x => x.Amount),
+            RenewalPaymentGrossAmount = renewalPayments.Sum(x => x.Amount),
+            WithoutPackageGrossAmount = withoutPackagePayments.Sum(x => x.Amount),
+            ByLocation = payments
+                .GroupBy(x => new
+                {
+                    Key = x.LocationId?.ToString() ?? "none",
+                    Label = x.Location?.Name ?? "Bez lokalizacji"
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByLegalEntity = payments
+                .GroupBy(x => new
+                {
+                    Key = x.LegalEntityId?.ToString() ?? "none",
+                    Label = x.LegalEntity?.Name ?? "Bez firmy"
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByTrainer = payments
+                .GroupBy(x => new
+                {
+                    Key = x.Client.TrainerId?.ToString() ?? "none",
+                    Label = x.Client.Trainer?.User is null
+                        ? "Bez trenera"
+                        : $"{x.Client.Trainer.User.FirstName} {x.Client.Trainer.User.LastName}".Trim()
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByPackageType = payments
+                .GroupBy(x => new
+                {
+                    Key = x.ClientPackage?.ExpectedBillingType.ToString() ?? "none",
+                    Label = x.ClientPackage?.ExpectedBillingType.ToString() ?? "Bez pakietu"
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByPackage = payments
+                .GroupBy(x => new
+                {
+                    Key = x.ClientPackageId?.ToString() ?? "none",
+                    Label = x.ClientPackage?.Name ?? "Bez pakietu"
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByClient = payments
+                .GroupBy(x => new
+                {
+                    x.ClientId,
+                    Label = $"{x.Client.FirstName} {x.Client.LastName}".Trim()
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.ClientId.ToString(), x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByPaymentMethod = payments
+                .GroupBy(x => x.Method)
+                .Select(x => BuildRevenueBreakdown(((int)x.Key).ToString(), x.Key.ToString(), x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByPaymentProvider = payments
+                .GroupBy(x => new
+                {
+                    Key = string.IsNullOrWhiteSpace(x.PaymentProvider) ? "none" : x.PaymentProvider,
+                    Label = string.IsNullOrWhiteSpace(x.PaymentProvider) ? "Bez operatora" : x.PaymentProvider
+                })
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByPaymentLifecycle = payments
+                .GroupBy(x => ResolvePaymentLifecycle(x))
+                .Select(x => BuildRevenueBreakdown(x.Key.Key, x.Key.Label, x))
+                .OrderByDescending(x => x.GrossAmount)
+                .ToList(),
+            ByMonth = payments
+                .GroupBy(x => x.PaymentDate.ToString("yyyy-MM"))
+                .Select(x => BuildRevenueBreakdown(x.Key, x.Key, x))
+                .OrderBy(x => x.Key)
+                .ToList()
+        };
+    }
+
     public async Task<PagedResultDto<ClientPaymentDto>> GetClientPaymentsAsync(
         int clientId,
         ClientPaymentFilterDto filter)
@@ -260,6 +446,58 @@ public class ClientPaymentService : IClientPaymentService
         await ApplyPaymentContextAsync(payment, payment.ClientPackage);
 
         await ApplyConfirmedPaymentAsync(payment, payment.ClientPackage);
+        await _context.SaveChangesAsync();
+
+        return await GetPaymentDtoAsync(payment.Id);
+    }
+
+    public async Task<ClientPaymentDto> UpdateProviderSettlementAsync(
+        int paymentId,
+        UpdatePaymentProviderSettlementRequest request)
+    {
+        var payment = await _context.ClientPayments
+            .FirstOrDefaultAsync(p => p.Id == paymentId);
+
+        if (payment is null)
+            throw new InvalidOperationException("Payment not found.");
+
+        await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        var feeAmount = request.ProviderFeeAmount.HasValue
+            ? NormalizeProviderFeeAmount(request.ProviderFeeAmount.Value, payment.Amount)
+            : payment.ProviderFeeAmount;
+        var netAmount = request.ProviderNetAmount.HasValue
+            ? NormalizeProviderNetAmount(request.ProviderNetAmount.Value, payment.Amount)
+            : payment.ProviderNetAmount ?? ResolveProviderNetAmount(payment);
+
+        if (request.ProviderFeeAmount.HasValue && !request.ProviderNetAmount.HasValue)
+            netAmount = decimal.Round(payment.Amount - feeAmount, 2);
+
+        if ((request.ProviderFeeAmount.HasValue || request.ProviderNetAmount.HasValue) &&
+            Math.Abs(netAmount - (payment.Amount - feeAmount)) > 0.01m)
+        {
+            throw new InvalidOperationException(
+                "Provider net amount must equal payment amount minus provider fee amount.");
+        }
+
+        payment.ProviderFeeAmount = feeAmount;
+        payment.ProviderNetAmount = netAmount;
+        payment.ProviderPayoutDate = request.ProviderPayoutDate.HasValue
+            ? NormalizeNullableDateTime(request.ProviderPayoutDate)
+            : payment.ProviderPayoutDate;
+        payment.ProviderSettledAt = request.ProviderSettledAt.HasValue
+            ? NormalizeNullableDateTime(request.ProviderSettledAt)
+            : payment.ProviderSettledAt;
+
+        if (request.ProviderSettlementId is not null)
+            payment.ProviderSettlementId = NormalizeOptionalText(request.ProviderSettlementId);
+
+        if (request.ProviderPaymentId is not null)
+            payment.ProviderPaymentId = NormalizeOptionalText(request.ProviderPaymentId);
+
+        if (request.ProviderStatus is not null)
+            payment.ProviderStatus = NormalizeOptionalText(request.ProviderStatus);
+
         await _context.SaveChangesAsync();
 
         return await GetPaymentDtoAsync(payment.Id);
@@ -857,6 +1095,11 @@ public class ClientPaymentService : IClientPaymentService
             PaymentProvider = payment.PaymentProvider,
             ProviderPaymentId = payment.ProviderPaymentId,
             ProviderStatus = payment.ProviderStatus,
+            ProviderFeeAmount = payment.ProviderFeeAmount,
+            ProviderNetAmount = ResolveProviderNetAmount(payment),
+            ProviderPayoutDate = payment.ProviderPayoutDate,
+            ProviderSettledAt = payment.ProviderSettledAt,
+            ProviderSettlementId = payment.ProviderSettlementId,
             CheckoutUrl = payment.CheckoutUrl,
             CheckoutExpiresAt = payment.CheckoutExpiresAt,
             WebhookReceivedAt = payment.WebhookReceivedAt,
@@ -868,6 +1111,46 @@ public class ClientPaymentService : IClientPaymentService
             ReceiptIssuedByUserId = payment.ReceiptIssuedByUserId,
             ReceiptNote = payment.ReceiptNote
         };
+    }
+
+    private static RevenueBreakdownDto BuildRevenueBreakdown(
+        string key,
+        string label,
+        IEnumerable<ClientPayment> payments)
+    {
+        var items = payments.ToList();
+
+        return new RevenueBreakdownDto
+        {
+            Key = key,
+            Label = label,
+            PaymentCount = items.Count,
+            GrossAmount = items.Sum(x => x.Amount),
+            ProviderFeeAmount = items.Sum(x => x.ProviderFeeAmount),
+            NetAmount = items.Sum(ResolveProviderNetAmount),
+            AppliedToPackageAmount = items.Sum(x => x.AppliedToPackageAmount),
+            BalanceCreditAmount = items.Sum(x => x.BalanceCreditAmount)
+        };
+    }
+
+    private static RevenueBreakdownKey ResolvePaymentLifecycle(ClientPayment payment)
+    {
+        if (payment.ClientPackage is null)
+            return new RevenueBreakdownKey("without-package", "Bez pakietu");
+
+        return IsRenewalPayment(payment)
+            ? new RevenueBreakdownKey("renewal", "Odnowienie")
+            : new RevenueBreakdownKey("new", "Nowa płatność");
+    }
+
+    private static bool IsRenewalPayment(ClientPayment payment)
+    {
+        return payment.ClientPackage?.PreviousClientPackageId.HasValue == true;
+    }
+
+    private static decimal ResolveProviderNetAmount(ClientPayment payment)
+    {
+        return decimal.Round(payment.ProviderNetAmount ?? payment.Amount - payment.ProviderFeeAmount, 2);
     }
 
     private static ClientPackageBillingDto MapPackage(
@@ -951,6 +1234,32 @@ public class ClientPaymentService : IClientPaymentService
         return decimal.Round(amount, 2);
     }
 
+    private static decimal NormalizeProviderFeeAmount(decimal amount, decimal paymentAmount)
+    {
+        if (amount < 0)
+            throw new InvalidOperationException("Provider fee amount cannot be negative.");
+
+        var normalized = decimal.Round(amount, 2);
+
+        if (normalized > paymentAmount)
+            throw new InvalidOperationException("Provider fee amount cannot be greater than payment amount.");
+
+        return normalized;
+    }
+
+    private static decimal NormalizeProviderNetAmount(decimal amount, decimal paymentAmount)
+    {
+        if (amount < 0)
+            throw new InvalidOperationException("Provider net amount cannot be negative.");
+
+        var normalized = decimal.Round(amount, 2);
+
+        if (normalized > paymentAmount)
+            throw new InvalidOperationException("Provider net amount cannot be greater than payment amount.");
+
+        return normalized;
+    }
+
     private static string? NormalizeOptionalText(string? value)
     {
         var normalized = value?.Trim();
@@ -977,4 +1286,6 @@ public class ClientPaymentService : IClientPaymentService
         string? PaymentProvider,
         bool ReceiptRequired,
         FiscalReceiptMode FiscalReceiptMode);
+
+    private sealed record RevenueBreakdownKey(string Key, string Label);
 }

@@ -7,6 +7,7 @@ public interface IClientPaymentService
     Task<ClientBillingSummaryDto> GetCurrentClientSummaryAsync();
     Task<ClientBillingSummaryDto> GetClientSummaryAsync(int clientId);
     Task<PagedResultDto<ClientPaymentDto>> GetPaymentsAsync(ClientPaymentFilterDto filter);
+    Task<RevenueStatisticsDto> GetRevenueStatisticsAsync(RevenueAnalysisFilterDto filter);
     Task<PagedResultDto<ClientPaymentDto>> GetClientPaymentsAsync(int clientId, ClientPaymentFilterDto filter);
     Task<PagedResultDto<ClientBalanceTransactionDto>> GetClientBalanceTransactionsAsync(int clientId, int page, int pageSize);
     Task<ClientPackageBillingDto?> GetActivePackageAsync(int clientId);
@@ -15,6 +16,7 @@ public interface IClientPaymentService
     Task<ClientPaymentDto> RequestPaymentAsClientAsync(CreateClientPaymentRequest request);
     Task<ClientPaymentDto> CreatePaymentAsStaffAsync(CreateClientPaymentRequest request);
     Task<ClientPaymentDto> ConfirmAsync(int paymentId);
+    Task<ClientPaymentDto> UpdateProviderSettlementAsync(int paymentId, UpdatePaymentProviderSettlementRequest request);
     Task<ClientPaymentDto> RejectAsync(int paymentId, RejectClientPaymentRequest request);
     Task<ClientPaymentDto> IssueReceiptAsync(int paymentId, IssueReceiptRequest request);
     Task<ClientPaymentDto> CancelReceiptAsync(int paymentId);

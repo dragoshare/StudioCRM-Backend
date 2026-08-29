@@ -50,6 +50,14 @@ public class BillingController : ControllerBase
             Ok(await _clientPaymentService.GetPaymentsAsync(filter)));
     }
 
+    [HttpGet("revenue/statistics")]
+    public async Task<ActionResult<RevenueStatisticsDto>> GetRevenueStatistics(
+        [FromQuery] RevenueAnalysisFilterDto filter)
+    {
+        return await HandleAsync<RevenueStatisticsDto>(async () =>
+            Ok(await _clientPaymentService.GetRevenueStatisticsAsync(filter)));
+    }
+
     [HttpGet("clients/{clientId:int}/payments")]
     public async Task<ActionResult<PagedResultDto<ClientPaymentDto>>> GetClientPayments(
         int clientId,
@@ -100,6 +108,17 @@ public class BillingController : ControllerBase
     {
         return await HandleAsync<ClientPaymentDto>(async () =>
             Ok(await _clientPaymentService.ConfirmAsync(paymentId)));
+    }
+
+    [HttpPatch("payments/{paymentId:int}/provider-settlement")]
+    public async Task<ActionResult<ClientPaymentDto>> UpdateProviderSettlement(
+        int paymentId,
+        [FromBody] UpdatePaymentProviderSettlementRequest? request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.UpdateProviderSettlementAsync(
+                paymentId,
+                request ?? new UpdatePaymentProviderSettlementRequest())));
     }
 
     [HttpPost("payments/{paymentId:int}/reject")]

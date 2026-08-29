@@ -2,6 +2,7 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Auth;
+using StudioCRM.Application.DTOs.Profiles;
 using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Api.Controllers;
@@ -11,10 +12,14 @@ namespace StudioCRM.Api.Controllers;
 public class AuthController : ControllerBase
 {
     private readonly IAuthService _authService;
+    private readonly IAvatarService _avatarService;
 
-    public AuthController(IAuthService authService)
+    public AuthController(
+        IAuthService authService,
+        IAvatarService avatarService)
     {
         _authService = authService;
+        _avatarService = avatarService;
     }
 
     [Authorize(Roles = "Owner")]
@@ -116,5 +121,47 @@ public class AuthController : ControllerBase
         }
 
         return Ok(result);
+    }
+
+    [Authorize]
+    [HttpPost("me/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AvatarDto>> UploadMyAvatar(
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file is null)
+            return BadRequest(new { message = "Avatar file is required." });
+
+        return await HandleAvatarAsync(async () =>
+        {
+            await using var stream = file.OpenReadStream();
+            return Ok(await _avatarService.UploadCurrentUserAvatarAsync(
+                stream,
+                file.FileName,
+                file.ContentType,
+                file.Length,
+                cancellationToken));
+        });
+    }
+
+    [Authorize]
+    [HttpDelete("me/avatar")]
+    public async Task<ActionResult<AvatarDto>> DeleteMyAvatar(CancellationToken cancellationToken)
+    {
+        return await HandleAvatarAsync(async () =>
+            Ok(await _avatarService.DeleteCurrentUserAvatarAsync(cancellationToken)));
+    }
+
+    private async Task<ActionResult<AvatarDto>> HandleAvatarAsync(Func<Task<ActionResult<AvatarDto>>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }

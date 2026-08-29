@@ -454,6 +454,16 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.ProviderStatus)
                 .HasMaxLength(100);
 
+            entity.Property(x => x.ProviderFeeAmount)
+                .HasPrecision(18, 2)
+                .HasDefaultValue(0m);
+
+            entity.Property(x => x.ProviderNetAmount)
+                .HasPrecision(18, 2);
+
+            entity.Property(x => x.ProviderSettlementId)
+                .HasMaxLength(200);
+
             entity.Property(x => x.CheckoutUrl)
                 .HasMaxLength(1000);
 
@@ -497,6 +507,8 @@ public class StudioCRMDbContext : DbContext
             entity.HasIndex(x => x.LegalEntityId);
             entity.HasIndex(x => x.PaymentProviderAccountId);
             entity.HasIndex(x => x.ProviderPaymentId);
+            entity.HasIndex(x => x.ProviderPayoutDate);
+            entity.HasIndex(x => x.ProviderSettlementId);
             entity.HasIndex(x => x.Status);
             entity.HasIndex(x => x.ReceiptStatus);
         });

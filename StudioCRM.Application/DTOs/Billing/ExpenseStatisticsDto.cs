@@ -18,7 +18,10 @@ public class ExpenseStatisticsDto
     public decimal OverdueGrossAmount { get; set; }
 
     public decimal RevenueGrossAmount { get; set; }
+    public decimal PaymentProviderFeeAmount { get; set; }
+    public decimal RevenueNetAmount { get; set; }
     public decimal OperatingProfitGrossAmount { get; set; }
+    public decimal OperatingProfitNetAmount { get; set; }
 
     public List<ExpenseBreakdownDto> ByLegalEntity { get; set; } = new();
     public List<ExpenseBreakdownDto> ByLocation { get; set; } = new();

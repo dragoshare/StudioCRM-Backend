@@ -45,6 +45,11 @@ public class ClientPaymentDto
     public string? PaymentProvider { get; set; }
     public string? ProviderPaymentId { get; set; }
     public string? ProviderStatus { get; set; }
+    public decimal ProviderFeeAmount { get; set; }
+    public decimal ProviderNetAmount { get; set; }
+    public DateTime? ProviderPayoutDate { get; set; }
+    public DateTime? ProviderSettledAt { get; set; }
+    public string? ProviderSettlementId { get; set; }
     public string? CheckoutUrl { get; set; }
     public DateTime? CheckoutExpiresAt { get; set; }
     public DateTime? WebhookReceivedAt { get; set; }
