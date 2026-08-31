@@ -295,6 +295,7 @@ public class ClientPaymentService : IClientPaymentService
         var activePackage = await _context.ClientPackages
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
+                .ThenInclude(l => l!.LegalEntity)
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
@@ -846,6 +847,7 @@ public class ClientPaymentService : IClientPaymentService
 
         var clientPackageEntities = await _context.ClientPackages
             .Include(cp => cp.Location)
+                .ThenInclude(l => l!.LegalEntity)
             .Where(cp => cp.ClientId == client.Id)
             .OrderByDescending(cp => cp.IsActive)
             .ThenByDescending(cp => cp.PurchaseDate)

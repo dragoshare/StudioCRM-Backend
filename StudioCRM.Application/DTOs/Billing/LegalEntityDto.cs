@@ -14,6 +14,16 @@ public class LegalEntityDto
 
     public string? Phone { get; set; }
 
+    public string? PaymentRecipientName { get; set; }
+
+    public string? BankAccountNumber { get; set; }
+
+    public string? BlikPhoneNumber { get; set; }
+
+    public string? TransferTitleTemplate { get; set; }
+
+    public string? PaymentDescription { get; set; }
+
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }

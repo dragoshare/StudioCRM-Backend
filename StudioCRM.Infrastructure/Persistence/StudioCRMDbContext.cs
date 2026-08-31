@@ -642,6 +642,21 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.Phone)
                 .HasMaxLength(50);
 
+            entity.Property(x => x.PaymentRecipientName)
+                .HasMaxLength(200);
+
+            entity.Property(x => x.BankAccountNumber)
+                .HasMaxLength(64);
+
+            entity.Property(x => x.BlikPhoneNumber)
+                .HasMaxLength(32);
+
+            entity.Property(x => x.TransferTitleTemplate)
+                .HasMaxLength(300);
+
+            entity.Property(x => x.PaymentDescription)
+                .HasMaxLength(1000);
+
             entity.HasIndex(x => x.Nip);
         });
 

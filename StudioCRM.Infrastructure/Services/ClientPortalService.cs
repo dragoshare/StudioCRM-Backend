@@ -249,6 +249,7 @@ public class ClientPortalService : IClientPortalService
 
         var activePackage = await _context.ClientPackages
             .Include(cp => cp.Location)
+                .ThenInclude(l => l!.LegalEntity)
             .Where(cp => cp.ClientId == client.Id && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
@@ -319,6 +320,7 @@ public class ClientPortalService : IClientPortalService
 
         return _context.Clients
             .Include(c => c.Location)
+                .ThenInclude(l => l!.LegalEntity)
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Where(c => c.UserId == _currentUser.UserId.Value);

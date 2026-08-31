@@ -126,12 +126,33 @@ public static class DataSeeder
 
     private static async Task SeedLocationsAsync(StudioCRMDbContext context)
     {
+        var niepolomiceLegalEntity = await EnsureLegalEntityAsync(
+            context,
+            "BS Workout Niepołomice",
+            "ul. Bocheńska 12, Niepołomice",
+            "BS Workout Niepołomice",
+            "12 3456 7890 1234 5678 9012 3456",
+            "501100098",
+            "Pakiet {PackageName} - {ClientFullName}",
+            "W tytule przelewu wpisz nazwę pakietu i swoje imię oraz nazwisko.");
+
+        var klajLegalEntity = await EnsureLegalEntityAsync(
+            context,
+            "BS Workout Kłaj",
+            "ul. Sportowa 4, Kłaj",
+            "BS Workout Kłaj",
+            "98 7654 3210 9876 5432 1098 7654",
+            "501100098",
+            "Pakiet {PackageName} - {ClientFullName}",
+            "W tytule przelewu wpisz nazwę pakietu i swoje imię oraz nazwisko.");
+
         await EnsureLocationAsync(
             context,
             "Niepołomice",
             "Niepołomice",
             "ul. Bocheńska 12",
             "niepolomice8_studio@bsworkout.pl",
+            niepolomiceLegalEntity.Id,
             "BS Workout Niepołomice",
             "12 3456 7890 1234 5678 9012 3456",
             "501100098",
@@ -144,11 +165,59 @@ public static class DataSeeder
             "Kłaj",
             "ul. Sportowa 4",
             "klaj237_studio@bsworkout.pl",
+            klajLegalEntity.Id,
             "BS Workout Kłaj",
             "98 7654 3210 9876 5432 1098 7654",
             "501100098",
             "Pakiet {PackageName} - {ClientFullName}",
             "W tytule przelewu wpisz nazwę pakietu i swoje imię oraz nazwisko.");
+    }
+
+    private static async Task<LegalEntity> EnsureLegalEntityAsync(
+        StudioCRMDbContext context,
+        string name,
+        string address,
+        string paymentRecipientName,
+        string bankAccountNumber,
+        string blikPhoneNumber,
+        string transferTitleTemplate,
+        string paymentDescription)
+    {
+        var legalEntity = await context.LegalEntities.FirstOrDefaultAsync(l => l.Name == name);
+
+        if (legalEntity is null)
+        {
+            legalEntity = new LegalEntity
+            {
+                Name = name,
+                Address = address,
+                PaymentRecipientName = paymentRecipientName,
+                BankAccountNumber = bankAccountNumber,
+                BlikPhoneNumber = blikPhoneNumber,
+                TransferTitleTemplate = transferTitleTemplate,
+                PaymentDescription = paymentDescription,
+                IsActive = true,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            };
+
+            await context.LegalEntities.AddAsync(legalEntity);
+        }
+        else
+        {
+            legalEntity.Address = address;
+            legalEntity.PaymentRecipientName = paymentRecipientName;
+            legalEntity.BankAccountNumber = bankAccountNumber;
+            legalEntity.BlikPhoneNumber = blikPhoneNumber;
+            legalEntity.TransferTitleTemplate = transferTitleTemplate;
+            legalEntity.PaymentDescription = paymentDescription;
+            legalEntity.IsActive = true;
+            legalEntity.UpdatedAt = DateTime.UtcNow;
+        }
+
+        await context.SaveChangesAsync();
+
+        return legalEntity;
     }
 
     private static async Task EnsureLocationAsync(
@@ -157,6 +226,7 @@ public static class DataSeeder
         string city,
         string address,
         string calendarEmail,
+        int legalEntityId,
         string paymentRecipientName,
         string bankAccountNumber,
         string blikPhoneNumber,
@@ -173,6 +243,7 @@ public static class DataSeeder
                 City = city,
                 Address = address,
                 CalendarEmail = calendarEmail,
+                LegalEntityId = legalEntityId,
                 PaymentRecipientName = paymentRecipientName,
                 BankAccountNumber = bankAccountNumber,
                 BlikPhoneNumber = blikPhoneNumber,
@@ -187,6 +258,7 @@ public static class DataSeeder
             location.City = city;
             location.Address = address;
             location.CalendarEmail = calendarEmail;
+            location.LegalEntityId = legalEntityId;
             location.PaymentRecipientName = paymentRecipientName;
             location.BankAccountNumber = bankAccountNumber;
             location.BlikPhoneNumber = blikPhoneNumber;

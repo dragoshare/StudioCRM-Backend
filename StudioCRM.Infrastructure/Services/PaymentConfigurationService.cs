@@ -51,6 +51,11 @@ public class PaymentConfigurationService : IPaymentConfigurationService
             Address = NormalizeOptionalText(request.Address),
             Email = NormalizeOptionalText(request.Email),
             Phone = NormalizeOptionalText(request.Phone),
+            PaymentRecipientName = NormalizeOptionalText(request.PaymentRecipientName),
+            BankAccountNumber = NormalizeOptionalText(request.BankAccountNumber),
+            BlikPhoneNumber = NormalizeOptionalText(request.BlikPhoneNumber),
+            TransferTitleTemplate = NormalizeOptionalText(request.TransferTitleTemplate),
+            PaymentDescription = NormalizeOptionalText(request.PaymentDescription),
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -74,6 +79,11 @@ public class PaymentConfigurationService : IPaymentConfigurationService
         legalEntity.Address = NormalizeOptionalText(request.Address);
         legalEntity.Email = NormalizeOptionalText(request.Email);
         legalEntity.Phone = NormalizeOptionalText(request.Phone);
+        legalEntity.PaymentRecipientName = NormalizeOptionalText(request.PaymentRecipientName);
+        legalEntity.BankAccountNumber = NormalizeOptionalText(request.BankAccountNumber);
+        legalEntity.BlikPhoneNumber = NormalizeOptionalText(request.BlikPhoneNumber);
+        legalEntity.TransferTitleTemplate = NormalizeOptionalText(request.TransferTitleTemplate);
+        legalEntity.PaymentDescription = NormalizeOptionalText(request.PaymentDescription);
         legalEntity.IsActive = request.IsActive;
         legalEntity.UpdatedAt = DateTime.UtcNow;
 
@@ -180,6 +190,11 @@ public class PaymentConfigurationService : IPaymentConfigurationService
             Address = legalEntity.Address,
             Email = legalEntity.Email,
             Phone = legalEntity.Phone,
+            PaymentRecipientName = legalEntity.PaymentRecipientName,
+            BankAccountNumber = legalEntity.BankAccountNumber,
+            BlikPhoneNumber = legalEntity.BlikPhoneNumber,
+            TransferTitleTemplate = legalEntity.TransferTitleTemplate,
+            PaymentDescription = legalEntity.PaymentDescription,
             IsActive = legalEntity.IsActive,
             CreatedAt = legalEntity.CreatedAt,
             UpdatedAt = legalEntity.UpdatedAt

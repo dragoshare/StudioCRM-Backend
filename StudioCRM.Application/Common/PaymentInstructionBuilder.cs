@@ -16,15 +16,21 @@ public static class PaymentInstructionBuilder
         decimal amountDue,
         string currency)
     {
-        var titleTemplate = string.IsNullOrWhiteSpace(location?.TransferTitleTemplate)
-            ? DefaultTransferTitleTemplate
-            : location.TransferTitleTemplate!;
+        var legalEntity = location?.LegalEntity;
+        var titleTemplate = FirstFilled(
+                location?.TransferTitleTemplate,
+                legalEntity?.TransferTitleTemplate)
+            ?? DefaultTransferTitleTemplate;
+
+        var descriptionTemplate = FirstFilled(
+            location?.PaymentDescription,
+            legalEntity?.PaymentDescription);
 
         return new PaymentInstructionsDto
         {
-            RecipientName = Normalize(location?.PaymentRecipientName),
-            BankAccountNumber = Normalize(location?.BankAccountNumber),
-            BlikPhoneNumber = Normalize(location?.BlikPhoneNumber),
+            RecipientName = FirstFilled(location?.PaymentRecipientName, legalEntity?.PaymentRecipientName, legalEntity?.Name),
+            BankAccountNumber = FirstFilled(location?.BankAccountNumber, legalEntity?.BankAccountNumber),
+            BlikPhoneNumber = FirstFilled(location?.BlikPhoneNumber, legalEntity?.BlikPhoneNumber),
             TransferTitle = ResolveTemplate(
                 titleTemplate,
                 clientFullName,
@@ -33,13 +39,26 @@ public static class PaymentInstructionBuilder
                 amountDue,
                 currency),
             Description = ResolveTemplate(
-                location?.PaymentDescription,
+                descriptionTemplate,
                 clientFullName,
                 packageName,
                 clientPackageId,
                 amountDue,
                 currency)
         };
+    }
+
+    private static string? FirstFilled(params string?[] values)
+    {
+        foreach (var value in values)
+        {
+            var normalized = Normalize(value);
+
+            if (normalized is not null)
+                return normalized;
+        }
+
+        return null;
     }
 
     private static string? ResolveTemplate(
