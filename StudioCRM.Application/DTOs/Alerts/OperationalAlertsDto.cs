@@ -21,6 +21,7 @@ public class OperationalAlertDto
     public string? TrainerName { get; set; }
     public int? SessionId { get; set; }
     public int? PaymentId { get; set; }
+    public int? ClientPackageId { get; set; }
     public int? InvitationId { get; set; }
     public int? TrainerContractId { get; set; }
     public int? SettlementId { get; set; }

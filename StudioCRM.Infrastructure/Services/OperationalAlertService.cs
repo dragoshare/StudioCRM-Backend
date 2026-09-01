@@ -41,6 +41,8 @@ public class OperationalAlertService : IOperationalAlertService
         alerts.AddRange(await BuildPendingPaymentAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildClientWithoutPackageAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildPackageEndingAlertsAsync(filter, trainerId));
+        alerts.AddRange(await BuildPackagePaymentRequiredAlertsAsync(filter, trainerId));
+        alerts.AddRange(await BuildCompletedPackageWithoutRenewalAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildRenewalCancellationAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildOutlookSyncAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildLocationLimitAlertsAsync(filter, trainerId));
@@ -104,7 +106,14 @@ public class OperationalAlertService : IOperationalAlertService
             .Where(c =>
                 !c.IsDeleted &&
                 c.Status != "Inactive" &&
-                !_context.ClientPackages.Any(cp => cp.ClientId == c.Id && cp.IsActive));
+                !_context.ClientPackages.Any(cp => cp.ClientId == c.Id && cp.IsActive) &&
+                !_context.ClientPackages.Any(cp =>
+                    cp.ClientId == c.Id &&
+                    !cp.IsActive &&
+                    cp.TotalSessions > 0 &&
+                    cp.UsedSessions >= cp.TotalSessions &&
+                    c.SubscriptionAutoRenewEnabled &&
+                    c.RenewalCancellationRequestedAt == null));
 
         query = ApplyClientScope(query, filter.LocationId, trainerId);
 
@@ -152,6 +161,94 @@ public class OperationalAlertService : IOperationalAlertService
                 Message = $"{cp.Client.FirstName} {cp.Client.LastName}: zostało {cp.TotalSessions - cp.UsedSessions} treningów",
                 ClientId = cp.ClientId,
                 ClientName = cp.Client.FirstName + " " + cp.Client.LastName,
+                LocationId = cp.Client.LocationId,
+                LocationName = cp.Client.Location.Name,
+                CreatedAt = cp.PurchaseDate,
+                DueAt = cp.ValidUntil,
+                ActionUrl = $"/clients/{cp.ClientId}/workspace"
+            })
+            .ToListAsync();
+    }
+
+    private async Task<List<OperationalAlertDto>> BuildPackagePaymentRequiredAlertsAsync(
+        OperationalAlertFilterDto filter,
+        int? trainerId)
+    {
+        var query = _context.ClientPackages
+            .Include(cp => cp.Client)
+                .ThenInclude(c => c.Location)
+            .Where(cp =>
+                cp.IsActive &&
+                cp.TotalPrice > cp.AmountPaid &&
+                cp.PaymentStatus != PaymentStatus.Paid &&
+                cp.PaymentStatus != PaymentStatus.PendingConfirmation);
+
+        query = ApplyClientPackageScope(query, filter.LocationId, trainerId);
+
+        var packages = await query
+            .OrderBy(cp => cp.PaymentDueDate ?? cp.PurchaseDate)
+            .Take(20)
+            .ToListAsync();
+
+        return packages
+            .Select(cp =>
+            {
+                var remainingSessions = Math.Max(0, cp.TotalSessions - cp.UsedSessions);
+                var amountDue = Math.Max(0, cp.TotalPrice - cp.AmountPaid);
+                var isEnded = cp.TotalSessions > 0 && cp.UsedSessions >= cp.TotalSessions;
+
+                return new OperationalAlertDto
+                {
+                    Type = isEnded ? "PackageEndedPaymentRequired" : "PackagePaymentRequired",
+                    Severity = cp.PaymentStatus == PaymentStatus.Overdue || isEnded ? "Warning" : "Info",
+                    Title = isEnded ? "Pakiet zakończony - wymaga opłacenia" : "Pakiet wymaga opłacenia",
+                    Message = isEnded
+                        ? $"{cp.Client.FirstName} {cp.Client.LastName}: pakiet {cp.Name} został wykorzystany, do zapłaty {amountDue} {cp.Currency}"
+                        : $"{cp.Client.FirstName} {cp.Client.LastName}: {cp.Name}, do zapłaty {amountDue} {cp.Currency}, zostało {remainingSessions} treningów",
+                    ClientId = cp.ClientId,
+                    ClientName = cp.Client.FirstName + " " + cp.Client.LastName,
+                    ClientPackageId = cp.Id,
+                    LocationId = cp.Client.LocationId,
+                    LocationName = cp.Client.Location.Name,
+                    CreatedAt = cp.PurchaseDate,
+                    DueAt = cp.PaymentDueDate,
+                    ActionUrl = $"/clients/{cp.ClientId}/workspace"
+                };
+            })
+            .ToList();
+    }
+
+    private async Task<List<OperationalAlertDto>> BuildCompletedPackageWithoutRenewalAlertsAsync(
+        OperationalAlertFilterDto filter,
+        int? trainerId)
+    {
+        var query = _context.ClientPackages
+            .Include(cp => cp.Client)
+                .ThenInclude(c => c.Location)
+            .Where(cp =>
+                !cp.IsActive &&
+                cp.TotalSessions > 0 &&
+                cp.UsedSessions >= cp.TotalSessions &&
+                cp.Client.SubscriptionAutoRenewEnabled &&
+                cp.Client.RenewalCancellationRequestedAt == null &&
+                !_context.ClientPackages.Any(active =>
+                    active.ClientId == cp.ClientId &&
+                    active.IsActive));
+
+        query = ApplyClientPackageScope(query, filter.LocationId, trainerId);
+
+        return await query
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .Take(20)
+            .Select(cp => new OperationalAlertDto
+            {
+                Type = "PackageEndedPaymentRequired",
+                Severity = "Warning",
+                Title = "Pakiet zakończony - brak kolejnego cyklu",
+                Message = $"{cp.Client.FirstName} {cp.Client.LastName}: pakiet {cp.Name} został wykorzystany i wymaga odnowienia/opłacenia",
+                ClientId = cp.ClientId,
+                ClientName = cp.Client.FirstName + " " + cp.Client.LastName,
+                ClientPackageId = cp.Id,
                 LocationId = cp.Client.LocationId,
                 LocationName = cp.Client.Location.Name,
                 CreatedAt = cp.PurchaseDate,

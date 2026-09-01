@@ -206,6 +206,9 @@ public class NotificationService : INotificationService
         if (alert.PaymentId.HasValue)
             return ("payment", alert.PaymentId.Value);
 
+        if (alert.ClientPackageId.HasValue)
+            return ("client_package", alert.ClientPackageId.Value);
+
         if (alert.SessionId.HasValue)
             return ("session", alert.SessionId.Value);
 
