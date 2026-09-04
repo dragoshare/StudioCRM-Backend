@@ -26,7 +26,9 @@ public class TrainerPortalMilestonesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var rewards = await _milestoneService.GetPendingRewardsForTrainerAsync(userId.Value);
+        var rewards = User.IsInRole("Owner")
+            ? await _milestoneService.GetPendingRewardsForOwnerAsync()
+            : await _milestoneService.GetPendingRewardsForTrainerAsync(userId.Value);
 
         return Ok(rewards);
     }
@@ -39,9 +41,10 @@ public class TrainerPortalMilestonesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var hasAccess = await _milestoneService.TrainerHasAccessToClientAsync(
-            userId.Value,
-            clientId);
+        var hasAccess = User.IsInRole("Owner") ||
+            await _milestoneService.TrainerHasAccessToClientAsync(
+                userId.Value,
+                clientId);
 
         if (!hasAccess)
             return Forbid();
@@ -65,11 +68,17 @@ public class TrainerPortalMilestonesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var success = await _milestoneService.ClaimRewardAsTrainerAsync(
-            userId.Value,
-            clientId,
-            milestoneDefinitionId,
-            request.Note);
+        var success = User.IsInRole("Owner")
+            ? await _milestoneService.ClaimRewardAsOwnerAsync(
+                userId.Value,
+                clientId,
+                milestoneDefinitionId,
+                request.Note)
+            : await _milestoneService.ClaimRewardAsTrainerAsync(
+                userId.Value,
+                clientId,
+                milestoneDefinitionId,
+                request.Note);
 
         if (!success)
         {
@@ -95,10 +104,15 @@ public class TrainerPortalMilestonesController : ControllerBase
         if (userId is null)
             return Unauthorized();
 
-        var success = await _milestoneService.UnclaimRewardAsTrainerAsync(
-            userId.Value,
-            clientId,
-            milestoneDefinitionId);
+        var success = User.IsInRole("Owner")
+            ? await _milestoneService.UnclaimRewardAsOwnerAsync(
+                userId.Value,
+                clientId,
+                milestoneDefinitionId)
+            : await _milestoneService.UnclaimRewardAsTrainerAsync(
+                userId.Value,
+                clientId,
+                milestoneDefinitionId);
 
         if (!success)
         {
