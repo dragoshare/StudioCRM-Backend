@@ -97,18 +97,15 @@ public class MilestoneService : IMilestoneService
             .ToListAsync();
 
         var now = DateTime.UtcNow.Date;
+        var tenureStartDate = ResolveTenureStartDate(client);
         var milestonesChanged = SyncAchievedMilestones(client, definitions, now);
 
         if (milestonesChanged)
             await _context.SaveChangesAsync();
 
-        var trainingDays = client.TrainingStartDate.HasValue
-            ? Math.Max(0, (now - client.TrainingStartDate.Value.Date).Days)
-            : 0;
+        var trainingDays = Math.Max(0, (now - tenureStartDate).Days);
 
-        var trainingMonths = client.TrainingStartDate.HasValue
-            ? CalculateFullMonths(client.TrainingStartDate.Value.Date, now)
-            : 0;
+        var trainingMonths = CalculateFullMonths(tenureStartDate, now);
 
         var result = new ClientMilestonesSummaryDto
         {
@@ -121,8 +118,8 @@ public class MilestoneService : IMilestoneService
 
         foreach (var definition in definitions)
         {
-            var achievedAt = client.TrainingStartDate?.Date.AddMonths(definition.RequiredMonths);
-            var isAchieved = client.TrainingStartDate.HasValue && achievedAt <= now;
+            var achievedAt = tenureStartDate.AddMonths(definition.RequiredMonths);
+            var isAchieved = achievedAt <= now;
 
             var existing = client.Milestones
                 .FirstOrDefault(x => x.MilestoneDefinitionId == definition.Id);
@@ -269,7 +266,7 @@ public class MilestoneService : IMilestoneService
             .Include(c => c.Milestones)
             .FirstOrDefaultAsync(c => c.Id == clientId);
 
-        if (client is null || client.TrainingStartDate is null)
+        if (client is null)
             return false;
 
         var definition = await _context.MilestoneDefinitions
@@ -278,7 +275,7 @@ public class MilestoneService : IMilestoneService
         if (definition is null)
             return false;
 
-        var achievedAt = client.TrainingStartDate.Value.Date.AddMonths(definition.RequiredMonths);
+        var achievedAt = ResolveTenureStartDate(client).AddMonths(definition.RequiredMonths);
 
         if (achievedAt > DateTime.UtcNow.Date)
             return false;
@@ -362,12 +359,10 @@ public class MilestoneService : IMilestoneService
 
         foreach (var client in clients)
         {
-            if (client.TrainingStartDate is null)
-                continue;
-
+            var tenureStartDate = ResolveTenureStartDate(client);
             foreach (var definition in definitions)
             {
-                var achievedAt = client.TrainingStartDate.Value.Date.AddMonths(definition.RequiredMonths);
+                var achievedAt = tenureStartDate.AddMonths(definition.RequiredMonths);
 
                 if (achievedAt > now)
                     continue;
@@ -401,15 +396,12 @@ public class MilestoneService : IMilestoneService
         IReadOnlyCollection<MilestoneDefinition> definitions,
         DateTime now)
     {
-        if (client.TrainingStartDate is null)
-            return false;
-
         var changed = false;
-        var trainingStartDate = client.TrainingStartDate.Value.Date;
+        var tenureStartDate = ResolveTenureStartDate(client);
 
         foreach (var definition in definitions)
         {
-            var achievedAt = trainingStartDate.AddMonths(definition.RequiredMonths);
+            var achievedAt = tenureStartDate.AddMonths(definition.RequiredMonths);
 
             if (achievedAt > now)
                 continue;
@@ -442,6 +434,11 @@ public class MilestoneService : IMilestoneService
         }
 
         return changed;
+    }
+
+    private static DateTime ResolveTenureStartDate(Client client)
+    {
+        return (client.TrainingStartDate ?? client.CreatedAt).Date;
     }
 
     private static void ApplyDefinitionRequest(
