@@ -556,6 +556,8 @@ public class TrainerPortalService : ITrainerPortalService
                 Goal = c.Goal,
                 Notes = c.Notes,
                 BillingStatus = c.BillingStatus,
+                Source = c.Source,
+                PortalAccessMode = c.TrainerId.HasValue ? "FullCrm" : "GroupOnly",
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
                 TrainingStartDate = c.TrainingStartDate,

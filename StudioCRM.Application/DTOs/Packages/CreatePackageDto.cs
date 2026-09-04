@@ -14,6 +14,8 @@ public class CreatePackageDto
     public SessionBillingType BillingType { get; set; } = SessionBillingType.OneToOne;
     public int? ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
+    public bool IsPubliclyAvailable { get; set; }
+    public string? PublicSlug { get; set; }
     public bool IsActive { get; set; } = true;
     public int? CreatedBy { get; set; }
 }

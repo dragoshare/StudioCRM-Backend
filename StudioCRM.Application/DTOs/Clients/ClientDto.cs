@@ -30,6 +30,10 @@ public class ClientDto
 
     public string BillingStatus { get; set; } = string.Empty;
 
+    public string Source { get; set; } = string.Empty;
+
+    public string PortalAccessMode { get; set; } = string.Empty;
+
     public string Status { get; set; } = string.Empty;
 
     public DateTime? NextSessionAt { get; set; }

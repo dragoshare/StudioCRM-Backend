@@ -112,6 +112,8 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto> CreateAsync(CreateSessionDto request)
     {
+        var participants = request.Participants ?? new List<CreateSessionParticipantDto>();
+        request.Participants = participants;
         var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
         var normalizedEndAt = await ResolveCreateSessionEndAtAsync(request.EndAt, normalizedStartAt);
         var requestedStatus = string.IsNullOrWhiteSpace(request.Status)
@@ -128,10 +130,13 @@ public class SessionService : ISessionService
             request.LocationId,
             normalizedStartAt,
             normalizedEndAt,
-            request.Participants,
+            request.IsPubliclyBookable,
+            request.PublicCapacity,
+            request.PlannedSessionType,
+            participants,
             excludedSessionId: null);
 
-        var clients = await GetClientsForParticipantsAsync(request.Participants);
+        var clients = await GetClientsForParticipantsAsync(participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories);
@@ -160,7 +165,10 @@ public class SessionService : ISessionService
                 LocationId = request.LocationId,
                 StudioRoom = null,
                 Status = requestedStatus,
-                PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count),
+                IsPubliclyBookable = request.IsPubliclyBookable,
+                PublicSlug = NormalizePublicSlug(request.PublicSlug),
+                PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity),
+                PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count),
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
                 OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors),
                 PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
@@ -172,7 +180,12 @@ public class SessionService : ISessionService
             await _context.Sessions.AddAsync(session);
             await _context.SaveChangesAsync();
 
-            await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
+            await AddParticipantsToSessionAsync(
+                session.Id,
+                participants,
+                clients,
+                session.PlannedSessionType,
+                session.LocationId);
 
             if (requestedStatus == "Completed")
             {
@@ -222,6 +235,19 @@ public class SessionService : ISessionService
         if (session is null)
             return null;
 
+        var replaceParticipants = request.Participants is not null;
+        var participants = request.Participants ?? session.Participants
+            .Select(p => new CreateSessionParticipantDto
+            {
+                ClientId = p.ClientId,
+                CountsAgainstPackage = p.CountsAgainstPackage,
+                SessionsCharged = p.SessionsCharged,
+                Note = p.Note
+            })
+            .ToList();
+
+        request.Participants = participants;
+
         var requestedStatus = string.IsNullOrWhiteSpace(request.Status)
             ? "Planned"
             : request.Status;
@@ -249,10 +275,13 @@ public class SessionService : ISessionService
             request.LocationId,
             normalizedStartAt,
             normalizedEndAt,
-            request.Participants,
+            request.IsPubliclyBookable,
+            request.PublicCapacity,
+            request.PlannedSessionType,
+            participants,
             excludedSessionId: id);
 
-        var clients = await GetClientsForParticipantsAsync(request.Participants);
+        var clients = await GetClientsForParticipantsAsync(participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories);
@@ -278,7 +307,10 @@ public class SessionService : ISessionService
             session.LocationId = request.LocationId;
             session.StudioRoom = null;
             session.Status = requestedStatus;
-            session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(request.Participants.Count);
+            session.IsPubliclyBookable = request.IsPubliclyBookable;
+            session.PublicSlug = NormalizePublicSlug(request.PublicSlug);
+            session.PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity);
+            session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count);
             session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
             session.OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors);
             session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
@@ -286,7 +318,8 @@ public class SessionService : ISessionService
 
             if (currentHasPackageAccounting && requestedStatus == "Completed")
             {
-                EnsureCompletedSessionParticipantsWereNotChanged(session, request.Participants);
+                if (replaceParticipants)
+                    EnsureCompletedSessionParticipantsWereNotChanged(session, participants);
 
                 await _context.SaveChangesAsync();
                 await TrySyncSessionToOutlookAsync(session.Id);
@@ -308,11 +341,23 @@ public class SessionService : ISessionService
                 session.CompletedAt = null;
             }
 
-            _context.SessionParticipants.RemoveRange(session.Participants);
+            if (replaceParticipants)
+            {
+                _context.SessionParticipants.RemoveRange(session.Participants);
 
-            await _context.SaveChangesAsync();
+                await _context.SaveChangesAsync();
 
-            await AddParticipantsToSessionAsync(session.Id, request.Participants, clients);
+                await AddParticipantsToSessionAsync(
+                    session.Id,
+                    participants,
+                    clients,
+                    session.PlannedSessionType,
+                    session.LocationId);
+            }
+            else if (requestedStatus != "Completed")
+            {
+                await _context.SaveChangesAsync();
+            }
 
             if (requestedStatus == "Completed")
             {
@@ -754,6 +799,9 @@ public class SessionService : ISessionService
         int locationId,
         DateTime startAt,
         DateTime endAt,
+        bool isPubliclyBookable,
+        int? publicCapacity,
+        string? plannedSessionType,
         List<CreateSessionParticipantDto> participants,
         int? excludedSessionId)
     {
@@ -768,7 +816,12 @@ public class SessionService : ISessionService
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
 
-        if (participants is null || !participants.Any())
+        participants ??= new List<CreateSessionParticipantDto>();
+
+        var isGroupSession = isPubliclyBookable || IsGroupSessionType(plannedSessionType);
+        var normalizedPublicCapacity = NormalizePublicCapacity(isPubliclyBookable, publicCapacity);
+
+        if (!isGroupSession && !participants.Any())
             throw new InvalidOperationException("At least one participant is required.");
 
         var clientIds = participants.Select(p => p.ClientId).ToList();
@@ -777,7 +830,10 @@ public class SessionService : ISessionService
         if (clientIds.Count != distinctClientIds.Count)
             throw new InvalidOperationException("Duplicated clients in session participants.");
 
-        if (distinctClientIds.Count > TrainerConcurrentParticipantLimit)
+        if (isGroupSession && normalizedPublicCapacity.HasValue && distinctClientIds.Count > normalizedPublicCapacity.Value)
+            throw new InvalidOperationException("Group session participants count cannot exceed public capacity.");
+
+        if (!isGroupSession && distinctClientIds.Count > TrainerConcurrentParticipantLimit)
             throw new InvalidOperationException("A trainer can run a session for at most four participants.");
 
         var duplicateSlotSession = await _context.Sessions
@@ -805,12 +861,15 @@ public class SessionService : ISessionService
                 $"Trainer already has a session in this exact time slot ({start:yyyy-MM-dd HH:mm}-{end:HH:mm}, session #{duplicateSlotSession.Id}). Add participants to the existing session instead of creating another one.");
         }
 
-        await EnsureTrainerConcurrentParticipantLimitAsync(
-            trainerId,
-            startAt,
-            endAt,
-            distinctClientIds.Count,
-            excludedSessionId);
+        if (!isGroupSession)
+        {
+            await EnsureTrainerConcurrentParticipantLimitAsync(
+                trainerId,
+                startAt,
+                endAt,
+                distinctClientIds.Count,
+                excludedSessionId);
+        }
     }
 
     private async Task EnsureTrainerConcurrentParticipantLimitAsync(
@@ -904,12 +963,17 @@ public class SessionService : ISessionService
     private async Task AddParticipantsToSessionAsync(
         int sessionId,
         List<CreateSessionParticipantDto> participants,
-        List<Client> clients)
+        List<Client> clients,
+        string? plannedSessionType,
+        int sessionLocationId)
     {
         foreach (var participantRequest in participants)
         {
             var client = clients.First(c => c.Id == participantRequest.ClientId);
-            var activeClientPackage = await ResolveActiveClientPackageAsync(client.Id);
+            var activeClientPackage = await ResolveActiveClientPackageAsync(
+                client.Id,
+                plannedSessionType,
+                sessionLocationId);
             var sessionsCharged = NormalizeSessionsCharged(participantRequest.SessionsCharged);
 
             var participant = new SessionParticipant
@@ -941,7 +1005,7 @@ public class SessionService : ISessionService
         return new CompleteSessionDto
         {
             ActualSessionType = actualSessionType.ToString(),
-            Participants = request.Participants
+            Participants = request.Participants!
                 .Select(p => new CompleteSessionParticipantDto
                 {
                     ClientId = p.ClientId,
@@ -970,7 +1034,7 @@ public class SessionService : ISessionService
         return new CompleteSessionDto
         {
             ActualSessionType = actualSessionType.ToString(),
-            Participants = request.Participants
+            Participants = request.Participants!
                 .Select(p => new CompleteSessionParticipantDto
                 {
                     ClientId = p.ClientId,
@@ -991,7 +1055,7 @@ public class SessionService : ISessionService
             return plannedSessionType;
         }
 
-        return request.Participants.Count switch
+        return request.Participants!.Count switch
         {
             1 => SessionBillingType.OneToOne,
             2 => SessionBillingType.TwoToOne,
@@ -1009,7 +1073,7 @@ public class SessionService : ISessionService
             return plannedSessionType;
         }
 
-        return request.Participants.Count switch
+        return request.Participants!.Count switch
         {
             1 => SessionBillingType.OneToOne,
             2 => SessionBillingType.TwoToOne,
@@ -1019,10 +1083,19 @@ public class SessionService : ISessionService
         };
     }
 
-    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)
+    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(
+        int clientId,
+        string? plannedSessionType,
+        int sessionLocationId)
     {
+        var isGroupSession = IsGroupSessionType(plannedSessionType);
+
         return await _context.ClientPackages
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .Where(cp => isGroupSession
+                ? cp.ExpectedBillingType == SessionBillingType.Group
+                : cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.LocationId == null || cp.LocationId == sessionLocationId)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
     }
@@ -1139,6 +1212,12 @@ public class SessionService : ISessionService
             LocationId = s.LocationId,
             LocationName = s.Location.Name,
             Status = s.Status,
+            IsPubliclyBookable = s.IsPubliclyBookable,
+            PublicSlug = s.PublicSlug,
+            PublicCapacity = s.PublicCapacity,
+            PublicAvailableSpots = s.IsPubliclyBookable && s.PublicCapacity.HasValue
+                ? Math.Max(0, s.PublicCapacity.Value - participants.Count(p => p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"))
+                : null,
             PlannedSessionType = s.PlannedSessionType,
             ActualSessionType = s.ActualSessionType,
             ActualParticipantsCount = s.ActualParticipantsCount,
@@ -1399,6 +1478,32 @@ public class SessionService : ISessionService
     private static int NormalizeSessionsCharged(int value)
     {
         return Math.Max(1, value);
+    }
+
+    private static bool IsGroupSessionType(string? value)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            value.Trim().Equals(SessionBillingType.Group.ToString(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int? NormalizePublicCapacity(bool isPubliclyBookable, int? capacity)
+    {
+        if (!isPubliclyBookable)
+            return null;
+
+        if (!capacity.HasValue || capacity.Value < 1)
+            throw new InvalidOperationException("Public group session capacity is required.");
+
+        if (capacity.Value > 100)
+            throw new InvalidOperationException("Public group session capacity cannot exceed 100.");
+
+        return capacity.Value;
+    }
+
+    private static string? NormalizePublicSlug(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 
     private sealed class TrainerCapacityInterval

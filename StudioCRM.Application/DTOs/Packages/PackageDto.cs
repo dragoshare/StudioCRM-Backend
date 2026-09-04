@@ -17,6 +17,8 @@ public class PackageDto
     public int ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }
+    public bool IsPubliclyAvailable { get; set; }
+    public string? PublicSlug { get; set; }
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }

@@ -68,6 +68,18 @@ public class ExpensesController : ControllerBase
             .ToList());
     }
 
+    [HttpGet("recurrence-edit-scopes")]
+    public ActionResult<List<EnumOptionDto>> GetRecurrenceEditScopes()
+    {
+        return Ok(Enum.GetValues<ExpenseRecurrenceEditScope>()
+            .Select(x => new EnumOptionDto
+            {
+                Value = (int)x,
+                Name = x.ToString()
+            })
+            .ToList());
+    }
+
     [HttpPost]
     public async Task<ActionResult<CompanyExpenseDto>> CreateExpense(
         CreateCompanyExpenseRequest request)
@@ -162,11 +174,13 @@ public class ExpensesController : ControllerBase
     }
 
     [HttpDelete("{id:int}")]
-    public async Task<IActionResult> DeleteExpense(int id)
+    public async Task<IActionResult> DeleteExpense(
+        int id,
+        [FromQuery] ExpenseRecurrenceEditScope recurrenceEditScope = ExpenseRecurrenceEditScope.ThisOnly)
     {
         try
         {
-            var deleted = await _companyExpenseService.DeleteExpenseAsync(id);
+            var deleted = await _companyExpenseService.DeleteExpenseAsync(id, recurrenceEditScope);
             return deleted ? NoContent() : NotFound();
         }
         catch (InvalidOperationException ex)

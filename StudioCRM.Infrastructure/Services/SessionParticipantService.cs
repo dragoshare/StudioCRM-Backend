@@ -78,7 +78,10 @@ public class SessionParticipantService : ISessionParticipantService
         if (alreadyExists)
             throw new InvalidOperationException("Client is already assigned to this session.");
 
-        var activeClientPackage = await ResolveActiveClientPackageAsync(client.Id);
+        var activeClientPackage = await ResolveActiveClientPackageAsync(
+            client.Id,
+            session.PlannedSessionType,
+            session.LocationId);
         var sessionsCharged = NormalizeSessionsCharged(request.SessionsCharged);
 
         var participant = new SessionParticipant
@@ -225,7 +228,13 @@ public class SessionParticipantService : ISessionParticipantService
             if (participantRequest.CountsAgainstPackage && participantRequest.AttendanceStatus == "Present")
             {
                 var activeClientPackage = await _context.ClientPackages
-                    .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                    .Where(cp =>
+                        cp.ClientId == client.Id &&
+                        cp.IsActive &&
+                        (actualBillingType == SessionBillingType.Group
+                            ? cp.ExpectedBillingType == SessionBillingType.Group
+                            : cp.ExpectedBillingType != SessionBillingType.Group) &&
+                        (cp.LocationId == null || cp.LocationId == session.LocationId))
                     .OrderByDescending(cp => cp.PurchaseDate)
                     .FirstOrDefaultAsync();
 
@@ -479,10 +488,24 @@ public class SessionParticipantService : ISessionParticipantService
         }
     }
 
-    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(int clientId)
+    private async Task<ClientPackage?> ResolveActiveClientPackageAsync(
+        int clientId,
+        string? plannedSessionType,
+        int sessionLocationId)
     {
+        var isGroupSession = string.Equals(
+            plannedSessionType,
+            SessionBillingType.Group.ToString(),
+            StringComparison.OrdinalIgnoreCase);
+
         return await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .Where(cp =>
+                cp.ClientId == clientId &&
+                cp.IsActive &&
+                (isGroupSession
+                    ? cp.ExpectedBillingType == SessionBillingType.Group
+                    : cp.ExpectedBillingType != SessionBillingType.Group) &&
+                (cp.LocationId == null || cp.LocationId == sessionLocationId))
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
     }

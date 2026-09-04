@@ -26,6 +26,14 @@ public class SessionDto
 
     public string Status { get; set; } = string.Empty;
 
+    public bool IsPubliclyBookable { get; set; }
+
+    public string? PublicSlug { get; set; }
+
+    public int? PublicCapacity { get; set; }
+
+    public int? PublicAvailableSpots { get; set; }
+
     public string? PlannedSessionType { get; set; }
 
     public string? ActualSessionType { get; set; }

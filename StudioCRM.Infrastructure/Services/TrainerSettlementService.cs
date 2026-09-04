@@ -518,7 +518,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             2 => "TwoToOne",
             3 => "ThreeToOne",
             4 => "FourToOne",
-            _ => "FourToOne"
+            _ => "Group"
         };
     }
 

@@ -16,6 +16,7 @@ public class CompanyExpenseFilterDto
     public DateTime? PaidTo { get; set; }
     public string? Search { get; set; }
     public bool? IsRecurring { get; set; }
+    public string? RecurringGroupId { get; set; }
     public bool? IsOverdue { get; set; }
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 25;

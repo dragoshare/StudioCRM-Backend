@@ -28,6 +28,10 @@ public class Package
 
     public Location? Location { get; set; }
 
+    public bool IsPubliclyAvailable { get; set; }
+
+    public string? PublicSlug { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

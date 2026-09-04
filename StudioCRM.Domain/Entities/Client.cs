@@ -31,6 +31,8 @@ public class Client
 
     public string BillingStatus { get; set; } = "Pending";
 
+    public string Source { get; set; } = "Invitation";
+
     public string Status { get; set; } = "New";
 
     public DateTime? NextSessionAt { get; set; }

@@ -64,7 +64,7 @@ public class AuthController : ControllerBase
     public async Task<IActionResult> ForgotPassword([FromBody] ForgotPasswordDto request)
     {
         await _authService.ForgotPasswordAsync(request);
-        return Ok(new { message = "If the account exists, a reset token has been generated." });
+        return Ok(new { message = "If the account exists, password reset instructions have been sent." });
     }
 
     [AllowAnonymous]

@@ -30,4 +30,6 @@ public class CreateCompanyExpenseRequest
 
     public bool IsRecurring { get; set; }
     public string? RecurringGroupId { get; set; }
+    public DateTime? RecurrenceEndDate { get; set; }
+    public int? RecurringOccurrencesCount { get; set; }
 }

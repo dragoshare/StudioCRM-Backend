@@ -36,6 +36,8 @@ public class ClientPortalService : IClientPortalService
                 Goal = c.Goal,
                 Status = c.Status,
                 BillingStatus = c.BillingStatus,
+                Source = c.Source,
+                PortalAccessMode = c.TrainerId.HasValue ? "FullCrm" : "GroupOnly",
                 LocationName = c.Location.Name,
                 TrainerFullName = c.Trainer != null
                     ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName
@@ -200,7 +202,12 @@ public class ClientPortalService : IClientPortalService
 
         var activeCycle = await _context.ClientPackages
             .Include(cp => cp.Package)
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .Where(cp =>
+                cp.ClientId == client.Id &&
+                cp.IsActive &&
+                (client.TrainerId.HasValue
+                    ? cp.ExpectedBillingType != StudioCRM.Domain.Enums.SessionBillingType.Group
+                    : cp.ExpectedBillingType == StudioCRM.Domain.Enums.SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate)
             .FirstOrDefaultAsync();
 
@@ -250,7 +257,12 @@ public class ClientPortalService : IClientPortalService
         var activePackage = await _context.ClientPackages
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .Where(cp =>
+                cp.ClientId == client.Id &&
+                cp.IsActive &&
+                (client.TrainerId.HasValue
+                    ? cp.ExpectedBillingType != StudioCRM.Domain.Enums.SessionBillingType.Group
+                    : cp.ExpectedBillingType == StudioCRM.Domain.Enums.SessionBillingType.Group))
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 

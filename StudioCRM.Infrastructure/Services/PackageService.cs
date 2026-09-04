@@ -41,6 +41,8 @@ public class PackageService : IPackageService
             BillingType = request.BillingType,
             ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType),
             LocationId = request.LocationId,
+            IsPubliclyAvailable = request.IsPubliclyAvailable,
+            PublicSlug = NormalizePublicSlug(request.PublicSlug),
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
@@ -104,6 +106,8 @@ public class PackageService : IPackageService
         package.BillingType = request.BillingType;
         package.ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType);
         package.LocationId = request.LocationId;
+        package.IsPubliclyAvailable = request.IsPubliclyAvailable;
+        package.PublicSlug = NormalizePublicSlug(request.PublicSlug);
         package.IsActive = request.IsActive;
         package.UpdatedAt = DateTime.UtcNow;
 
@@ -232,6 +236,8 @@ public class PackageService : IPackageService
                 Goal = c.Goal,
                 Notes = c.Notes,
                 BillingStatus = c.BillingStatus,
+                Source = c.Source,
+                PortalAccessMode = c.TrainerId.HasValue ? "FullCrm" : "GroupOnly",
                 Status = c.Status,
                 NextSessionAt = c.NextSessionAt,
                 TrainingStartDate = c.TrainingStartDate,
@@ -261,6 +267,8 @@ public class PackageService : IPackageService
             ParticipantsCount = package.ParticipantsCount,
             LocationId = package.LocationId,
             LocationName = package.Location?.Name,
+            IsPubliclyAvailable = package.IsPubliclyAvailable,
+            PublicSlug = package.PublicSlug,
             IsActive = package.IsActive,
             CreatedAt = package.CreatedAt,
             UpdatedAt = package.UpdatedAt,
@@ -272,11 +280,25 @@ public class PackageService : IPackageService
     {
         var resolved = participantsCount ?? (int)billingType;
 
+        if (billingType == StudioCRM.Domain.Enums.SessionBillingType.Group)
+        {
+            if (resolved < 1 || resolved > 100)
+                throw new InvalidOperationException("Group package participants count must be between 1 and 100.");
+
+            return resolved;
+        }
+
         if (resolved < 1 || resolved > 4)
         {
             throw new InvalidOperationException("Participants count must be between 1 and 4.");
         }
 
         return resolved;
+    }
+
+    private static string? NormalizePublicSlug(string? value)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        return string.IsNullOrWhiteSpace(normalized) ? null : normalized;
     }
 }

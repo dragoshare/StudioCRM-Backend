@@ -7,7 +7,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using StudioCRM.Application.DTOs.Auth;
+using StudioCRM.Application.DTOs.Public;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
@@ -18,14 +20,20 @@ public class AuthService : IAuthService
 {
     private readonly StudioCRMDbContext _context;
     private readonly JwtSettings _jwtSettings;
+    private readonly AppSettings _appSettings;
+    private readonly IEmailService _emailService;
     private readonly PasswordHasher<User> _passwordHasher;
 
     public AuthService(
         StudioCRMDbContext context,
-        IOptions<JwtSettings> jwtOptions)
+        IOptions<JwtSettings> jwtOptions,
+        IOptions<AppSettings> appOptions,
+        IEmailService emailService)
     {
         _context = context;
         _jwtSettings = jwtOptions.Value;
+        _appSettings = appOptions.Value;
+        _emailService = emailService;
         _passwordHasher = new PasswordHasher<User>();
     }
 
@@ -177,6 +185,96 @@ public class AuthService : IAuthService
         };
     }
 
+    public async Task<AuthResponseDto> RegisterPublicGroupClientAsync(PublicGroupRegisterRequest request)
+    {
+        var email = request.Email.Trim();
+
+        if (string.IsNullOrWhiteSpace(email))
+            throw new InvalidOperationException("Email is required.");
+
+        if (string.IsNullOrWhiteSpace(request.Password))
+            throw new InvalidOperationException("Password is required.");
+
+        if (string.IsNullOrWhiteSpace(request.FirstName) || string.IsNullOrWhiteSpace(request.LastName))
+            throw new InvalidOperationException("First name and last name are required.");
+
+        var existingUser = await _context.Users
+            .AnyAsync(u => u.Email == email);
+
+        if (existingUser)
+            throw new InvalidOperationException("User with this email already exists.");
+
+        var locationExists = await _context.Locations
+            .AnyAsync(l => l.Id == request.LocationId && l.IsActive);
+
+        if (!locationExists)
+            throw new InvalidOperationException("Location does not exist.");
+
+        var role = await _context.Roles
+            .FirstOrDefaultAsync(r => r.Name == "Client");
+
+        if (role is null)
+            throw new InvalidOperationException("Client role does not exist.");
+
+        var now = DateTime.UtcNow;
+        var user = new User
+        {
+            Email = email,
+            FirstName = request.FirstName.Trim(),
+            LastName = request.LastName.Trim(),
+            IsActive = true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+
+        await _context.Users.AddAsync(user);
+        await _context.SaveChangesAsync();
+
+        await _context.UserRoles.AddAsync(new UserRole
+        {
+            UserId = user.Id,
+            RoleId = role.Id
+        });
+
+        await _context.Clients.AddAsync(new Client
+        {
+            UserId = user.Id,
+            TrainerId = null,
+            LocationId = request.LocationId,
+            FirstName = user.FirstName,
+            LastName = user.LastName,
+            Email = user.Email,
+            PhoneNumber = request.PhoneNumber,
+            BillingStatus = "Pending",
+            Source = "PublicGroupSignup",
+            Status = "Inactive",
+            SubscriptionAutoRenewEnabled = false,
+            CreatedAt = now,
+            UpdatedAt = now
+        });
+
+        var refreshToken = GenerateRefreshToken();
+
+        await _context.RefreshTokens.AddAsync(new RefreshToken
+        {
+            UserId = user.Id,
+            Token = refreshToken,
+            ExpiresAt = DateTime.UtcNow.AddDays(7),
+            CreatedAt = DateTime.UtcNow
+        });
+
+        await _context.SaveChangesAsync();
+
+        var registeredUser = await _context.Users
+            .Include(u => u.UserRoles)
+                .ThenInclude(ur => ur.Role)
+            .FirstAsync(u => u.Id == user.Id);
+
+        return BuildAuthResponse(registeredUser, refreshToken);
+    }
+
     public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto request)
     {
         var user = await _context.Users
@@ -233,6 +331,25 @@ public class AuthService : IAuthService
             .Select(ur => ur.Role.Name)
             .ToList();
 
+        var client = await _context.Clients
+            .Where(c => c.UserId == user.Id)
+            .Select(c => new
+            {
+                c.Id,
+                c.TrainerId,
+                c.LocationId,
+                c.Source
+            })
+            .FirstOrDefaultAsync();
+
+        var trainer = await _context.Trainers
+            .Where(t => t.UserId == user.Id)
+            .Select(t => new
+            {
+                t.Id
+            })
+            .FirstOrDefaultAsync();
+
         var primaryRole = roleNames.FirstOrDefault() ?? string.Empty;
         return new AuthMeDto
         {
@@ -241,7 +358,14 @@ public class AuthService : IAuthService
             Role = primaryRole,
             Roles = roleNames,
             FullName = $"{user.FirstName} {user.LastName}".Trim(),
-            AvatarUrl = user.AvatarUrl
+            AvatarUrl = user.AvatarUrl,
+            ClientId = client?.Id,
+            TrainerId = trainer?.Id,
+            LocationId = client?.LocationId,
+            ClientSource = client?.Source,
+            PortalAccessMode = client is null
+                ? null
+                : client.TrainerId.HasValue ? "FullCrm" : "GroupOnly"
         };
     }
 
@@ -279,8 +403,13 @@ public class AuthService : IAuthService
 
     public async Task ForgotPasswordAsync(ForgotPasswordDto request)
     {
+        var email = request.Email.Trim().ToLowerInvariant();
+
+        if (string.IsNullOrWhiteSpace(email))
+            return;
+
         var user = await _context.Users
-            .FirstOrDefaultAsync(u => u.Email == request.Email);
+            .FirstOrDefaultAsync(u => u.Email.ToLower() == email);
 
         if (user is null)
         {
@@ -288,6 +417,17 @@ public class AuthService : IAuthService
         }
 
         var token = GenerateResetToken();
+        var activeTokens = await _context.PasswordResetTokens
+            .Where(t =>
+                t.UserId == user.Id &&
+                !t.IsUsed &&
+                t.ExpiresAt > DateTime.UtcNow)
+            .ToListAsync();
+
+        foreach (var activeToken in activeTokens)
+        {
+            activeToken.IsUsed = true;
+        }
 
         await _context.PasswordResetTokens.AddAsync(new PasswordResetToken
         {
@@ -300,7 +440,9 @@ public class AuthService : IAuthService
 
         await _context.SaveChangesAsync();
 
-        Console.WriteLine($"RESET TOKEN for {user.Email}: {token}");
+        var resetLink = BuildFrontendUrl("reset-password", ("token", token));
+
+        await _emailService.SendPasswordResetEmailAsync(user.Email, resetLink);
     }
 
     public async Task ResetPasswordAsync(ResetPasswordDto request)
@@ -410,6 +552,22 @@ public class AuthService : IAuthService
     {
         var randomBytes = RandomNumberGenerator.GetBytes(64);
         return Convert.ToBase64String(randomBytes);
+    }
+
+    private string BuildFrontendUrl(
+        string path,
+        params (string Key, string Value)[] queryParameters)
+    {
+        var baseUrl = _appSettings.FrontendBaseUrl.TrimEnd('/');
+        var normalizedPath = path.TrimStart('/');
+        var queryString = string.Join(
+            "&",
+            queryParameters.Select(x =>
+                $"{Uri.EscapeDataString(x.Key)}={Uri.EscapeDataString(x.Value)}"));
+
+        return string.IsNullOrWhiteSpace(queryString)
+            ? $"{baseUrl}/{normalizedPath}"
+            : $"{baseUrl}/{normalizedPath}?{queryString}";
     }
 
     private static string NormalizeManualRegistrationRole(string? role)

@@ -37,6 +37,11 @@ public class CompanyExpenseDto
 
     public bool IsRecurring { get; set; }
     public string? RecurringGroupId { get; set; }
+    public int? RecurrenceIntervalMonths { get; set; }
+    public DateTime? RecurrenceStartDate { get; set; }
+    public DateTime? RecurrenceEndDate { get; set; }
+    public int? RecurrenceDayOfMonth { get; set; }
+    public int? RecurrenceInstanceNumber { get; set; }
 
     public int? CreatedByUserId { get; set; }
     public int? PaidByUserId { get; set; }

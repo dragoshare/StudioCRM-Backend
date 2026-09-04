@@ -180,12 +180,6 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<TrainerRate>()
             .HasIndex(tr => new { tr.TrainerId, tr.SessionType, tr.IsActive });
-        modelBuilder.Entity<Client>()
-            .HasOne(c => c.Trainer)
-            .WithMany()
-            .HasForeignKey(c => c.TrainerId)
-            .OnDelete(DeleteBehavior.SetNull);
-
         // =========================
         // TRAINER MONTHLY SETTLEMENTS
         // =========================
@@ -303,6 +297,12 @@ public class StudioCRMDbContext : DbContext
             .HasDefaultValue(true);
 
         modelBuilder.Entity<Client>()
+            .Property(c => c.Source)
+            .IsRequired()
+            .HasMaxLength(50)
+            .HasDefaultValue("Invitation");
+
+        modelBuilder.Entity<Client>()
             .HasQueryFilter(c => !c.IsDeleted);
 
         // =========================
@@ -321,6 +321,13 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<Package>()
             .HasIndex(p => new { p.LocationId, p.BillingType, p.SessionsPerWeek, p.SessionsLimit });
+
+        modelBuilder.Entity<Package>()
+            .Property(p => p.PublicSlug)
+            .HasMaxLength(120);
+
+        modelBuilder.Entity<Package>()
+            .HasIndex(p => p.PublicSlug);
 
         modelBuilder.Entity<Package>()
             .HasQueryFilter(p => !p.IsDeleted);
@@ -384,7 +391,7 @@ public class StudioCRMDbContext : DbContext
             entity.HasIndex(x => new { x.ClientId, x.IsActive });
             entity.HasIndex(x => x.ClientId)
                 .IsUnique()
-                .HasFilter("\"IsActive\" = TRUE")
+                .HasFilter("\"IsActive\" = TRUE AND \"ExpectedBillingType\" <> 5")
                 .HasDatabaseName("IX_ClientPackages_OneActivePerClient");
         });
 
@@ -599,6 +606,9 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.RecurringGroupId)
                 .HasMaxLength(100);
 
+            entity.HasIndex(x => x.RecurringGroupId);
+            entity.HasIndex(x => new { x.RecurringGroupId, x.IssueDate });
+
             entity.HasOne(x => x.LegalEntity)
                 .WithMany(x => x.Expenses)
                 .HasForeignKey(x => x.LegalEntityId)
@@ -763,6 +773,13 @@ public class StudioCRMDbContext : DbContext
             .WithMany(l => l.Sessions)
             .HasForeignKey(s => s.LocationId)
             .OnDelete(DeleteBehavior.Restrict);
+
+        modelBuilder.Entity<Session>()
+            .Property(s => s.PublicSlug)
+            .HasMaxLength(120);
+
+        modelBuilder.Entity<Session>()
+            .HasIndex(s => s.PublicSlug);
 
         modelBuilder.Entity<Session>()
             .HasQueryFilter(s => !s.IsDeleted);

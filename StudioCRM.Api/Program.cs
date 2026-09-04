@@ -75,6 +75,7 @@ builder.Services.AddScoped<IStudioSettingsService, StudioSettingsService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
 builder.Services.AddScoped<ISessionAutoCompletionService, SessionAutoCompletionService>();
 builder.Services.AddScoped<IAvatarService, AvatarService>();
+builder.Services.AddScoped<IPublicGroupClassService, PublicGroupClassService>();
 builder.Services.AddHttpClient<IObjectStorageService, CloudflareR2ObjectStorageService>();
 // Authentication
 builder.Services.AddHttpContextAccessor();

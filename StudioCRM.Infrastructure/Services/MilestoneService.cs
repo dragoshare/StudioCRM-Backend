@@ -97,6 +97,10 @@ public class MilestoneService : IMilestoneService
             .ToListAsync();
 
         var now = DateTime.UtcNow.Date;
+        var milestonesChanged = SyncAchievedMilestones(client, definitions, now);
+
+        if (milestonesChanged)
+            await _context.SaveChangesAsync();
 
         var trainingDays = client.TrainingStartDate.HasValue
             ? Math.Max(0, (now - client.TrainingStartDate.Value.Date).Days)
@@ -300,6 +304,7 @@ public class MilestoneService : IMilestoneService
         }
         else
         {
+            existing.AchievedAt = achievedAt;
             existing.IsRewardClaimed = true;
             existing.RewardClaimedAt = DateTime.UtcNow;
             existing.RewardClaimedByUserId = claimedByUserId;
@@ -343,6 +348,16 @@ public class MilestoneService : IMilestoneService
             .ToListAsync();
 
         var now = DateTime.UtcNow.Date;
+        var milestonesChanged = false;
+
+        foreach (var client in clients)
+        {
+            milestonesChanged |= SyncAchievedMilestones(client, definitions, now);
+        }
+
+        if (milestonesChanged)
+            await _context.SaveChangesAsync();
+
         var result = new List<PendingRewardDto>();
 
         foreach (var client in clients)
@@ -379,6 +394,54 @@ public class MilestoneService : IMilestoneService
             .OrderBy(x => x.AchievedAt)
             .ThenBy(x => x.ClientFullName)
             .ToList();
+    }
+
+    private bool SyncAchievedMilestones(
+        Client client,
+        IReadOnlyCollection<MilestoneDefinition> definitions,
+        DateTime now)
+    {
+        if (client.TrainingStartDate is null)
+            return false;
+
+        var changed = false;
+        var trainingStartDate = client.TrainingStartDate.Value.Date;
+
+        foreach (var definition in definitions)
+        {
+            var achievedAt = trainingStartDate.AddMonths(definition.RequiredMonths);
+
+            if (achievedAt > now)
+                continue;
+
+            var existing = client.Milestones
+                .FirstOrDefault(x => x.MilestoneDefinitionId == definition.Id);
+
+            if (existing is null)
+            {
+                existing = new ClientMilestone
+                {
+                    ClientId = client.Id,
+                    MilestoneDefinitionId = definition.Id,
+                    AchievedAt = achievedAt,
+                    IsRewardClaimed = false
+                };
+
+                client.Milestones.Add(existing);
+                _context.ClientMilestones.Add(existing);
+                changed = true;
+
+                continue;
+            }
+
+            if (existing.AchievedAt.Date != achievedAt.Date)
+            {
+                existing.AchievedAt = achievedAt;
+                changed = true;
+            }
+        }
+
+        return changed;
     }
 
     private static void ApplyDefinitionRequest(

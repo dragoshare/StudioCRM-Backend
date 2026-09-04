@@ -22,6 +22,10 @@ public class ClientPortalMeDto
 
     public string BillingStatus { get; set; } = string.Empty;
 
+    public string Source { get; set; } = string.Empty;
+
+    public string PortalAccessMode { get; set; } = string.Empty;
+
     public string LocationName { get; set; } = string.Empty;
 
     public string? TrainerFullName { get; set; }

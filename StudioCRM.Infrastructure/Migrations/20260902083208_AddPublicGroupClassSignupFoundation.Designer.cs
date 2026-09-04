@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using StudioCRM.Infrastructure.Persistence;
@@ -11,9 +12,11 @@ using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Migrations
 {
     [DbContext(typeof(StudioCRMDbContext))]
-    partial class StudioCRMDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260902083208_AddPublicGroupClassSignupFoundation")]
+    partial class AddPublicGroupClassSignupFoundation
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -794,21 +797,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("PaymentStatus")
                         .HasColumnType("integer");
 
-                    b.Property<int?>("RecurrenceDayOfMonth")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("RecurrenceEndDate")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<int?>("RecurrenceInstanceNumber")
-                        .HasColumnType("integer");
-
-                    b.Property<int?>("RecurrenceIntervalMonths")
-                        .HasColumnType("integer");
-
-                    b.Property<DateTime?>("RecurrenceStartDate")
-                        .HasColumnType("timestamp with time zone");
-
                     b.Property<string>("RecurringGroupId")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
@@ -847,10 +835,6 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasIndex("LocationId");
 
                     b.HasIndex("PaymentStatus");
-
-                    b.HasIndex("RecurringGroupId");
-
-                    b.HasIndex("RecurringGroupId", "IssueDate");
 
                     b.ToTable("CompanyExpenses");
                 });

@@ -23,6 +23,6 @@ public interface ICompanyExpenseService
     Task<CompanyExpenseDto?> DeleteAttachmentAsync(
         int id,
         CancellationToken cancellationToken = default);
-    Task<bool> DeleteExpenseAsync(int id);
+    Task<bool> DeleteExpenseAsync(int id, StudioCRM.Domain.Enums.ExpenseRecurrenceEditScope recurrenceEditScope = StudioCRM.Domain.Enums.ExpenseRecurrenceEditScope.ThisOnly);
     Task<ExpenseStatisticsDto> GetStatisticsAsync(CompanyExpenseFilterDto filter);
 }

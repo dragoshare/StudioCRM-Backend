@@ -19,6 +19,13 @@ public class Session
     public string? StudioRoom { get; set; }
 
     public string Status { get; set; } = "Planned";
+
+    public bool IsPubliclyBookable { get; set; }
+
+    public string? PublicSlug { get; set; }
+
+    public int? PublicCapacity { get; set; }
+
     public bool IsDeleted { get; set; } = false;
 
     public string? PlannedSessionType { get; set; }

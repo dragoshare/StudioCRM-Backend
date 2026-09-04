@@ -62,10 +62,14 @@ public class ClientPackageService : IClientPackageService
             ? package.SessionsPerWeek
             : InferSessionsPerWeek(totalSessions);
 
+        var isGroupPackage = (request.ExpectedBillingType ?? package.BillingType) == SessionBillingType.Group;
         var hasActivePackage = await _context.ClientPackages
-            .AnyAsync(cp => cp.ClientId == request.ClientId && cp.IsActive);
+            .AnyAsync(cp =>
+                cp.ClientId == request.ClientId &&
+                cp.IsActive &&
+                cp.ExpectedBillingType != SessionBillingType.Group);
 
-        if (hasActivePackage)
+        if (!isGroupPackage && hasActivePackage)
             throw new InvalidOperationException("Client already has an active subscription cycle. Use subscription next-package endpoint to schedule package changes.");
 
         var now = DateTime.UtcNow;
@@ -96,7 +100,7 @@ public class ClientPackageService : IClientPackageService
                     ?? now.Date.AddDays(settings.DefaultPaymentDueDays),
             PaidAt = totalPrice <= 0 ? now : null,
             ActivationMode = ClientPackageActivationMode.Immediately,
-            RenewalSource = "Manual",
+            RenewalSource = isGroupPackage ? "GroupManual" : "Manual",
             ActivatedAt = now,
             ActivatedByUserId = _currentUser.UserId,
             IsActive = true
@@ -119,8 +123,12 @@ public class ClientPackageService : IClientPackageService
             });
         }
 
-        client.ActivePackageId = package.Id;
-        client.BillingStatus = clientPackage.PaymentStatus.ToString();
+        if (!isGroupPackage)
+        {
+            client.ActivePackageId = package.Id;
+            client.BillingStatus = clientPackage.PaymentStatus.ToString();
+        }
+
         client.Status = "Active";
         client.UpdatedAt = now;
 
@@ -139,9 +147,15 @@ public class ClientPackageService : IClientPackageService
 
         await EnsureStaffAccessToClientAsync(clientId);
 
-        var activePackages = await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive)
-            .ToListAsync();
+        var isGroupPackage = clientPackage.ExpectedBillingType == SessionBillingType.Group;
+        var activePackages = isGroupPackage
+            ? new List<ClientPackage>()
+            : await _context.ClientPackages
+                .Where(cp =>
+                    cp.ClientId == clientId &&
+                    cp.IsActive &&
+                    cp.ExpectedBillingType != SessionBillingType.Group)
+                .ToListAsync();
 
         foreach (var activePackage in activePackages)
             activePackage.IsActive = false;
@@ -151,7 +165,11 @@ public class ClientPackageService : IClientPackageService
         clientPackage.ActivatedByUserId = _currentUser.UserId;
 
         var client = await _context.Clients.FirstAsync(c => c.Id == clientId);
-        client.ActivePackageId = clientPackage.PackageId;
+        if (!isGroupPackage)
+        {
+            client.ActivePackageId = clientPackage.PackageId;
+        }
+
         client.Status = "Active";
         client.UpdatedAt = DateTime.UtcNow;
 
@@ -205,7 +223,7 @@ public class ClientPackageService : IClientPackageService
         }
 
         var client = clientPackage.Client;
-        if (clientPackage.IsActive)
+        if (clientPackage.IsActive && clientPackage.ExpectedBillingType != SessionBillingType.Group)
         {
             client.ActivePackageId = null;
             client.BillingStatus = "Pending";

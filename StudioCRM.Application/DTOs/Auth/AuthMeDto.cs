@@ -13,4 +13,14 @@ public class AuthMeDto
     public string FullName { get; set; } = string.Empty;
 
     public string? AvatarUrl { get; set; }
+
+    public int? ClientId { get; set; }
+
+    public int? TrainerId { get; set; }
+
+    public int? LocationId { get; set; }
+
+    public string? ClientSource { get; set; }
+
+    public string? PortalAccessMode { get; set; }
 }

@@ -14,6 +14,8 @@ namespace StudioCRM.Infrastructure.Services;
 public class CompanyExpenseService : ICompanyExpenseService
 {
     private const int DefaultMaxExpenseAttachmentFileSizeMb = 15;
+    private const int DefaultRecurringOccurrencesCount = 12;
+    private const int MaxRecurringOccurrencesCount = 60;
 
     private static readonly Dictionary<string, string> AllowedAttachmentContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -65,6 +67,14 @@ public class CompanyExpenseService : ICompanyExpenseService
             request.PaymentStatus,
             request.DueDate,
             request.PaidAt);
+        var issueDate = NormalizeDateTime(request.IssueDate);
+        var recurrencePlan = request.IsRecurring
+            ? ResolveRecurrencePlan(
+                issueDate,
+                NormalizeNullableDateTime(request.RecurrenceEndDate),
+                request.RecurringOccurrencesCount,
+                request.RecurringGroupId)
+            : null;
 
         var expense = new CompanyExpense
         {
@@ -75,7 +85,7 @@ public class CompanyExpenseService : ICompanyExpenseService
             VendorName = NormalizeRequiredText(request.VendorName, "Vendor name is required."),
             VendorNip = NormalizeOptionalText(request.VendorNip),
             InvoiceNumber = NormalizeOptionalText(request.InvoiceNumber),
-            IssueDate = NormalizeDateTime(request.IssueDate),
+            IssueDate = issueDate,
             SaleDate = NormalizeNullableDateTime(request.SaleDate),
             DueDate = NormalizeNullableDateTime(request.DueDate),
             PaidAt = paymentStatus == ExpensePaymentStatus.Paid
@@ -89,7 +99,12 @@ public class CompanyExpenseService : ICompanyExpenseService
             Notes = NormalizeOptionalText(request.Notes),
             AttachmentUrl = NormalizeOptionalText(request.AttachmentUrl),
             IsRecurring = request.IsRecurring,
-            RecurringGroupId = NormalizeOptionalText(request.RecurringGroupId),
+            RecurringGroupId = recurrencePlan?.GroupId,
+            RecurrenceIntervalMonths = recurrencePlan?.IntervalMonths,
+            RecurrenceStartDate = recurrencePlan?.StartDate,
+            RecurrenceEndDate = recurrencePlan?.EndDate,
+            RecurrenceDayOfMonth = recurrencePlan?.DayOfMonth,
+            RecurrenceInstanceNumber = recurrencePlan is null ? null : 1,
             CreatedByUserId = _currentUser.UserId,
             PaidByUserId = paymentStatus == ExpensePaymentStatus.Paid ? _currentUser.UserId : null,
             CreatedAt = DateTime.UtcNow,
@@ -99,6 +114,13 @@ public class CompanyExpenseService : ICompanyExpenseService
         EnsureAmountConsistency(expense.NetAmount, expense.VatAmount, expense.GrossAmount);
 
         await _context.CompanyExpenses.AddAsync(expense);
+
+        if (recurrencePlan is not null)
+        {
+            var futureExpenses = BuildFutureRecurringExpenses(request, recurrencePlan, startInstanceNumber: 2);
+            await _context.CompanyExpenses.AddRangeAsync(futureExpenses);
+        }
+
         await _context.SaveChangesAsync();
 
         return await GetExpenseAsync(expense.Id)
@@ -112,41 +134,30 @@ public class CompanyExpenseService : ICompanyExpenseService
         if (expense is null)
             return null;
 
+        if (request.RecurrenceEditScope != ExpenseRecurrenceEditScope.ThisOnly &&
+            expense.IsRecurring &&
+            !string.IsNullOrWhiteSpace(expense.RecurringGroupId))
+        {
+            await UpdateRecurringSeriesAsync(expense, request);
+            return await GetExpenseAsync(id);
+        }
+
         await EnsureExpenseContextAsync(request.LegalEntityId, request.LocationId);
 
-        var paymentStatus = ResolvePaymentStatus(
-            request.PaymentStatus,
-            request.DueDate,
-            request.PaidAt);
+        var wasRecurring = expense.IsRecurring && !string.IsNullOrWhiteSpace(expense.RecurringGroupId);
+        ApplyExpenseUpdate(expense, request);
 
-        expense.LegalEntityId = request.LegalEntityId;
-        expense.LocationId = request.LocationId;
-        expense.Category = request.Category;
-        expense.PaymentStatus = paymentStatus;
-        expense.VendorName = NormalizeRequiredText(request.VendorName, "Vendor name is required.");
-        expense.VendorNip = NormalizeOptionalText(request.VendorNip);
-        expense.InvoiceNumber = NormalizeOptionalText(request.InvoiceNumber);
-        expense.IssueDate = NormalizeDateTime(request.IssueDate);
-        expense.SaleDate = NormalizeNullableDateTime(request.SaleDate);
-        expense.DueDate = NormalizeNullableDateTime(request.DueDate);
-        expense.PaidAt = paymentStatus == ExpensePaymentStatus.Paid
-            ? NormalizeNullableDateTime(request.PaidAt) ?? expense.PaidAt ?? DateTime.UtcNow
-            : null;
-        expense.NetAmount = NormalizeMoney(request.NetAmount, allowZero: true);
-        expense.VatAmount = NormalizeMoney(request.VatAmount, allowZero: true);
-        expense.GrossAmount = NormalizeMoney(request.GrossAmount, allowZero: false);
-        expense.Currency = NormalizeCurrency(request.Currency);
-        expense.Description = NormalizeOptionalText(request.Description);
-        expense.Notes = NormalizeOptionalText(request.Notes);
-        expense.AttachmentUrl = NormalizeOptionalText(request.AttachmentUrl);
-        expense.IsRecurring = request.IsRecurring;
-        expense.RecurringGroupId = NormalizeOptionalText(request.RecurringGroupId);
-        expense.PaidByUserId = paymentStatus == ExpensePaymentStatus.Paid
-            ? expense.PaidByUserId ?? _currentUser.UserId
-            : null;
-        expense.UpdatedAt = DateTime.UtcNow;
+        if (!wasRecurring && expense.IsRecurring && !string.IsNullOrWhiteSpace(expense.RecurringGroupId))
+        {
+            var recurrencePlan = ResolveRecurrencePlan(
+                expense.IssueDate,
+                expense.RecurrenceEndDate,
+                request.RecurringOccurrencesCount,
+                expense.RecurringGroupId);
+            var futureExpenses = BuildFutureRecurringExpenses(request, recurrencePlan, startInstanceNumber: 2);
 
-        EnsureAmountConsistency(expense.NetAmount, expense.VatAmount, expense.GrossAmount);
+            await _context.CompanyExpenses.AddRangeAsync(futureExpenses);
+        }
 
         await _context.SaveChangesAsync();
 
@@ -252,17 +263,30 @@ public class CompanyExpenseService : ICompanyExpenseService
         return await GetExpenseAsync(expense.Id);
     }
 
-    public async Task<bool> DeleteExpenseAsync(int id)
+    public async Task<bool> DeleteExpenseAsync(
+        int id,
+        ExpenseRecurrenceEditScope recurrenceEditScope = ExpenseRecurrenceEditScope.ThisOnly)
     {
         var expense = await _context.CompanyExpenses.FirstOrDefaultAsync(x => x.Id == id);
 
         if (expense is null)
             return false;
 
-        var oldStorageKey = ResolveAttachmentStorageKey(expense);
-        _context.CompanyExpenses.Remove(expense);
+        var expensesToDelete = await ResolveExpensesToDeleteAsync(expense, recurrenceEditScope);
+        var oldStorageKeys = expensesToDelete
+            .Select(ResolveAttachmentStorageKey)
+            .Where(x => !string.IsNullOrWhiteSpace(x))
+            .Distinct()
+            .ToList();
+
+        _context.CompanyExpenses.RemoveRange(expensesToDelete);
         await _context.SaveChangesAsync();
-        await DeleteAttachmentObjectIfNeededAsync(oldStorageKey, null, CancellationToken.None);
+
+        foreach (var oldStorageKey in oldStorageKeys)
+        {
+            await DeleteAttachmentObjectIfNeededAsync(oldStorageKey, null, CancellationToken.None);
+        }
+
         return true;
     }
 
@@ -356,6 +380,384 @@ public class CompanyExpenseService : ICompanyExpenseService
         };
     }
 
+    private async Task UpdateRecurringSeriesAsync(
+        CompanyExpense selectedExpense,
+        UpdateCompanyExpenseRequest request)
+    {
+        await EnsureExpenseContextAsync(request.LegalEntityId, request.LocationId);
+
+        var recurringGroupId = selectedExpense.RecurringGroupId
+            ?? throw new InvalidOperationException("Expense is not connected to a recurring series.");
+
+        var query = _context.CompanyExpenses
+            .Where(x => x.RecurringGroupId == recurringGroupId);
+
+        if (request.RecurrenceEditScope == ExpenseRecurrenceEditScope.ThisAndFuture)
+            query = query.Where(x => x.IssueDate >= selectedExpense.IssueDate);
+
+        var targets = await query
+            .OrderBy(x => x.IssueDate)
+            .ThenBy(x => x.Id)
+            .ToListAsync();
+
+        if (targets.Count == 0)
+            return;
+
+        var baseIssueDate = NormalizeDateTime(request.IssueDate);
+        var saleOffset = NormalizeNullableDateTime(request.SaleDate) - baseIssueDate;
+        var dueOffset = NormalizeNullableDateTime(request.DueDate) - baseIssueDate;
+        var paidOffset = NormalizeNullableDateTime(request.PaidAt) - baseIssueDate;
+        var updatedRecurringGroupId = request.RecurrenceEditScope == ExpenseRecurrenceEditScope.ThisAndFuture
+            ? Guid.NewGuid().ToString("N")
+            : recurringGroupId;
+        var recurrencePlan = request.IsRecurring
+            ? ResolveRecurrencePlan(
+                baseIssueDate,
+                NormalizeNullableDateTime(request.RecurrenceEndDate),
+                request.RecurringOccurrencesCount,
+                updatedRecurringGroupId)
+            : null;
+        var removedExpenses = new List<CompanyExpense>();
+        var attachmentStorageKeysToDelete = new List<string>();
+
+        if (recurrencePlan is not null && targets.Count > recurrencePlan.OccurrencesCount)
+        {
+            removedExpenses = targets
+                .Skip(recurrencePlan.OccurrencesCount)
+                .ToList();
+
+            if (removedExpenses.Any(x => x.PaymentStatus == ExpensePaymentStatus.Paid))
+                throw new InvalidOperationException("Recurring series cannot remove paid expense instances.");
+
+            attachmentStorageKeysToDelete.AddRange(removedExpenses
+                .Select(ResolveAttachmentStorageKey)
+                .Where(x => !string.IsNullOrWhiteSpace(x))!);
+
+            targets = targets
+                .Take(recurrencePlan.OccurrencesCount)
+                .ToList();
+        }
+
+        for (var index = 0; index < targets.Count; index++)
+        {
+            var target = targets[index];
+            var occurrenceIssueDate = request.IsRecurring
+                ? AddCalendarMonths(baseIssueDate, index, recurrencePlan!.DayOfMonth)
+                : target.IssueDate;
+            DateTime? occurrenceSaleDate = saleOffset.HasValue ? occurrenceIssueDate + saleOffset.Value : null;
+            DateTime? occurrenceDueDate = dueOffset.HasValue ? occurrenceIssueDate + dueOffset.Value : null;
+            DateTime? occurrencePaidAt = paidOffset.HasValue ? occurrenceIssueDate + paidOffset.Value : null;
+            var paymentStatus = ResolvePaymentStatus(
+                request.PaymentStatus,
+                occurrenceDueDate,
+                occurrencePaidAt);
+
+            ApplyExpenseValues(
+                target,
+                request,
+                occurrenceIssueDate,
+                occurrenceSaleDate,
+                occurrenceDueDate,
+                occurrencePaidAt,
+                paymentStatus);
+
+            target.IsRecurring = request.IsRecurring;
+            target.RecurringGroupId = recurrencePlan?.GroupId;
+            target.RecurrenceIntervalMonths = recurrencePlan?.IntervalMonths;
+            target.RecurrenceStartDate = recurrencePlan?.StartDate;
+            target.RecurrenceEndDate = recurrencePlan?.EndDate;
+            target.RecurrenceDayOfMonth = recurrencePlan?.DayOfMonth;
+            target.RecurrenceInstanceNumber = request.IsRecurring ? index + 1 : null;
+
+            if (index > 0)
+            {
+                var oldStorageKey = ResolveAttachmentStorageKey(target);
+                if (!string.IsNullOrWhiteSpace(oldStorageKey))
+                    attachmentStorageKeysToDelete.Add(oldStorageKey);
+
+                target.InvoiceNumber = null;
+                target.AttachmentUrl = null;
+                target.AttachmentStorageKey = null;
+                target.AttachmentFileName = null;
+                target.AttachmentContentType = null;
+
+                if (target.PaymentStatus == ExpensePaymentStatus.Paid)
+                {
+                    target.PaymentStatus = ResolvePaymentStatus(
+                        ExpensePaymentStatus.Unpaid,
+                        target.DueDate,
+                        null);
+                    target.PaidAt = null;
+                    target.PaidByUserId = null;
+                }
+            }
+        }
+
+        if (recurrencePlan is not null)
+        {
+            var nextInstanceNumber = targets.Count + 1;
+            var futureExpenses = BuildFutureRecurringExpenses(request, recurrencePlan, nextInstanceNumber);
+
+            await _context.CompanyExpenses.AddRangeAsync(futureExpenses);
+        }
+
+        if (removedExpenses.Count > 0)
+            _context.CompanyExpenses.RemoveRange(removedExpenses);
+
+        await _context.SaveChangesAsync();
+
+        foreach (var storageKey in attachmentStorageKeysToDelete.Distinct())
+        {
+            await DeleteAttachmentObjectIfNeededAsync(storageKey, null, CancellationToken.None);
+        }
+    }
+
+    private void ApplyExpenseUpdate(CompanyExpense expense, UpdateCompanyExpenseRequest request)
+    {
+        var issueDate = NormalizeDateTime(request.IssueDate);
+        var saleDate = NormalizeNullableDateTime(request.SaleDate);
+        var dueDate = NormalizeNullableDateTime(request.DueDate);
+        var paidAt = NormalizeNullableDateTime(request.PaidAt);
+        var paymentStatus = ResolvePaymentStatus(request.PaymentStatus, dueDate, paidAt);
+        var recurrencePlan = request.IsRecurring
+            ? ResolveRecurrencePlan(
+                issueDate,
+                NormalizeNullableDateTime(request.RecurrenceEndDate),
+                request.RecurringOccurrencesCount,
+                request.RecurringGroupId ?? expense.RecurringGroupId)
+            : null;
+
+        ApplyExpenseValues(expense, request, issueDate, saleDate, dueDate, paidAt, paymentStatus);
+
+        expense.IsRecurring = request.IsRecurring;
+        expense.RecurringGroupId = recurrencePlan?.GroupId;
+        expense.RecurrenceIntervalMonths = recurrencePlan?.IntervalMonths;
+        expense.RecurrenceStartDate = recurrencePlan?.StartDate;
+        expense.RecurrenceEndDate = recurrencePlan?.EndDate;
+        expense.RecurrenceDayOfMonth = recurrencePlan?.DayOfMonth;
+        expense.RecurrenceInstanceNumber = recurrencePlan is null
+            ? null
+            : expense.RecurrenceInstanceNumber ?? 1;
+    }
+
+    private void ApplyExpenseValues(
+        CompanyExpense expense,
+        UpdateCompanyExpenseRequest request,
+        DateTime issueDate,
+        DateTime? saleDate,
+        DateTime? dueDate,
+        DateTime? paidAt,
+        ExpensePaymentStatus paymentStatus)
+    {
+        expense.LegalEntityId = request.LegalEntityId;
+        expense.LocationId = request.LocationId;
+        expense.Category = request.Category;
+        expense.PaymentStatus = paymentStatus;
+        expense.VendorName = NormalizeRequiredText(request.VendorName, "Vendor name is required.");
+        expense.VendorNip = NormalizeOptionalText(request.VendorNip);
+        expense.InvoiceNumber = NormalizeOptionalText(request.InvoiceNumber);
+        expense.IssueDate = issueDate;
+        expense.SaleDate = saleDate;
+        expense.DueDate = dueDate;
+        expense.PaidAt = paymentStatus == ExpensePaymentStatus.Paid
+            ? paidAt ?? expense.PaidAt ?? DateTime.UtcNow
+            : null;
+        expense.NetAmount = NormalizeMoney(request.NetAmount, allowZero: true);
+        expense.VatAmount = NormalizeMoney(request.VatAmount, allowZero: true);
+        expense.GrossAmount = NormalizeMoney(request.GrossAmount, allowZero: false);
+        expense.Currency = NormalizeCurrency(request.Currency);
+        expense.Description = NormalizeOptionalText(request.Description);
+        expense.Notes = NormalizeOptionalText(request.Notes);
+        expense.AttachmentUrl = NormalizeOptionalText(request.AttachmentUrl);
+        expense.PaidByUserId = paymentStatus == ExpensePaymentStatus.Paid
+            ? expense.PaidByUserId ?? _currentUser.UserId
+            : null;
+        expense.UpdatedAt = DateTime.UtcNow;
+
+        EnsureAmountConsistency(expense.NetAmount, expense.VatAmount, expense.GrossAmount);
+    }
+
+    private List<CompanyExpense> BuildFutureRecurringExpenses(
+        CreateCompanyExpenseRequest request,
+        ExpenseRecurrencePlan recurrencePlan,
+        int startInstanceNumber)
+    {
+        var expenses = new List<CompanyExpense>();
+        var baseIssueDate = NormalizeDateTime(request.IssueDate);
+        var saleOffset = NormalizeNullableDateTime(request.SaleDate) - baseIssueDate;
+        var dueOffset = NormalizeNullableDateTime(request.DueDate) - baseIssueDate;
+
+        for (var instanceNumber = startInstanceNumber; instanceNumber <= recurrencePlan.OccurrencesCount; instanceNumber++)
+        {
+            var monthOffset = instanceNumber - 1;
+            var issueDate = AddCalendarMonths(baseIssueDate, monthOffset, recurrencePlan.DayOfMonth);
+            DateTime? saleDate = saleOffset.HasValue ? issueDate + saleOffset.Value : null;
+            DateTime? dueDate = dueOffset.HasValue ? issueDate + dueOffset.Value : null;
+            var paymentStatus = ResolvePaymentStatus(ExpensePaymentStatus.Unpaid, dueDate, null);
+
+            expenses.Add(new CompanyExpense
+            {
+                LegalEntityId = request.LegalEntityId,
+                LocationId = request.LocationId,
+                Category = request.Category,
+                PaymentStatus = paymentStatus,
+                VendorName = NormalizeRequiredText(request.VendorName, "Vendor name is required."),
+                VendorNip = NormalizeOptionalText(request.VendorNip),
+                InvoiceNumber = null,
+                IssueDate = issueDate,
+                SaleDate = saleDate,
+                DueDate = dueDate,
+                PaidAt = null,
+                NetAmount = NormalizeMoney(request.NetAmount, allowZero: true),
+                VatAmount = NormalizeMoney(request.VatAmount, allowZero: true),
+                GrossAmount = NormalizeMoney(request.GrossAmount, allowZero: false),
+                Currency = NormalizeCurrency(request.Currency),
+                Description = NormalizeOptionalText(request.Description),
+                Notes = NormalizeOptionalText(request.Notes),
+                AttachmentUrl = null,
+                AttachmentStorageKey = null,
+                AttachmentFileName = null,
+                AttachmentContentType = null,
+                IsRecurring = true,
+                RecurringGroupId = recurrencePlan.GroupId,
+                RecurrenceIntervalMonths = recurrencePlan.IntervalMonths,
+                RecurrenceStartDate = recurrencePlan.StartDate,
+                RecurrenceEndDate = recurrencePlan.EndDate,
+                RecurrenceDayOfMonth = recurrencePlan.DayOfMonth,
+                RecurrenceInstanceNumber = instanceNumber,
+                CreatedByUserId = _currentUser.UserId,
+                PaidByUserId = null,
+                CreatedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+        }
+
+        return expenses;
+    }
+
+    private List<CompanyExpense> BuildFutureRecurringExpenses(
+        UpdateCompanyExpenseRequest request,
+        ExpenseRecurrencePlan recurrencePlan,
+        int startInstanceNumber)
+    {
+        var createRequest = new CreateCompanyExpenseRequest
+        {
+            LegalEntityId = request.LegalEntityId,
+            LocationId = request.LocationId,
+            Category = request.Category,
+            PaymentStatus = request.PaymentStatus,
+            VendorName = request.VendorName,
+            VendorNip = request.VendorNip,
+            InvoiceNumber = request.InvoiceNumber,
+            IssueDate = request.IssueDate,
+            SaleDate = request.SaleDate,
+            DueDate = request.DueDate,
+            PaidAt = request.PaidAt,
+            NetAmount = request.NetAmount,
+            VatAmount = request.VatAmount,
+            GrossAmount = request.GrossAmount,
+            Currency = request.Currency,
+            Description = request.Description,
+            Notes = request.Notes,
+            AttachmentUrl = request.AttachmentUrl,
+            IsRecurring = request.IsRecurring,
+            RecurringGroupId = recurrencePlan.GroupId,
+            RecurrenceEndDate = request.RecurrenceEndDate,
+            RecurringOccurrencesCount = request.RecurringOccurrencesCount
+        };
+
+        return BuildFutureRecurringExpenses(createRequest, recurrencePlan, startInstanceNumber);
+    }
+
+    private async Task<List<CompanyExpense>> ResolveExpensesToDeleteAsync(
+        CompanyExpense expense,
+        ExpenseRecurrenceEditScope recurrenceEditScope)
+    {
+        if (recurrenceEditScope == ExpenseRecurrenceEditScope.ThisOnly ||
+            !expense.IsRecurring ||
+            string.IsNullOrWhiteSpace(expense.RecurringGroupId))
+        {
+            return new List<CompanyExpense> { expense };
+        }
+
+        var query = _context.CompanyExpenses
+            .Where(x => x.RecurringGroupId == expense.RecurringGroupId);
+
+        if (recurrenceEditScope == ExpenseRecurrenceEditScope.ThisAndFuture)
+            query = query.Where(x => x.IssueDate >= expense.IssueDate);
+
+        return await query.ToListAsync();
+    }
+
+    private static ExpenseRecurrencePlan ResolveRecurrencePlan(
+        DateTime issueDate,
+        DateTime? recurrenceEndDate,
+        int? requestedOccurrencesCount,
+        string? requestedGroupId)
+    {
+        var groupId = NormalizeOptionalText(requestedGroupId) ?? Guid.NewGuid().ToString("N");
+        var startDate = issueDate;
+        var endDate = recurrenceEndDate.HasValue
+            ? (DateTime?)NormalizeDateTime(recurrenceEndDate.Value)
+            : null;
+
+        if (endDate.HasValue && endDate.Value.Date < startDate.Date)
+            throw new InvalidOperationException("Recurring expense end date cannot be earlier than issue date.");
+
+        var occurrencesCount = requestedOccurrencesCount.HasValue
+            ? Math.Clamp(requestedOccurrencesCount.Value, 1, MaxRecurringOccurrencesCount)
+            : endDate.HasValue
+                ? CountMonthlyOccurrences(startDate, endDate.Value)
+                : DefaultRecurringOccurrencesCount;
+
+        return new ExpenseRecurrencePlan(
+            groupId,
+            IntervalMonths: 1,
+            StartDate: startDate,
+            EndDate: endDate,
+            DayOfMonth: startDate.Day,
+            OccurrencesCount: occurrencesCount);
+    }
+
+    private static int CountMonthlyOccurrences(DateTime startDate, DateTime endDate)
+    {
+        var count = 1;
+
+        while (count < MaxRecurringOccurrencesCount)
+        {
+            var next = AddCalendarMonths(startDate, count, startDate.Day);
+
+            if (next.Date > endDate.Date)
+                break;
+
+            count++;
+        }
+
+        return count;
+    }
+
+    private static DateTime AddCalendarMonths(DateTime startDate, int monthsToAdd, int dayOfMonth)
+    {
+        var targetMonth = new DateTime(
+            startDate.Year,
+            startDate.Month,
+            1,
+            startDate.Hour,
+            startDate.Minute,
+            startDate.Second,
+            startDate.Kind).AddMonths(monthsToAdd);
+        var day = Math.Min(dayOfMonth, DateTime.DaysInMonth(targetMonth.Year, targetMonth.Month));
+
+        return new DateTime(
+            targetMonth.Year,
+            targetMonth.Month,
+            day,
+            startDate.Hour,
+            startDate.Minute,
+            startDate.Second,
+            startDate.Kind);
+    }
+
     private IQueryable<CompanyExpense> BaseExpenseQuery()
     {
         return _context.CompanyExpenses
@@ -418,6 +820,12 @@ public class CompanyExpenseService : ICompanyExpenseService
 
         if (filter.IsRecurring.HasValue)
             query = query.Where(x => x.IsRecurring == filter.IsRecurring.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.RecurringGroupId))
+        {
+            var recurringGroupId = NormalizeOptionalText(filter.RecurringGroupId);
+            query = query.Where(x => x.RecurringGroupId == recurringGroupId);
+        }
 
         if (filter.IsOverdue.HasValue)
         {
@@ -525,6 +933,11 @@ public class CompanyExpenseService : ICompanyExpenseService
             AttachmentContentType = expense.AttachmentContentType,
             IsRecurring = expense.IsRecurring,
             RecurringGroupId = expense.RecurringGroupId,
+            RecurrenceIntervalMonths = expense.RecurrenceIntervalMonths,
+            RecurrenceStartDate = expense.RecurrenceStartDate,
+            RecurrenceEndDate = expense.RecurrenceEndDate,
+            RecurrenceDayOfMonth = expense.RecurrenceDayOfMonth,
+            RecurrenceInstanceNumber = expense.RecurrenceInstanceNumber,
             CreatedByUserId = expense.CreatedByUserId,
             PaidByUserId = expense.PaidByUserId,
             IsOverdue = IsOverdue(expense),
@@ -784,4 +1197,12 @@ public class CompanyExpenseService : ICompanyExpenseService
 
         return (int)Math.Ceiling(totalCount / (decimal)pageSize);
     }
+
+    private sealed record ExpenseRecurrencePlan(
+        string GroupId,
+        int IntervalMonths,
+        DateTime StartDate,
+        DateTime? EndDate,
+        int DayOfMonth,
+        int OccurrencesCount);
 }

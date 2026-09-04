@@ -7,4 +7,8 @@ public interface IEmailService
         string role,
         string locationName,
         string inviteLink);
+
+    Task SendPasswordResetEmailAsync(
+        string toEmail,
+        string resetLink);
 }

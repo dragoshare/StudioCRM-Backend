@@ -147,7 +147,7 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
             2 => SessionBillingType.TwoToOne,
             3 => SessionBillingType.ThreeToOne,
             4 => SessionBillingType.FourToOne,
-            _ => null
+            _ => SessionBillingType.Group
         };
     }
 }
