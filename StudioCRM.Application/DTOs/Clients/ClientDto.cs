@@ -8,6 +8,20 @@ public class ClientDto
 
     public int? ActivePackageId { get; set; }
 
+    public int? ActiveClientPackageId { get; set; }
+
+    public string? ActiveClientPackageName { get; set; }
+
+    public int ActivePackageTotalSessions { get; set; }
+
+    public int ActivePackageUsedSessions { get; set; }
+
+    public int ActivePackageRemainingSessions { get; set; }
+
+    public string ActivePackagePaymentStatus { get; set; } = string.Empty;
+
+    public decimal CurrentBalance { get; set; }
+
     public string FirstName { get; set; } = string.Empty;
 
     public string LastName { get; set; } = string.Empty;

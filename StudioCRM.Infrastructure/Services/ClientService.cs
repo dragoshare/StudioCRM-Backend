@@ -5,6 +5,7 @@ using StudioCRM.Application.DTOs.Subscriptions;
 using StudioCRM.Application.DTOs.TrainingPlans;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
@@ -87,17 +88,25 @@ public class ClientService : IClientService
     {
         var query = ApplyAccessControl(BuildClientQuery());
 
-        return await query
+        var clients = await query
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync();
+
+        return await EnrichClientListSummariesAsync(clients);
     }
 
     public async Task<ClientDto?> GetByIdAsync(int id)
     {
         var query = ApplyAccessControl(BuildClientQuery());
 
-        return await query
+        var client = await query
             .FirstOrDefaultAsync(c => c.Id == id);
+
+        if (client is null)
+            return null;
+
+        var clients = await EnrichClientListSummariesAsync(new List<ClientDto> { client });
+        return clients[0];
     }
 
     public async Task<ClientWorkspaceDto?> GetWorkspaceAsync(int id)
@@ -337,9 +346,11 @@ public class ClientService : IClientService
                 c.Email.ToLower().Contains(search));
         }
 
-        return await query
+        var clients = await query
             .OrderByDescending(c => c.CreatedAt)
             .ToListAsync();
+
+        return await EnrichClientListSummariesAsync(clients);
     }
 
     private async Task<List<ClientWorkspaceSessionDto>> BuildUpcomingSessionsAsync(int clientId)
@@ -498,6 +509,67 @@ public class ClientService : IClientService
         }
 
         return query.Where(c => false);
+    }
+
+    private async Task<List<ClientDto>> EnrichClientListSummariesAsync(List<ClientDto> clients)
+    {
+        if (clients.Count == 0)
+            return clients;
+
+        var clientIds = clients.Select(c => c.Id).ToList();
+
+        var activePackages = await _context.ClientPackages
+            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
+            .ThenByDescending(cp => cp.Id)
+            .Select(cp => new
+            {
+                cp.ClientId,
+                cp.Id,
+                cp.Name,
+                cp.TotalSessions,
+                cp.UsedSessions,
+                cp.PaymentStatus
+            })
+            .ToListAsync();
+
+        var activePackageByClientId = activePackages
+            .GroupBy(cp => cp.ClientId)
+            .ToDictionary(g => g.Key, g => g.First());
+
+        var balancesByClientId = await _context.ClientBalanceTransactions
+            .Where(t =>
+                clientIds.Contains(t.ClientId) &&
+                t.Type != BalanceTransactionType.PaymentCredit &&
+                t.Type != BalanceTransactionType.PaymentReversal)
+            .GroupBy(t => t.ClientId)
+            .Select(g => new
+            {
+                ClientId = g.Key,
+                Balance = g.Sum(t => t.Amount)
+            })
+            .ToDictionaryAsync(x => x.ClientId, x => x.Balance);
+
+        foreach (var client in clients)
+        {
+            if (activePackageByClientId.TryGetValue(client.Id, out var activePackage))
+            {
+                client.ActiveClientPackageId = activePackage.Id;
+                client.ActiveClientPackageName = activePackage.Name;
+                client.ActivePackageTotalSessions = activePackage.TotalSessions;
+                client.ActivePackageUsedSessions = activePackage.UsedSessions;
+                client.ActivePackageRemainingSessions = Math.Max(
+                    0,
+                    activePackage.TotalSessions - activePackage.UsedSessions);
+                client.ActivePackagePaymentStatus = activePackage.PaymentStatus.ToString();
+            }
+
+            client.CurrentBalance = balancesByClientId.TryGetValue(client.Id, out var balance)
+                ? balance
+                : 0;
+        }
+
+        return clients;
     }
 
     private async Task<string> ResolveClientStatusAsync(int clientId)
