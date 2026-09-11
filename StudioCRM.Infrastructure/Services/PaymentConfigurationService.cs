@@ -130,6 +130,12 @@ public class PaymentConfigurationService : IPaymentConfigurationService
         if (account is null)
             return null;
 
+        if (await _context.ClientPayments.AnyAsync(x => x.PaymentProviderAccountId == id) &&
+            (account.LegalEntityId != request.LegalEntityId || account.LocationId != request.LocationId ||
+             !string.Equals(account.Provider, request.Provider.Trim(), StringComparison.OrdinalIgnoreCase) ||
+             account.AccountKey != NormalizeOptionalText(request.AccountKey) || account.MerchantId != NormalizeOptionalText(request.MerchantId)))
+            throw new InvalidOperationException("An account used by payments cannot be reassigned. Create a new provider account instead.");
+
         account.LegalEntityId = request.LegalEntityId;
         account.LocationId = request.LocationId;
         account.Provider = NormalizeRequiredText(request.Provider, "Payment provider is required.");

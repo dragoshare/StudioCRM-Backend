@@ -8,17 +8,23 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class ClientPaymentService : IClientPaymentService
+public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
+    private readonly ITpayApiClient _tpay;
+    private readonly StudioCRM.Application.Settings.TpaySettings _tpaySettings;
 
     public ClientPaymentService(
         StudioCRMDbContext context,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ITpayApiClient tpay,
+        Microsoft.Extensions.Options.IOptions<StudioCRM.Application.Settings.TpaySettings> tpaySettings)
     {
         _context = context;
         _currentUser = currentUser;
+        _tpay = tpay;
+        _tpaySettings = tpaySettings.Value;
     }
 
     public async Task<ClientBillingSummaryDto> GetCurrentClientSummaryAsync()
@@ -306,7 +312,7 @@ public class ClientPaymentService : IClientPaymentService
     public async Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync()
     {
         var query = BasePaymentQuery()
-            .Where(p => p.Status == ClientPaymentStatus.PendingConfirmation);
+            .Where(p => p.Status == ClientPaymentStatus.PendingConfirmation && p.Source != ClientPaymentSource.PaymentGateway);
 
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
@@ -349,8 +355,12 @@ public class ClientPaymentService : IClientPaymentService
 
     public async Task<ClientPaymentDto> RequestPaymentAsClientAsync(CreateClientPaymentRequest request)
     {
+        if (request.Method == PaymentMethod.PaymentGateway)
+            throw new InvalidOperationException("Use the payment gateway checkout endpoint.");
         var client = await GetCurrentClientAsync();
         var clientPackage = await ResolveClientPackageAsync(client.Id, request.ClientPackageId);
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await PrepareManualPackagePaymentAsync(clientPackage);
         var paymentContext = await ResolvePaymentContextAsync(
             client.Id,
             clientPackage,
@@ -382,16 +392,21 @@ public class ClientPaymentService : IClientPaymentService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return await GetPaymentDtoAsync(payment.Id);
     }
 
     public async Task<ClientPaymentDto> CreatePaymentAsStaffAsync(CreateClientPaymentRequest request)
     {
+        if (request.Method == PaymentMethod.PaymentGateway)
+            throw new InvalidOperationException("Gateway payments must be confirmed by the provider.");
         if (!request.ClientId.HasValue)
             throw new InvalidOperationException("ClientId is required for staff payment entry.");
 
         await EnsureStaffAccessToClientAsync(request.ClientId.Value);
         var clientPackage = await ResolveClientPackageAsync(request.ClientId.Value, request.ClientPackageId);
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await PrepareManualPackagePaymentAsync(clientPackage);
         var paymentContext = await ResolvePaymentContextAsync(
             request.ClientId.Value,
             clientPackage,
@@ -424,6 +439,7 @@ public class ClientPaymentService : IClientPaymentService
         await ApplyConfirmedPaymentAsync(payment, clientPackage);
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return await GetPaymentDtoAsync(payment.Id);
     }
 
@@ -438,6 +454,13 @@ public class ClientPaymentService : IClientPaymentService
 
         await EnsureStaffAccessToClientAsync(payment.ClientId);
 
+        if (payment.Source == ClientPaymentSource.PaymentGateway)
+            throw new InvalidOperationException("Gateway payments must be confirmed by the provider.");
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await PrepareManualPackagePaymentAsync(payment.ClientPackage);
+        await _context.Entry(payment).ReloadAsync();
+
         if (payment.Status != ClientPaymentStatus.PendingConfirmation)
             throw new InvalidOperationException("Only pending payments can be confirmed.");
 
@@ -449,6 +472,7 @@ public class ClientPaymentService : IClientPaymentService
         await ApplyConfirmedPaymentAsync(payment, payment.ClientPackage);
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return await GetPaymentDtoAsync(payment.Id);
     }
 
@@ -463,6 +487,10 @@ public class ClientPaymentService : IClientPaymentService
             throw new InvalidOperationException("Payment not found.");
 
         await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.Source == ClientPaymentSource.PaymentGateway &&
+            (request.ProviderPaymentId is not null || request.ProviderStatus is not null))
+            throw new InvalidOperationException("Gateway transaction identity and status cannot be edited manually.");
 
         var feeAmount = request.ProviderFeeAmount.HasValue
             ? NormalizeProviderFeeAmount(request.ProviderFeeAmount.Value, payment.Amount)
@@ -514,6 +542,9 @@ public class ClientPaymentService : IClientPaymentService
             throw new InvalidOperationException("Payment not found.");
 
         await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.Source == ClientPaymentSource.PaymentGateway)
+            throw new InvalidOperationException("Gateway payments require reconciliation with the provider before cancellation.");
 
         if (payment.Status != ClientPaymentStatus.PendingConfirmation)
             throw new InvalidOperationException("Only pending payments can be rejected.");
@@ -591,6 +622,13 @@ public class ClientPaymentService : IClientPaymentService
 
         await EnsureStaffAccessToClientAsync(payment.ClientId);
 
+        if (payment.Source == ClientPaymentSource.PaymentGateway)
+            throw new InvalidOperationException("Tpay refunds require provider reconciliation; automatic refunds are not enabled.");
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await PrepareManualPackagePaymentAsync(payment.ClientPackage);
+        await _context.Entry(payment).ReloadAsync();
+
         if (payment.Status != ClientPaymentStatus.Confirmed)
             throw new InvalidOperationException("Only confirmed payments can be reversed.");
 
@@ -601,6 +639,7 @@ public class ClientPaymentService : IClientPaymentService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return await GetPaymentDtoAsync(payment.Id);
     }
 
@@ -774,17 +813,27 @@ public class ClientPaymentService : IClientPaymentService
 
     private async Task ActivatePackageAfterPaymentIfNeededAsync(ClientPackage clientPackage)
     {
-        if (clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive)
+        if (clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive ||
+            clientPackage.UsedSessions >= clientPackage.TotalSessions ||
+            clientPackage.ValidUntil.HasValue && clientPackage.ValidUntil.Value <= DateTime.UtcNow)
             return;
 
+        if (clientPackage.ExpectedBillingType == SessionBillingType.Group)
+        {
+            clientPackage.IsActive = true;
+            clientPackage.ActivatedAt = DateTime.UtcNow;
+            clientPackage.ActivatedByUserId = _currentUser.UserId;
+            return;
+        }
+
         var hasActivePackage = await _context.ClientPackages
-            .AnyAsync(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive);
+            .AnyAsync(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && cp.ExpectedBillingType != SessionBillingType.Group);
 
         if (hasActivePackage && clientPackage.ActivationMode != ClientPackageActivationMode.Immediately)
             return;
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive)
+            .Where(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && cp.ExpectedBillingType != SessionBillingType.Group)
             .ToListAsync();
 
         foreach (var activePackage in activePackages)

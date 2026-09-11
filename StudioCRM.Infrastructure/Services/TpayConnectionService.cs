@@ -1,14 +1,21 @@
 using System.Text.Json;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Settings;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings> options)
+public partial class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings> options, IMemoryCache cache)
     : ITpayConnectionService
 {
     public async Task<bool> TestConnectionAsync(string accountKey, CancellationToken cancellationToken)
+    {
+        await GetTokenAsync(accountKey, cancellationToken, forceRefresh: true);
+        return options.Value.UseSandbox;
+    }
+
+    private async Task<string> GetTokenAsync(string accountKey, CancellationToken cancellationToken, bool forceRefresh = false)
     {
         var settings = options.Value;
         if (!settings.Accounts.TryGetValue(accountKey, out var account) ||
@@ -18,6 +25,11 @@ public class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings>
         var endpoint = settings.UseSandbox
             ? "https://openapi.sandbox.tpay.com/oauth/auth"
             : "https://api.tpay.com/oauth/auth";
+
+        var cacheKey = "tpay-token:" + endpoint + ":" + Convert.ToHexString(
+            System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(account.ClientId + ":" + account.ClientSecret)));
+        if (!forceRefresh && cache.TryGetValue<string>(cacheKey, out var cached) && cached is not null)
+            return cached;
 
         using var content = new FormUrlEncodedContent(new Dictionary<string, string>
         {
@@ -34,6 +46,9 @@ public class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings>
             token.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(token.GetString()))
             throw new HttpRequestException("Tpay did not return an access token.");
 
-        return settings.UseSandbox;
+        var value = token.GetString()!;
+        if (document.RootElement.TryGetProperty("expires_in", out var expires) && expires.TryGetInt32(out var seconds) && seconds > 60)
+            cache.Set(cacheKey, value, TimeSpan.FromSeconds(Math.Min(seconds - 30, 7200)));
+        return value;
     }
 }

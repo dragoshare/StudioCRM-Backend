@@ -37,7 +37,11 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
 builder.Services.Configure<TpaySettings>(builder.Configuration.GetSection("Tpay"));
+builder.Services.AddMemoryCache();
 builder.Services.AddHttpClient<ITpayConnectionService, TpayConnectionService>(client =>
+    client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
+builder.Services.AddHttpClient<ITpayApiClient, TpayConnectionService>(client =>
     client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.Configure<CloudflareR2Settings>(
@@ -68,7 +72,9 @@ builder.Services.AddScoped<ITrainerRateService, TrainerRateService>();
 builder.Services.AddScoped<ITrainerSettlementService, TrainerSettlementService>();
 builder.Services.AddScoped<IMilestoneService, MilestoneService>();
 builder.Services.AddScoped<IClientPackageService, ClientPackageService>();
-builder.Services.AddScoped<IClientPaymentService, ClientPaymentService>();
+builder.Services.AddScoped<ClientPaymentService>();
+builder.Services.AddScoped<IClientPaymentService>(sp => sp.GetRequiredService<ClientPaymentService>());
+builder.Services.AddScoped<ITpayPaymentService>(sp => sp.GetRequiredService<ClientPaymentService>());
 builder.Services.AddScoped<IPaymentConfigurationService, PaymentConfigurationService>();
 builder.Services.AddScoped<ICompanyExpenseService, CompanyExpenseService>();
 builder.Services.AddScoped<ITrainerCostAnalysisService, TrainerCostAnalysisService>();
