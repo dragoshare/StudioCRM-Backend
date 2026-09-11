@@ -36,6 +36,10 @@ var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
 
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
+builder.Services.Configure<TpaySettings>(builder.Configuration.GetSection("Tpay"));
+builder.Services.AddHttpClient<ITpayConnectionService, TpayConnectionService>(client =>
+    client.Timeout = TimeSpan.FromSeconds(20))
+    .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
 builder.Services.Configure<CloudflareR2Settings>(
     builder.Configuration.GetSection("CloudflareR2"));
 // Database

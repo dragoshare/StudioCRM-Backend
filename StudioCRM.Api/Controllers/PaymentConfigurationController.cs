@@ -24,6 +24,28 @@ public class PaymentConfigurationController : ControllerBase
             Ok(await _paymentConfigurationService.GetConfigurationAsync()));
     }
 
+    [HttpPost("tpay/{accountKey}/test-connection")]
+    public async Task<IActionResult> TestTpayConnection(
+        string accountKey,
+        [FromServices] ITpayConnectionService tpay,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var sandbox = await tpay.TestConnectionAsync(accountKey, cancellationToken);
+            return Ok(new { connected = true, accountKey, sandbox });
+        }
+        catch (InvalidOperationException)
+        {
+            return BadRequest(new { message = "Tpay credentials are not configured for this account key." });
+        }
+        catch (Exception ex) when (ex is HttpRequestException or System.Text.Json.JsonException ||
+                                   ex is OperationCanceledException && !cancellationToken.IsCancellationRequested)
+        {
+            return StatusCode(502, new { message = "Tpay connection check failed. Check credentials and environment or retry later." });
+        }
+    }
+
     [HttpPost("legal-entities")]
     public async Task<ActionResult<LegalEntityDto>> CreateLegalEntity(UpsertLegalEntityRequest request)
     {
