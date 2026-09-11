@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
@@ -221,7 +222,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
         var payload = new Dictionary<string, object?>
         {
-            ["subject"] = $"StudioCRM: {session.Title} - {clientName}",
+            ["subject"] = SessionTitleBuilder.BuildOutlookSubject(session),
             ["body"] = new
             {
                 contentType = "HTML",

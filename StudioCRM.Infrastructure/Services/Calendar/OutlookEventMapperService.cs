@@ -109,7 +109,12 @@ public class OutlookEventMapperService
         if (matchingSession is not null)
         {
             await AddMissingClientsToSessionAsync(matchingSession, clients, warnings);
-            matchingSession.Title = await BuildSessionTitleFromParticipantsAsync(matchingSession.Id);
+            if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(
+                matchingSession.IsPubliclyBookable,
+                matchingSession.PlannedSessionType))
+            {
+                matchingSession.Title = await BuildSessionTitleFromParticipantsAsync(matchingSession.Id);
+            }
             matchingSession.UpdatedAt = DateTime.UtcNow;
 
             var sessionLink = await _context.CalendarEventLinks

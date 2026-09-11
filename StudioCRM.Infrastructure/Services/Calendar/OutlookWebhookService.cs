@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
@@ -297,18 +298,29 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
-        var newTitle = await BuildSessionTitleFromParticipantsAsync(session.Id);
-
-        session.Title = newTitle;
+        var newTitle = session.Title;
+        if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(
+            session.IsPubliclyBookable,
+            session.PlannedSessionType))
+        {
+            newTitle = await BuildSessionTitleFromParticipantsAsync(session.Id);
+            session.Title = newTitle;
+        }
         session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+
+        var outlookTitle = SessionTitleBuilder.ShouldDeriveFromParticipants(
+            session.IsPubliclyBookable,
+            session.PlannedSessionType)
+            ? newTitle
+            : SessionTitleBuilder.BuildOutlookSubject(session);
 
         await UpdateOutlookEventTitleIfNeededAsync(
             integration,
             externalEventId,
             currentOutlookTitle,
-            newTitle);
+            outlookTitle);
     }
 
     private async Task SyncSessionParticipantsFromOutlookAsync(Session session, ExternalCalendarEvent evt)

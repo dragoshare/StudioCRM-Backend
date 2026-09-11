@@ -246,7 +246,12 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             if (!sessionClients.Any(c => c.Id == client.Id))
                 sessionClients.Add(client);
 
-            session.Title = SessionTitleBuilder.Build(sessionClients);
+            if (SessionTitleBuilder.ShouldDeriveFromParticipants(
+                session.IsPubliclyBookable,
+                session.PlannedSessionType))
+            {
+                session.Title = SessionTitleBuilder.Build(sessionClients);
+            }
             session.UpdatedAt = DateTime.UtcNow;
 
             var warnings = ReadWarnings(evt.MappingWarningsJson);

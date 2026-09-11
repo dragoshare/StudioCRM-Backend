@@ -144,9 +144,11 @@ public class SessionService : ISessionService
             request.TrainerId,
             outlookCategories);
 
-        var title = string.IsNullOrWhiteSpace(request.Title)
-            ? SessionTitleBuilder.Build(clients)
-            : request.Title;
+        var title = ResolveSessionTitle(
+            request.Title,
+            clients,
+            request.IsPubliclyBookable,
+            request.PlannedSessionType);
 
         var transaction = requestedStatus == "Completed"
             ? await _context.Database.BeginTransactionAsync()
@@ -296,9 +298,12 @@ public class SessionService : ISessionService
 
         try
         {
-            session.Title = string.IsNullOrWhiteSpace(request.Title)
-                ? SessionTitleBuilder.Build(clients)
-                : request.Title;
+            session.Title = ResolveSessionTitle(
+                request.Title,
+                clients,
+                request.IsPubliclyBookable,
+                request.PlannedSessionType,
+                session.Title);
 
             session.Note = request.Note;
             session.StartAt = normalizedStartAt;
@@ -1110,6 +1115,27 @@ public class SessionService : ISessionService
         {
             _logger.LogWarning(ex, "Could not sync session {SessionId} to Outlook.", sessionId);
         }
+    }
+
+    private static string ResolveSessionTitle(
+        string? requestedTitle,
+        List<Client> clients,
+        bool isPubliclyBookable,
+        string? plannedSessionType,
+        string? currentTitle = null)
+    {
+        if (!string.IsNullOrWhiteSpace(requestedTitle))
+            return requestedTitle.Trim();
+
+        if (!SessionTitleBuilder.ShouldDeriveFromParticipants(isPubliclyBookable, plannedSessionType))
+        {
+            if (!string.IsNullOrWhiteSpace(currentTitle))
+                return currentTitle;
+
+            throw new InvalidOperationException("Group class title is required.");
+        }
+
+        return SessionTitleBuilder.Build(clients);
     }
 
     private async Task TryDeleteSessionFromOutlookAsync(int sessionId)
