@@ -9,7 +9,10 @@ public static class SessionTitleBuilder
         string? plannedSessionType)
     {
         return !isPubliclyBookable &&
-            !string.Equals(plannedSessionType, "Group", StringComparison.OrdinalIgnoreCase);
+            !string.Equals(
+                plannedSessionType,
+                nameof(StudioCRM.Domain.Enums.SessionBillingType.Group),
+                StringComparison.OrdinalIgnoreCase);
     }
 
     public static string Build(List<Client> clients)

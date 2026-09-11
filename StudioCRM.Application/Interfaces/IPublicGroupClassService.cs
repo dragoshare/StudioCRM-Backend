@@ -18,6 +18,8 @@ public interface IPublicGroupClassService
 
     Task<PublicGroupPurchaseDto> PurchasePackageForCurrentClientAsync(int packageId);
 
+    Task<PublicGroupClientStateDto> GetCurrentClientStateAsync();
+
     Task<PublicGroupBookingDto> BookCurrentClientAsync(int sessionId);
 
     Task<bool> CancelCurrentClientBookingAsync(int sessionId);

@@ -818,11 +818,26 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             clientPackage.ValidUntil.HasValue && clientPackage.ValidUntil.Value <= DateTime.UtcNow)
             return;
 
+        var now = DateTime.UtcNow;
+        if (!clientPackage.ValidUntil.HasValue)
+        {
+            var durationDays = await _context.Packages
+                .Where(p => p.Id == clientPackage.PackageId)
+                .Select(p => p.DurationDays)
+                .FirstAsync();
+
+            clientPackage.ValidUntil = now.Date.AddDays(durationDays);
+        }
+
         if (clientPackage.ExpectedBillingType == SessionBillingType.Group)
         {
             clientPackage.IsActive = true;
-            clientPackage.ActivatedAt = DateTime.UtcNow;
+            clientPackage.ActivatedAt = now;
             clientPackage.ActivatedByUserId = _currentUser.UserId;
+
+            var groupClient = await _context.Clients.FirstAsync(c => c.Id == clientPackage.ClientId);
+            groupClient.Status = "Active";
+            groupClient.UpdatedAt = now;
             return;
         }
 
@@ -840,7 +855,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             activePackage.IsActive = false;
 
         clientPackage.IsActive = true;
-        clientPackage.ActivatedAt = DateTime.UtcNow;
+        clientPackage.ActivatedAt = now;
         clientPackage.ActivatedByUserId = _currentUser.UserId;
 
         var client = await _context.Clients.FirstAsync(c => c.Id == clientPackage.ClientId);

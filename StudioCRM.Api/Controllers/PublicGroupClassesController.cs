@@ -75,6 +75,14 @@ public class PublicGroupClassesController : ControllerBase
     }
 
     [Authorize(Roles = "Client")]
+    [HttpGet("me")]
+    public async Task<ActionResult<PublicGroupClientStateDto>> GetMyState()
+    {
+        return await HandleAsync<PublicGroupClientStateDto>(async () =>
+            Ok(await _publicGroupClassService.GetCurrentClientStateAsync()));
+    }
+
+    [Authorize(Roles = "Client")]
     [HttpPost("packages/{packageId:int}/purchases/me")]
     public async Task<ActionResult<PublicGroupPurchaseDto>> PurchasePackage(int packageId)
     {

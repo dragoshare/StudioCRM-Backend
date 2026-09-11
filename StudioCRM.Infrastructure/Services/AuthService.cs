@@ -238,7 +238,7 @@ public class AuthService : IAuthService
             RoleId = role.Id
         });
 
-        await _context.Clients.AddAsync(new Client
+        var client = new Client
         {
             UserId = user.Id,
             TrainerId = null,
@@ -252,6 +252,18 @@ public class AuthService : IAuthService
             Status = "Inactive",
             SubscriptionAutoRenewEnabled = false,
             CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        await _context.Clients.AddAsync(client);
+        await _context.ClientLocationMemberships.AddAsync(new ClientLocationMembership
+        {
+            Client = client,
+            LocationId = request.LocationId,
+            IsHomeLocation = true,
+            GroupAccessEnabled = true,
+            Source = "PublicGroupSignup",
+            JoinedAt = now,
             UpdatedAt = now
         });
 

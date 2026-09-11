@@ -140,6 +140,10 @@ public class PublicGroupClassService : IPublicGroupClassService
     public async Task<PublicGroupPurchaseDto> PurchasePackageForCurrentClientAsync(int packageId)
     {
         var client = await GetCurrentClientAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
+
         var package = await _context.Packages
             .Include(p => p.Location)
             .FirstOrDefaultAsync(p =>
@@ -151,27 +155,36 @@ public class PublicGroupClassService : IPublicGroupClassService
         if (package is null)
             throw new InvalidOperationException("Public group package does not exist.");
 
-        if (package.LocationId.HasValue && package.LocationId.Value != client.LocationId)
-            throw new InvalidOperationException("Package does not belong to the client's location.");
-
         if (package.SessionsLimit <= 0)
             throw new InvalidOperationException("Public group package entries count must be greater than zero.");
+
+        var targetLocationId = package.LocationId ?? client.LocationId;
+        await EnsureGroupLocationMembershipAsync(
+            client.Id,
+            targetLocationId,
+            targetLocationId == client.LocationId,
+            "GroupPackagePurchase");
 
         var existingPackages = await _context.ClientPackages
             .Include(cp => cp.Package)
             .Where(cp =>
                 cp.ClientId == client.Id &&
-                cp.PackageId == package.Id &&
-                cp.IsActive &&
-                (cp.ValidUntil == null || cp.ValidUntil >= DateTime.UtcNow))
+                cp.PackageId == package.Id)
             .OrderBy(cp => cp.PurchaseDate)
             .ToListAsync();
 
         foreach (var existingPackage in existingPackages)
         {
             var remaining = await CountRemainingEntriesAsync(existingPackage);
-            if (remaining > 0 || existingPackage.PaymentStatus != PaymentStatus.Paid)
+            if (existingPackage.PaymentStatus != PaymentStatus.Paid ||
+                existingPackage.IsActive &&
+                (existingPackage.ValidUntil == null || existingPackage.ValidUntil >= DateTime.UtcNow) &&
+                remaining > 0)
+            {
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
                 return MapPurchase(existingPackage, remaining);
+            }
         }
 
         var now = DateTime.UtcNow;
@@ -191,33 +204,104 @@ public class PublicGroupClassService : IPublicGroupClassService
                 ? decimal.Round(package.Price / package.SessionsLimit, 2)
                 : package.Price,
             Currency = package.Currency,
-            LocationId = package.LocationId ?? client.LocationId,
+            LocationId = targetLocationId,
             ExpectedBillingType = SessionBillingType.Group,
             PaymentStatus = package.Price <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = now,
-            ValidUntil = now.Date.AddDays(package.DurationDays),
+            ValidUntil = package.Price <= 0 ? now.Date.AddDays(package.DurationDays) : null,
             PaymentDueDate = package.Price <= 0 ? null : now.Date.AddDays(3),
             PaidAt = package.Price <= 0 ? now : null,
             ActivationMode = ClientPackageActivationMode.Immediately,
             RenewalSource = "GroupPublic",
             RequestedByUserId = _currentUser.UserId,
-            ActivatedAt = now,
-            ActivatedByUserId = _currentUser.UserId,
-            IsActive = true
+            ActivatedAt = package.Price <= 0 ? now : null,
+            ActivatedByUserId = package.Price <= 0 ? _currentUser.UserId : null,
+            IsActive = package.Price <= 0
         };
 
         await _context.ClientPackages.AddAsync(clientPackage);
-        client.Status = "Active";
+        if (package.Price <= 0)
+            client.Status = "Active";
         client.UpdatedAt = now;
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return MapPurchase(clientPackage, clientPackage.TotalSessions);
+    }
+
+    public async Task<PublicGroupClientStateDto> GetCurrentClientStateAsync()
+    {
+        var client = await GetCurrentClientAsync();
+        var memberships = await _context.ClientLocationMemberships
+            .Include(x => x.Location)
+            .Where(x => x.ClientId == client.Id && x.GroupAccessEnabled)
+            .OrderByDescending(x => x.IsHomeLocation)
+            .ThenBy(x => x.Location.Name)
+            .ToListAsync();
+
+        var packages = await _context.ClientPackages
+            .Include(x => x.Location)
+            .Where(x => x.ClientId == client.Id && x.ExpectedBillingType == SessionBillingType.Group)
+            .OrderByDescending(x => x.PurchaseDate)
+            .ToListAsync();
+
+        var packageDtos = new List<PublicGroupClientPackageDto>();
+        foreach (var package in packages)
+        {
+            packageDtos.Add(new PublicGroupClientPackageDto
+            {
+                ClientPackageId = package.Id,
+                PackageId = package.PackageId,
+                PackageName = package.Name,
+                LocationId = package.LocationId,
+                LocationName = package.Location?.Name,
+                PaymentStatus = package.PaymentStatus.ToString(),
+                IsActive = package.IsActive,
+                EntriesCount = package.TotalSessions,
+                RemainingEntries = await CountRemainingEntriesAsync(package),
+                ValidUntil = package.ValidUntil.HasValue
+                    ? ToStudioDisplayDateTime(package.ValidUntil.Value)
+                    : null
+            });
+        }
+
+        var bookedSessionIds = await _context.SessionParticipants
+            .Where(p =>
+                p.ClientId == client.Id &&
+                p.PlannedBillingType == SessionBillingType.Group &&
+                p.Session.Status == "Planned" &&
+                p.Session.StartAt >= DateTime.UtcNow &&
+                p.AttendanceStatus != "CancelledInTime" &&
+                p.AttendanceStatus != "CancelledLate")
+            .OrderBy(p => p.Session.StartAt)
+            .Select(p => p.SessionId)
+            .ToListAsync();
+
+        return new PublicGroupClientStateDto
+        {
+            ClientId = client.Id,
+            DefaultLocationId = client.LocationId,
+            Locations = memberships.Select(x => new PublicGroupLocationAccessDto
+            {
+                LocationId = x.LocationId,
+                LocationName = x.Location.Name,
+                IsHomeLocation = x.IsHomeLocation
+            }).ToList(),
+            Packages = packageDtos,
+            UpcomingBookedSessionIds = bookedSessionIds
+        };
     }
 
     public async Task<PublicGroupBookingDto> BookCurrentClientAsync(int sessionId)
     {
         var client = await GetCurrentClientAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74102}, {sessionId})");
+
         var session = await BasePublicClassQuery()
             .FirstOrDefaultAsync(s => s.Id == sessionId);
 
@@ -282,6 +366,7 @@ public class PublicGroupClassService : IPublicGroupClassService
 
         session.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
         await TrySyncSessionToOutlookAsync(session.Id);
 
         return new PublicGroupBookingDto
@@ -298,6 +383,12 @@ public class PublicGroupClassService : IPublicGroupClassService
     public async Task<bool> CancelCurrentClientBookingAsync(int sessionId)
     {
         var client = await GetCurrentClientAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74102}, {sessionId})");
+
         var participant = await _context.SessionParticipants
             .Include(p => p.Session)
             .FirstOrDefaultAsync(p =>
@@ -317,6 +408,7 @@ public class PublicGroupClassService : IPublicGroupClassService
         participant.Session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
         await TrySyncSessionToOutlookAsync(sessionId);
 
         return true;
@@ -376,6 +468,34 @@ public class PublicGroupClassService : IPublicGroupClassService
             .Where(c => c.UserId == _currentUser.UserId.Value)
             .Select(c => (int?)c.Id)
             .FirstOrDefaultAsync();
+    }
+
+    private async Task EnsureGroupLocationMembershipAsync(
+        int clientId,
+        int locationId,
+        bool isHomeLocation,
+        string source)
+    {
+        var membership = await _context.ClientLocationMemberships
+            .FirstOrDefaultAsync(x => x.ClientId == clientId && x.LocationId == locationId);
+
+        if (membership is null)
+        {
+            await _context.ClientLocationMemberships.AddAsync(new ClientLocationMembership
+            {
+                ClientId = clientId,
+                LocationId = locationId,
+                IsHomeLocation = isHomeLocation,
+                GroupAccessEnabled = true,
+                Source = source,
+                JoinedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            return;
+        }
+
+        membership.GroupAccessEnabled = true;
+        membership.UpdatedAt = DateTime.UtcNow;
     }
 
     private async Task<ClientPackage?> ResolveBookableGroupPackageAsync(int clientId, int sessionLocationId)

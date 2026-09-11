@@ -29,6 +29,7 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
+    public DbSet<ClientLocationMembership> ClientLocationMemberships => Set<ClientLocationMembership>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
@@ -823,6 +824,25 @@ public class StudioCRMDbContext : DbContext
                 .IsUnique();
 
             entity.HasIndex(sp => sp.ClientPackageId);
+        });
+
+        modelBuilder.Entity<ClientLocationMembership>(entity =>
+        {
+            entity.Property(x => x.Source)
+                .HasMaxLength(50);
+
+            entity.HasOne(x => x.Client)
+                .WithMany(x => x.LocationMemberships)
+                .HasForeignKey(x => x.ClientId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(x => x.Location)
+                .WithMany()
+                .HasForeignKey(x => x.LocationId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasIndex(x => new { x.ClientId, x.LocationId })
+                .IsUnique();
         });
 
         // =========================

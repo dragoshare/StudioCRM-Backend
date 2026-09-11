@@ -79,6 +79,16 @@ public class ClientService : IClientService
         };
 
         await _context.Clients.AddAsync(client);
+        await _context.ClientLocationMemberships.AddAsync(new ClientLocationMembership
+        {
+            Client = client,
+            LocationId = request.LocationId,
+            IsHomeLocation = true,
+            GroupAccessEnabled = false,
+            Source = "StaffCreation",
+            JoinedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
         await _context.SaveChangesAsync();
 
         return await GetProjectedById(client.Id);
@@ -197,6 +207,7 @@ public class ClientService : IClientService
         }
 
         client.TrainerId = request.TrainerId;
+        await SetHomeLocationMembershipAsync(client, request.LocationId);
         client.LocationId = request.LocationId;
         client.FirstName = request.FirstName;
         client.LastName = request.LastName;
@@ -220,6 +231,38 @@ public class ClientService : IClientService
         await _context.SaveChangesAsync();
 
         return await GetProjectedById(id);
+    }
+
+    private async Task SetHomeLocationMembershipAsync(Client client, int locationId)
+    {
+        var memberships = await _context.ClientLocationMemberships
+            .Where(x => x.ClientId == client.Id)
+            .ToListAsync();
+
+        foreach (var membership in memberships.Where(x => x.IsHomeLocation))
+        {
+            membership.IsHomeLocation = false;
+            membership.UpdatedAt = DateTime.UtcNow;
+        }
+
+        var target = memberships.FirstOrDefault(x => x.LocationId == locationId);
+        if (target is null)
+        {
+            await _context.ClientLocationMemberships.AddAsync(new ClientLocationMembership
+            {
+                ClientId = client.Id,
+                LocationId = locationId,
+                IsHomeLocation = true,
+                GroupAccessEnabled = false,
+                Source = "HomeLocationChange",
+                JoinedAt = DateTime.UtcNow,
+                UpdatedAt = DateTime.UtcNow
+            });
+            return;
+        }
+
+        target.IsHomeLocation = true;
+        target.UpdatedAt = DateTime.UtcNow;
     }
 
     public async Task<bool> DeleteAsync(int id)

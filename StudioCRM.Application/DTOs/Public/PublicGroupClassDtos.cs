@@ -130,3 +130,48 @@ public class PublicGroupBookingDto
 
     public int RemainingEntries { get; set; }
 }
+
+public class PublicGroupClientStateDto
+{
+    public int ClientId { get; set; }
+
+    public int DefaultLocationId { get; set; }
+
+    public List<PublicGroupLocationAccessDto> Locations { get; set; } = new();
+
+    public List<PublicGroupClientPackageDto> Packages { get; set; } = new();
+
+    public List<int> UpcomingBookedSessionIds { get; set; } = new();
+}
+
+public class PublicGroupLocationAccessDto
+{
+    public int LocationId { get; set; }
+
+    public string LocationName { get; set; } = string.Empty;
+
+    public bool IsHomeLocation { get; set; }
+}
+
+public class PublicGroupClientPackageDto
+{
+    public int ClientPackageId { get; set; }
+
+    public int PackageId { get; set; }
+
+    public string PackageName { get; set; } = string.Empty;
+
+    public int? LocationId { get; set; }
+
+    public string? LocationName { get; set; }
+
+    public string PaymentStatus { get; set; } = string.Empty;
+
+    public bool IsActive { get; set; }
+
+    public int EntriesCount { get; set; }
+
+    public int RemainingEntries { get; set; }
+
+    public DateTime? ValidUntil { get; set; }
+}

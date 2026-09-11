@@ -435,6 +435,16 @@ public class InvitationService : IInvitationService
         };
 
         await _context.Clients.AddAsync(client);
+        await _context.ClientLocationMemberships.AddAsync(new ClientLocationMembership
+        {
+            Client = client,
+            LocationId = invitation.LocationId,
+            IsHomeLocation = true,
+            GroupAccessEnabled = false,
+            Source = "Invitation",
+            JoinedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow
+        });
         await _context.SaveChangesAsync();
     }
 

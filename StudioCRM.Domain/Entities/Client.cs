@@ -67,4 +67,6 @@ public class Client
     public int? RenewalCancelledByUserId { get; set; }
 
     public ICollection<ClientMilestone> Milestones { get; set; } = new List<ClientMilestone>();
+
+    public ICollection<ClientLocationMembership> LocationMemberships { get; set; } = new List<ClientLocationMembership>();
 }
