@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Notifications;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Api.Controllers;
 
@@ -19,15 +20,22 @@ public class NotificationsController : ControllerBase
 
     [HttpGet]
     public async Task<ActionResult<List<NotificationDto>>> GetNotifications(
-        [FromQuery] int limit = 50)
+        [FromQuery] int limit = 50,
+        [FromQuery] string? category = null,
+        [FromQuery] bool? isRead = null)
     {
-        return Ok(await _notificationService.GetCurrentUserNotificationsAsync(limit));
+        try { return Ok(await _notificationService.GetCurrentUserNotificationsAsync(limit, category, isRead)); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    [HttpGet("categories")]
+    public ActionResult<IReadOnlyList<NotificationCategoryDto>> GetCategories() => Ok(NotificationCategories.All);
+
     [HttpGet("unread-count")]
-    public async Task<ActionResult<NotificationUnreadCountDto>> GetUnreadCount()
+    public async Task<ActionResult<NotificationUnreadCountDto>> GetUnreadCount([FromQuery] string? category = null)
     {
-        return Ok(await _notificationService.GetUnreadCountAsync());
+        try { return Ok(await _notificationService.GetUnreadCountAsync(category)); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
     [HttpPost("{id:int}/read")]
@@ -38,8 +46,9 @@ public class NotificationsController : ControllerBase
     }
 
     [HttpPost("read-all")]
-    public async Task<ActionResult<NotificationReadAllResultDto>> MarkAllAsRead()
+    public async Task<ActionResult<NotificationReadAllResultDto>> MarkAllAsRead([FromQuery] string? category = null)
     {
-        return Ok(await _notificationService.MarkAllAsReadAsync());
+        try { return Ok(await _notificationService.MarkAllAsReadAsync(category)); }
+        catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 }

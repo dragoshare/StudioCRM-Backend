@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.Alerts;
 using StudioCRM.Application.DTOs.Notifications;
 using StudioCRM.Application.Interfaces;
@@ -25,32 +26,43 @@ public class NotificationService : INotificationService
         _operationalAlertService = operationalAlertService;
     }
 
-    public async Task<List<NotificationDto>> GetCurrentUserNotificationsAsync(int limit)
+    public async Task<List<NotificationDto>> GetCurrentUserNotificationsAsync(int limit, string? category = null, bool? isRead = null)
     {
         var userId = GetRequiredUserId();
         var safeLimit = limit is <= 0 or > 200 ? 50 : limit;
+        var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId), category);
+        if (isRead.HasValue)
+            query = query.Where(n => n.IsRead == isRead.Value);
 
         await SyncOperationalNotificationsAsync(userId);
 
-        return await _context.Notifications
-            .Where(n => n.UserId == userId)
+        return await query
+            .AsNoTracking()
             .OrderBy(n => n.IsRead)
             .ThenByDescending(n => n.CreatedAt)
+            .ThenByDescending(n => n.Id)
             .Take(safeLimit)
             .Select(n => MapToDto(n))
             .ToListAsync();
     }
 
-    public async Task<NotificationUnreadCountDto> GetUnreadCountAsync()
+    public async Task<NotificationUnreadCountDto> GetUnreadCountAsync(string? category = null)
     {
         var userId = GetRequiredUserId();
+        var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId && !n.IsRead), category);
 
         await SyncOperationalNotificationsAsync(userId);
 
+        var counts = await query.GroupBy(n => n.Type)
+            .Select(g => new { Type = g.Key, Count = g.Count() }).ToListAsync();
+        var byCategory = NotificationCategories.All.ToDictionary(x => x.Key, _ => 0);
+        foreach (var count in counts)
+            byCategory[NotificationCategories.Resolve(count.Type)] += count.Count;
+
         return new NotificationUnreadCountDto
         {
-            UnreadCount = await _context.Notifications
-                .CountAsync(n => n.UserId == userId && !n.IsRead)
+            UnreadCount = byCategory.Values.Sum(),
+            UnreadByCategory = byCategory
         };
     }
 
@@ -69,15 +81,14 @@ public class NotificationService : INotificationService
         return MapToDto(notification);
     }
 
-    public async Task<NotificationReadAllResultDto> MarkAllAsReadAsync()
+    public async Task<NotificationReadAllResultDto> MarkAllAsReadAsync(string? category = null)
     {
         var userId = GetRequiredUserId();
+        var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId && !n.IsRead), category);
 
         await SyncOperationalNotificationsAsync(userId);
 
-        var notifications = await _context.Notifications
-            .Where(n => n.UserId == userId && !n.IsRead)
-            .ToListAsync();
+        var notifications = await query.ToListAsync();
 
         foreach (var notification in notifications)
             MarkRead(notification);
@@ -96,6 +107,20 @@ public class NotificationService : INotificationService
             ?? throw new UnauthorizedAccessException("User is not authenticated.");
     }
 
+    private static IQueryable<Notification> FilterCategory(IQueryable<Notification> query, string? category)
+    {
+        var normalized = NotificationCategories.Normalize(category);
+        if (normalized is null)
+            return query;
+        if (normalized == NotificationCategories.Fallback)
+        {
+            var nonSystemTypes = NotificationCategories.NonSystemTypes();
+            return query.Where(n => !nonSystemTypes.Contains(n.Type));
+        }
+        var types = NotificationCategories.TypesFor(normalized);
+        return query.Where(n => types.Contains(n.Type));
+    }
+
     private static void MarkRead(Notification notification)
     {
         if (notification.IsRead)
@@ -112,6 +137,7 @@ public class NotificationService : INotificationService
             Id = notification.Id,
             UserId = notification.UserId,
             Type = notification.Type,
+            Category = NotificationCategories.Resolve(notification.Type),
             Severity = notification.Severity,
             Title = notification.Title,
             Message = notification.Message,

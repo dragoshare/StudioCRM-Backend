@@ -8,6 +8,8 @@ public class NotificationDto
 
     public string Type { get; set; } = string.Empty;
 
+    public string Category { get; set; } = "system";
+
     public string Severity { get; set; } = "Info";
 
     public string Title { get; set; } = string.Empty;
