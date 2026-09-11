@@ -287,6 +287,21 @@ app.MapControllers();
 using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<StudioCRMDbContext>();
+    var applyMigrationsOnStartup = builder.Configuration.GetValue<bool>("Database:ApplyMigrationsOnStartup");
+    if (applyMigrationsOnStartup)
+    {
+        await dbContext.Database.MigrateAsync();
+    }
+    else
+    {
+        var pendingMigrations = (await dbContext.Database.GetPendingMigrationsAsync()).ToList();
+        if (pendingMigrations.Count > 0)
+        {
+            throw new InvalidOperationException(
+                $"Database has {pendingMigrations.Count} pending migration(s). Run the controlled migration step before starting the API.");
+        }
+    }
+
     var seedDemoData = builder.Configuration.GetValue<bool>("Seed:DemoData") &&
                        builder.Configuration["Seed:DemoDataConfirmation"] == "ALLOW_DEMO_SEED";
 

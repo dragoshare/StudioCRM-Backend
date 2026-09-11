@@ -24,8 +24,6 @@ public static class DataSeeder
 
     public static async Task SeedAsync(StudioCRMDbContext context, bool seedDemoData)
     {
-        await context.Database.MigrateAsync();
-
         var passwordHasher = new PasswordHasher<User>();
 
         await SeedRolesAsync(context);
