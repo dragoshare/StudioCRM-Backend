@@ -33,6 +33,10 @@ builder.Services.Configure<JwtSettings>(
 
 var jwtSettings = builder.Configuration.GetSection("Jwt").Get<JwtSettings>()
     ?? throw new InvalidOperationException("JWT settings are not configured.");
+if (string.IsNullOrWhiteSpace(jwtSettings.Key) || Encoding.UTF8.GetByteCount(jwtSettings.Key) < 32)
+{
+    throw new InvalidOperationException("JWT signing key must be configured and contain at least 32 bytes.");
+}
 
 builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
@@ -47,8 +51,11 @@ builder.Services.AddHttpClient<ITpayApiClient, TpayConnectionService>(client =>
 builder.Services.Configure<CloudflareR2Settings>(
     builder.Configuration.GetSection("CloudflareR2"));
 // Database
-var connectionString = builder.Configuration.GetConnectionString(connectionName)
-    ?? throw new InvalidOperationException($"Connection string '{connectionName}' is not configured.");
+var connectionString = builder.Configuration.GetConnectionString(connectionName);
+if (string.IsNullOrWhiteSpace(connectionString))
+{
+    throw new InvalidOperationException($"Connection string '{connectionName}' is not configured.");
+}
 
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
     options.UseNpgsql(connectionString));
