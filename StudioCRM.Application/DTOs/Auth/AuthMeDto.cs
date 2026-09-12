@@ -23,4 +23,6 @@ public class AuthMeDto
     public string? ClientSource { get; set; }
 
     public string? PortalAccessMode { get; set; }
+
+    public bool EmailVerified { get; set; }
 }

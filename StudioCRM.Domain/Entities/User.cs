@@ -22,9 +22,15 @@ public class User
 
     public DateTime? LastLoginAt { get; set; }
 
+    public DateTime? EmailVerifiedAt { get; set; }
+
     public ICollection<UserRole> UserRoles { get; set; } = new List<UserRole>();
 
     public ICollection<RefreshToken> RefreshTokens { get; set; } = new List<RefreshToken>();
+
+    public ICollection<EmailVerificationToken> EmailVerificationTokens { get; set; } = new List<EmailVerificationToken>();
+
+    public ICollection<UserLegalConsent> LegalConsents { get; set; } = new List<UserLegalConsent>();
 
     public Trainer? TrainerProfile { get; set; }
 }

@@ -22,7 +22,7 @@ public class TpayPaymentTests
         await using var setup = database.Context();
         var company = new LegalEntity { Name = "Test company" };
         var location = new Location { Name = "Test location", LegalEntity = company };
-        var user = new User { Email = "tpay-test@example.test" };
+        var user = new User { Email = "tpay-test@example.test", EmailVerifiedAt = DateTime.UtcNow };
         var client = new Client { User = user, Location = location, Email = user.Email, FirstName = "Test" };
         var package = new ClientPackage
         {

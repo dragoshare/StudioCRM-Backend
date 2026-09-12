@@ -44,6 +44,7 @@ public class PaymentConfigurationService : IPaymentConfigurationService
 
     public async Task<LegalEntityDto> CreateLegalEntityAsync(UpsertLegalEntityRequest request)
     {
+        var (termsVersion, termsUrl) = NormalizeTerms(request.TermsVersion, request.TermsUrl);
         var legalEntity = new LegalEntity
         {
             Name = NormalizeRequiredText(request.Name, "Legal entity name is required."),
@@ -56,6 +57,9 @@ public class PaymentConfigurationService : IPaymentConfigurationService
             BlikPhoneNumber = NormalizeOptionalText(request.BlikPhoneNumber),
             TransferTitleTemplate = NormalizeOptionalText(request.TransferTitleTemplate),
             PaymentDescription = NormalizeOptionalText(request.PaymentDescription),
+            TermsVersion = termsVersion,
+            TermsUrl = termsUrl,
+            TermsPublishedAt = termsVersion is null ? null : DateTime.UtcNow,
             IsActive = request.IsActive,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
@@ -74,6 +78,16 @@ public class PaymentConfigurationService : IPaymentConfigurationService
         if (legalEntity is null)
             return null;
 
+        var (termsVersion, termsUrl) = NormalizeTerms(request.TermsVersion, request.TermsUrl);
+        if (legalEntity.TermsVersion is not null &&
+            string.Equals(legalEntity.TermsVersion, termsVersion, StringComparison.Ordinal) &&
+            !string.Equals(legalEntity.TermsUrl, termsUrl, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException("Change TermsVersion when publishing a different TermsUrl.");
+        }
+        var termsChanged = !string.Equals(legalEntity.TermsVersion, termsVersion, StringComparison.Ordinal) ||
+            !string.Equals(legalEntity.TermsUrl, termsUrl, StringComparison.Ordinal);
+
         legalEntity.Name = NormalizeRequiredText(request.Name, "Legal entity name is required.");
         legalEntity.Nip = NormalizeOptionalText(request.Nip);
         legalEntity.Address = NormalizeOptionalText(request.Address);
@@ -84,6 +98,10 @@ public class PaymentConfigurationService : IPaymentConfigurationService
         legalEntity.BlikPhoneNumber = NormalizeOptionalText(request.BlikPhoneNumber);
         legalEntity.TransferTitleTemplate = NormalizeOptionalText(request.TransferTitleTemplate);
         legalEntity.PaymentDescription = NormalizeOptionalText(request.PaymentDescription);
+        legalEntity.TermsVersion = termsVersion;
+        legalEntity.TermsUrl = termsUrl;
+        if (termsChanged)
+            legalEntity.TermsPublishedAt = termsVersion is null ? null : DateTime.UtcNow;
         legalEntity.IsActive = request.IsActive;
         legalEntity.UpdatedAt = DateTime.UtcNow;
 
@@ -201,10 +219,30 @@ public class PaymentConfigurationService : IPaymentConfigurationService
             BlikPhoneNumber = legalEntity.BlikPhoneNumber,
             TransferTitleTemplate = legalEntity.TransferTitleTemplate,
             PaymentDescription = legalEntity.PaymentDescription,
+            TermsVersion = legalEntity.TermsVersion,
+            TermsUrl = legalEntity.TermsUrl,
+            TermsPublishedAt = legalEntity.TermsPublishedAt,
             IsActive = legalEntity.IsActive,
             CreatedAt = legalEntity.CreatedAt,
             UpdatedAt = legalEntity.UpdatedAt
         };
+    }
+
+    private static (string? Version, string? Url) NormalizeTerms(string? version, string? url)
+    {
+        var normalizedVersion = NormalizeOptionalText(version);
+        var normalizedUrl = NormalizeOptionalText(url);
+
+        if ((normalizedVersion is null) != (normalizedUrl is null))
+            throw new InvalidOperationException("TermsVersion and TermsUrl must be configured together.");
+
+        if (normalizedUrl is not null &&
+            (!Uri.TryCreate(normalizedUrl, UriKind.Absolute, out var uri) || uri.Scheme != Uri.UriSchemeHttps))
+        {
+            throw new InvalidOperationException("TermsUrl must be an absolute HTTPS URL.");
+        }
+
+        return (normalizedVersion, normalizedUrl);
     }
 
     private static PaymentProviderAccountDto MapPaymentProviderAccount(PaymentProviderAccount account)

@@ -75,6 +75,29 @@ public class AuthController : ControllerBase
         return Ok(new { message = "Password has been reset." });
     }
 
+    [AllowAnonymous]
+    [HttpPost("verify-email")]
+    public async Task<IActionResult> VerifyEmail([FromBody] VerifyEmailRequest request)
+    {
+        try
+        {
+            await _authService.VerifyEmailAsync(request);
+            return Ok(new { message = "Email address has been verified." });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [AllowAnonymous]
+    [HttpPost("resend-email-verification")]
+    public async Task<IActionResult> ResendEmailVerification([FromBody] ResendEmailVerificationRequest request)
+    {
+        await _authService.ResendEmailVerificationAsync(request);
+        return Ok(new { message = "If verification is required, a new email has been sent." });
+    }
+
     [Authorize]
     [HttpPost("logout")]
     public IActionResult Logout()

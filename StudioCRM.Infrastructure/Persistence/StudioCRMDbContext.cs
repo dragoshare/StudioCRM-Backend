@@ -33,7 +33,9 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
+    public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<UserLegalConsent> UserLegalConsents => Set<UserLegalConsent>();
 
     public DbSet<Location> Locations => Set<Location>();
     public DbSet<LegalEntity> LegalEntities => Set<LegalEntity>();
@@ -668,6 +670,12 @@ public class StudioCRMDbContext : DbContext
             entity.Property(x => x.PaymentDescription)
                 .HasMaxLength(1000);
 
+            entity.Property(x => x.TermsVersion)
+                .HasMaxLength(100);
+
+            entity.Property(x => x.TermsUrl)
+                .HasMaxLength(1000);
+
             entity.HasIndex(x => x.Nip);
         });
 
@@ -858,6 +866,37 @@ public class StudioCRMDbContext : DbContext
         modelBuilder.Entity<RefreshToken>()
             .HasIndex(rt => rt.Token)
             .IsUnique();
+
+        modelBuilder.Entity<EmailVerificationToken>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.TokenHash).IsRequired().HasMaxLength(64);
+            entity.HasIndex(x => x.TokenHash).IsUnique();
+            entity.HasIndex(x => new { x.UserId, x.UsedAt, x.ExpiresAt });
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.EmailVerificationTokens)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<UserLegalConsent>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.DocumentType).IsRequired().HasMaxLength(50);
+            entity.Property(x => x.DocumentVersion).IsRequired().HasMaxLength(100);
+            entity.Property(x => x.DocumentUrl).IsRequired().HasMaxLength(1000);
+            entity.Property(x => x.Source).IsRequired().HasMaxLength(50);
+            entity.HasIndex(x => new { x.UserId, x.LegalEntityId, x.DocumentType, x.DocumentVersion })
+                .IsUnique();
+            entity.HasOne(x => x.User)
+                .WithMany(x => x.LegalConsents)
+                .HasForeignKey(x => x.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(x => x.LegalEntity)
+                .WithMany(x => x.UserLegalConsents)
+                .HasForeignKey(x => x.LegalEntityId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<Notification>(entity =>
         {

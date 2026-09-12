@@ -15,4 +15,14 @@ public class ValidateInvitationDto
     public string? TrainerName { get; set; }
 
     public DateTime ExpiresAt { get; set; }
+
+    public int? LegalEntityId { get; set; }
+
+    public string? LegalEntityName { get; set; }
+
+    public bool TermsAcceptanceRequired { get; set; }
+
+    public string? TermsVersion { get; set; }
+
+    public string? TermsUrl { get; set; }
 }

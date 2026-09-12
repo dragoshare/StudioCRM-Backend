@@ -15,4 +15,5 @@ public interface IClientService
     Task<List<ClientDto>> GetFilteredAsync(ClientFilterDto filter);
     Task<bool> RestoreAsync(int id);
     Task<List<ClientDto>> GetDeletedAsync();
+    Task<List<ClientLegalConsentDto>> GetLegalConsentsAsync(int clientId);
 }

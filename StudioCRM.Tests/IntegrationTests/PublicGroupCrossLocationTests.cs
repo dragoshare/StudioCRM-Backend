@@ -16,10 +16,21 @@ public class PublicGroupCrossLocationTests
         await using var database = await TestDatabase.CreateAsync();
         await using var db = database.Context();
 
-        var user = new User { Email = "cross-location@example.test" };
+        var user = new User { Email = "cross-location@example.test", EmailVerifiedAt = DateTime.UtcNow };
         var trainerUser = new User { Email = "trainer@example.test" };
         var home = new Location { Name = "Klaj", City = "Klaj" };
-        var destination = new Location { Name = "Niepolomice", City = "Niepolomice" };
+        var destinationCompany = new LegalEntity
+        {
+            Name = "Niepolomice company",
+            TermsVersion = "2026-09",
+            TermsUrl = "https://example.test/terms/2026-09"
+        };
+        var destination = new Location
+        {
+            Name = "Niepolomice",
+            City = "Niepolomice",
+            LegalEntity = destinationCompany
+        };
         db.AddRange(user, trainerUser, home, destination);
         await db.SaveChangesAsync();
 
@@ -54,6 +65,19 @@ public class PublicGroupCrossLocationTests
             new ClientUser(user.Id),
             new NoOutlookSync(),
             NullLogger<PublicGroupClassService>.Instance);
+
+        var requirements = await service.GetLegalRequirementsAsync(destination.Id);
+        Assert.True(requirements.AcceptanceRequired);
+        Assert.False(requirements.IsAccepted);
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            service.PurchasePackageForCurrentClientAsync(package.Id));
+
+        await service.AcceptLegalTermsAsync(new StudioCRM.Application.DTOs.Public.AcceptPublicLegalTermsRequest
+        {
+            LocationId = destination.Id,
+            AcceptTerms = true,
+            TermsVersion = destinationCompany.TermsVersion
+        });
 
         var purchase = await service.PurchasePackageForCurrentClientAsync(package.Id);
 

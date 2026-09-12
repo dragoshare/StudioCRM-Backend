@@ -11,4 +11,8 @@ public interface IEmailService
     Task SendPasswordResetEmailAsync(
         string toEmail,
         string resetLink);
+
+    Task SendEmailVerificationAsync(
+        string toEmail,
+        string verificationLink);
 }

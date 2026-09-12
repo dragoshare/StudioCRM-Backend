@@ -74,6 +74,12 @@ public class ClientsController : ControllerBase
         return result is null ? NotFound() : Ok(result);
     }
 
+    [HttpGet("{id:int}/legal-consents")]
+    public async Task<ActionResult<List<ClientLegalConsentDto>>> GetLegalConsents(int id)
+    {
+        return Ok(await _clientService.GetLegalConsentsAsync(id));
+    }
+
     [HttpPost("{id:int}/avatar")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadAvatar(

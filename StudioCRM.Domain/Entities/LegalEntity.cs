@@ -24,6 +24,12 @@ public class LegalEntity
 
     public string? PaymentDescription { get; set; }
 
+    public string? TermsVersion { get; set; }
+
+    public string? TermsUrl { get; set; }
+
+    public DateTime? TermsPublishedAt { get; set; }
+
     public bool IsActive { get; set; } = true;
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
@@ -35,4 +41,6 @@ public class LegalEntity
     public ICollection<PaymentProviderAccount> PaymentProviderAccounts { get; set; } = new List<PaymentProviderAccount>();
 
     public ICollection<CompanyExpense> Expenses { get; set; } = new List<CompanyExpense>();
+
+    public ICollection<UserLegalConsent> UserLegalConsents { get; set; } = new List<UserLegalConsent>();
 }

@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
 using StudioCRM.Application.DTOs.Auth;
@@ -22,18 +23,21 @@ public class AuthService : IAuthService
     private readonly JwtSettings _jwtSettings;
     private readonly AppSettings _appSettings;
     private readonly IEmailService _emailService;
+    private readonly ILogger<AuthService> _logger;
     private readonly PasswordHasher<User> _passwordHasher;
 
     public AuthService(
         StudioCRMDbContext context,
         IOptions<JwtSettings> jwtOptions,
         IOptions<AppSettings> appOptions,
-        IEmailService emailService)
+        IEmailService emailService,
+        ILogger<AuthService> logger)
     {
         _context = context;
         _jwtSettings = jwtOptions.Value;
         _appSettings = appOptions.Value;
         _emailService = emailService;
+        _logger = logger;
         _passwordHasher = new PasswordHasher<User>();
     }
 
@@ -110,6 +114,7 @@ public class AuthService : IAuthService
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             IsActive = true,
+            EmailVerifiedAt = now,
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -210,6 +215,16 @@ public class AuthService : IAuthService
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
 
+        var legalRequirements = await LegalConsentManager.GetRequirementsAsync(_context, request.LocationId);
+        if (legalRequirements.AcceptanceRequired &&
+            (!request.AcceptTerms || !string.Equals(
+                request.TermsVersion?.Trim(),
+                legalRequirements.TermsVersion,
+                StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Current terms must be accepted before registration.");
+        }
+
         var role = await _context.Roles
             .FirstOrDefaultAsync(r => r.Name == "Client");
 
@@ -277,6 +292,16 @@ public class AuthService : IAuthService
             CreatedAt = DateTime.UtcNow
         });
 
+        await LegalConsentManager.AcceptAsync(
+            _context,
+            user.Id,
+            request.LocationId,
+            request.AcceptTerms,
+            request.TermsVersion,
+            "PublicGroupRegistration");
+
+        var emailVerificationToken = await CreateEmailVerificationTokenAsync(user.Id);
+
         await _context.SaveChangesAsync();
 
         var clientName = $"{client.FirstName} {client.LastName}".Trim();
@@ -287,7 +312,7 @@ public class AuthService : IAuthService
             registrationSourceKey,
             "PublicGroupClientRegistered",
             "Konto zostało utworzone",
-            "Możesz teraz kupić pakiet i zapisać się na zajęcia grupowe.",
+            "Potwierdź adres e-mail, aby kupić pakiet i zapisać się na zajęcia grupowe.",
             relatedEntityType: "client",
             relatedEntityId: client.Id,
             actionUrl: "/group-classes",
@@ -303,6 +328,16 @@ public class AuthService : IAuthService
             actionUrl: $"/clients/{client.Id}/workspace",
             createdAt: now);
         await _context.SaveChangesAsync();
+
+        try
+        {
+            var verificationLink = BuildFrontendUrl("verify-email", ("token", emailVerificationToken));
+            await _emailService.SendEmailVerificationAsync(user.Email, verificationLink);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not send email verification to user {UserId}.", user.Id);
+        }
 
         var registeredUser = await _context.Users
             .Include(u => u.UserRoles)
@@ -402,7 +437,8 @@ public class AuthService : IAuthService
             ClientSource = client?.Source,
             PortalAccessMode = client is null
                 ? null
-                : client.TrainerId.HasValue ? "FullCrm" : "GroupOnly"
+                : client.TrainerId.HasValue ? "FullCrm" : "GroupOnly",
+            EmailVerified = user.EmailVerifiedAt.HasValue
         };
     }
 
@@ -531,6 +567,57 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
     }
 
+    public async Task VerifyEmailAsync(VerifyEmailRequest request)
+    {
+        var tokenHash = HashEmailVerificationToken(request.Token);
+        var verificationToken = await _context.EmailVerificationTokens
+            .Include(x => x.User)
+            .FirstOrDefaultAsync(x =>
+                x.TokenHash == tokenHash &&
+                x.UsedAt == null &&
+                x.ExpiresAt > DateTime.UtcNow);
+
+        if (verificationToken is null)
+            throw new InvalidOperationException("Invalid or expired email verification token.");
+
+        var now = DateTime.UtcNow;
+        verificationToken.UsedAt = now;
+        verificationToken.User.EmailVerifiedAt ??= now;
+        verificationToken.User.UpdatedAt = now;
+
+        var otherTokens = await _context.EmailVerificationTokens
+            .Where(x => x.UserId == verificationToken.UserId && x.Id != verificationToken.Id && x.UsedAt == null)
+            .ToListAsync();
+        foreach (var otherToken in otherTokens)
+            otherToken.UsedAt = now;
+
+        await _context.SaveChangesAsync();
+    }
+
+    public async Task ResendEmailVerificationAsync(ResendEmailVerificationRequest request)
+    {
+        var email = request.Email.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(email))
+            return;
+
+        var user = await _context.Users.FirstOrDefaultAsync(x => x.Email.ToLower() == email && x.IsActive);
+        if (user is null || user.EmailVerifiedAt.HasValue)
+            return;
+
+        var recentlyCreated = await _context.EmailVerificationTokens.AnyAsync(x =>
+            x.UserId == user.Id &&
+            x.UsedAt == null &&
+            x.CreatedAt > DateTime.UtcNow.AddMinutes(-1));
+        if (recentlyCreated)
+            return;
+
+        var rawToken = await CreateEmailVerificationTokenAsync(user.Id);
+        await _context.SaveChangesAsync();
+
+        var verificationLink = BuildFrontendUrl("verify-email", ("token", rawToken));
+        await _emailService.SendEmailVerificationAsync(user.Email, verificationLink);
+    }
+
     private AuthResponseDto BuildAuthResponse(User user, string refreshToken)
     {
         var roleNames = user.UserRoles
@@ -547,7 +634,9 @@ public class AuthService : IAuthService
             RefreshToken = refreshToken,
             UserId = user.Id,
             Email = user.Email,
-            Role = primaryRole
+            Role = primaryRole,
+            EmailVerified = user.EmailVerifiedAt.HasValue,
+            EmailVerificationRequired = !user.EmailVerifiedAt.HasValue
         };
     }
 
@@ -589,6 +678,36 @@ public class AuthService : IAuthService
     {
         var randomBytes = RandomNumberGenerator.GetBytes(64);
         return Convert.ToBase64String(randomBytes);
+    }
+
+    private async Task<string> CreateEmailVerificationTokenAsync(int userId)
+    {
+        var now = DateTime.UtcNow;
+        var activeTokens = await _context.EmailVerificationTokens
+            .Where(x => x.UserId == userId && x.UsedAt == null)
+            .ToListAsync();
+        foreach (var activeToken in activeTokens)
+            activeToken.UsedAt = now;
+
+        var rawToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32)).ToLowerInvariant();
+        await _context.EmailVerificationTokens.AddAsync(new EmailVerificationToken
+        {
+            UserId = userId,
+            TokenHash = HashEmailVerificationToken(rawToken),
+            CreatedAt = now,
+            ExpiresAt = now.AddHours(24)
+        });
+
+        return rawToken;
+    }
+
+    private static string HashEmailVerificationToken(string? token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return string.Empty;
+
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token.Trim())))
+            .ToLowerInvariant();
     }
 
     private string BuildFrontendUrl(

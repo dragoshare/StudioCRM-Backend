@@ -22,5 +22,9 @@ public class UpsertLegalEntityRequest
 
     public string? PaymentDescription { get; set; }
 
+    public string? TermsVersion { get; set; }
+
+    public string? TermsUrl { get; set; }
+
     public bool IsActive { get; set; } = true;
 }

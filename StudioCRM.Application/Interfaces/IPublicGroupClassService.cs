@@ -23,4 +23,8 @@ public interface IPublicGroupClassService
     Task<PublicGroupBookingDto> BookCurrentClientAsync(int sessionId);
 
     Task<bool> CancelCurrentClientBookingAsync(int sessionId);
+
+    Task<PublicLegalRequirementsDto> GetLegalRequirementsAsync(int locationId);
+
+    Task<PublicLegalRequirementsDto> AcceptLegalTermsAsync(AcceptPublicLegalTermsRequest request);
 }

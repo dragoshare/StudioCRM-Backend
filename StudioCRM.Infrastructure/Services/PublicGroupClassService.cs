@@ -159,6 +159,11 @@ public class PublicGroupClassService : IPublicGroupClassService
             throw new InvalidOperationException("Public group package entries count must be greater than zero.");
 
         var targetLocationId = package.LocationId ?? client.LocationId;
+        await EnsureEmailVerifiedAsync(client);
+        await LegalConsentManager.EnsureAcceptedAsync(
+            _context,
+            client.UserId!.Value,
+            targetLocationId);
         await EnsureGroupLocationMembershipAsync(
             client.Id,
             targetLocationId,
@@ -341,6 +346,12 @@ public class PublicGroupClassService : IPublicGroupClassService
         if (session.StartAt <= DateTime.UtcNow)
             throw new InvalidOperationException("Past group class cannot be booked.");
 
+        await EnsureEmailVerifiedAsync(client);
+        await LegalConsentManager.EnsureAcceptedAsync(
+            _context,
+            client.UserId!.Value,
+            session.LocationId);
+
         var existingParticipant = session.Participants
             .FirstOrDefault(p => p.ClientId == client.Id);
 
@@ -496,6 +507,33 @@ public class PublicGroupClassService : IPublicGroupClassService
         return true;
     }
 
+    public async Task<PublicLegalRequirementsDto> GetLegalRequirementsAsync(int locationId)
+    {
+        return await LegalConsentManager.GetRequirementsAsync(
+            _context,
+            locationId,
+            _currentUser.UserId);
+    }
+
+    public async Task<PublicLegalRequirementsDto> AcceptLegalTermsAsync(
+        AcceptPublicLegalTermsRequest request)
+    {
+        var client = await GetCurrentClientAsync();
+        await LegalConsentManager.AcceptAsync(
+            _context,
+            client.UserId!.Value,
+            request.LocationId,
+            request.AcceptTerms,
+            request.TermsVersion,
+            "ClientPortal");
+        await _context.SaveChangesAsync();
+
+        return await LegalConsentManager.GetRequirementsAsync(
+            _context,
+            request.LocationId,
+            client.UserId);
+    }
+
     private IQueryable<Session> BuildPublicClassQuery(PublicGroupClassFilterDto filter)
     {
         var query = BasePublicClassQuery();
@@ -539,6 +577,20 @@ public class PublicGroupClassService : IPublicGroupClassService
             throw new InvalidOperationException("Client profile not found for current user.");
 
         return client;
+    }
+
+    private async Task EnsureEmailVerifiedAsync(Client client)
+    {
+        if (!client.UserId.HasValue)
+            throw new InvalidOperationException("Client account is required.");
+
+        var isVerified = await _context.Users
+            .Where(x => x.Id == client.UserId.Value)
+            .Select(x => x.EmailVerifiedAt.HasValue)
+            .SingleAsync();
+
+        if (!isVerified)
+            throw new InvalidOperationException("Email address must be verified before continuing.");
     }
 
     private async Task<int?> GetCurrentClientIdAsync()

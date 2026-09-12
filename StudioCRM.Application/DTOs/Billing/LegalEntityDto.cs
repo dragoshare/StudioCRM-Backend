@@ -24,6 +24,12 @@ public class LegalEntityDto
 
     public string? PaymentDescription { get; set; }
 
+    public string? TermsVersion { get; set; }
+
+    public string? TermsUrl { get; set; }
+
+    public DateTime? TermsPublishedAt { get; set; }
+
     public bool IsActive { get; set; }
 
     public DateTime CreatedAt { get; set; }

@@ -167,6 +167,7 @@ public class InvitationService : IInvitationService
     {
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+                .ThenInclude(l => l.LegalEntity)
             .Include(i => i.Trainer)
                 .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Id == id);
@@ -184,6 +185,7 @@ public class InvitationService : IInvitationService
     {
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+                .ThenInclude(l => l.LegalEntity)
             .Include(i => i.Trainer)
                 .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Token == token);
@@ -202,7 +204,13 @@ public class InvitationService : IInvitationService
             LocationName = GetLocationName(invitation),
             TrainerId = invitation.TrainerId,
             TrainerName = GetTrainerName(invitation),
-            ExpiresAt = invitation.ExpiresAt
+            ExpiresAt = invitation.ExpiresAt,
+            LegalEntityId = invitation.Location.LegalEntityId,
+            LegalEntityName = invitation.Location.LegalEntity?.Name,
+            TermsAcceptanceRequired = !string.IsNullOrWhiteSpace(invitation.Location.LegalEntity?.TermsVersion) &&
+                !string.IsNullOrWhiteSpace(invitation.Location.LegalEntity?.TermsUrl),
+            TermsVersion = invitation.Location.LegalEntity?.TermsVersion,
+            TermsUrl = invitation.Location.LegalEntity?.TermsUrl
         };
     }
 
@@ -219,6 +227,7 @@ public class InvitationService : IInvitationService
 
         var invitation = await _context.Invitations
             .Include(i => i.Location)
+                .ThenInclude(l => l.LegalEntity)
             .Include(i => i.Trainer)
                 .ThenInclude(t => t!.User)
             .FirstOrDefaultAsync(i => i.Token == request.Token);
@@ -237,6 +246,18 @@ public class InvitationService : IInvitationService
         if (role is null)
             throw new InvalidOperationException("Role does not exist.");
 
+        var legalRequirements = await LegalConsentManager.GetRequirementsAsync(
+            _context,
+            invitation.LocationId);
+        if (legalRequirements.AcceptanceRequired &&
+            (!request.AcceptTerms || !string.Equals(
+                request.TermsVersion?.Trim(),
+                legalRequirements.TermsVersion,
+                StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException("Current terms must be accepted before activating the account.");
+        }
+
         await using var transaction = await _context.Database.BeginTransactionAsync();
 
         var user = new User
@@ -245,6 +266,7 @@ public class InvitationService : IInvitationService
             FirstName = request.FirstName.Trim(),
             LastName = request.LastName.Trim(),
             IsActive = true,
+            EmailVerifiedAt = DateTime.UtcNow,
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow
         };
@@ -266,6 +288,14 @@ public class InvitationService : IInvitationService
             await CreateTrainerProfileAsync(user, invitation);
         else if (invitation.Role == "Client")
             await CreateClientProfileAsync(user, invitation, request);
+
+        await LegalConsentManager.AcceptAsync(
+            _context,
+            user.Id,
+            invitation.LocationId,
+            request.AcceptTerms,
+            request.TermsVersion,
+            "InvitationAcceptance");
 
         invitation.IsAccepted = true;
         invitation.AcceptedAt = DateTime.UtcNow;

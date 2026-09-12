@@ -74,6 +74,24 @@ public class PublicGroupClassesController : ControllerBase
             Ok(await _authService.RegisterPublicGroupClientAsync(request)));
     }
 
+    [AllowAnonymous]
+    [HttpGet("legal-requirements")]
+    public async Task<ActionResult<PublicLegalRequirementsDto>> GetLegalRequirements(
+        [FromQuery] int locationId)
+    {
+        return await HandleAsync<PublicLegalRequirementsDto>(async () =>
+            Ok(await _publicGroupClassService.GetLegalRequirementsAsync(locationId)));
+    }
+
+    [Authorize(Roles = "Client")]
+    [HttpPost("legal-consents/me")]
+    public async Task<ActionResult<PublicLegalRequirementsDto>> AcceptLegalTerms(
+        AcceptPublicLegalTermsRequest request)
+    {
+        return await HandleAsync<PublicLegalRequirementsDto>(async () =>
+            Ok(await _publicGroupClassService.AcceptLegalTermsAsync(request)));
+    }
+
     [Authorize(Roles = "Client")]
     [HttpGet("me")]
     public async Task<ActionResult<PublicGroupClientStateDto>> GetMyState()

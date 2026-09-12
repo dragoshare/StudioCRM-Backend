@@ -233,6 +233,35 @@ public class ClientService : IClientService
         return await GetProjectedById(id);
     }
 
+    public async Task<List<ClientLegalConsentDto>> GetLegalConsentsAsync(int clientId)
+    {
+        var userId = await _context.Clients
+            .Where(x => x.Id == clientId)
+            .Select(x => x.UserId)
+            .FirstOrDefaultAsync();
+
+        if (!userId.HasValue)
+            return new List<ClientLegalConsentDto>();
+
+        return await _context.UserLegalConsents
+            .Where(x => x.UserId == userId.Value)
+            .OrderByDescending(x => x.AcceptedAt)
+            .Select(x => new ClientLegalConsentDto
+            {
+                Id = x.Id,
+                LegalEntityId = x.LegalEntityId,
+                LegalEntityName = x.LegalEntity.Name,
+                DocumentType = x.DocumentType,
+                DocumentVersion = x.DocumentVersion,
+                DocumentUrl = x.DocumentUrl,
+                Source = x.Source,
+                AcceptedAt = x.AcceptedAt,
+                IsCurrent = x.DocumentVersion == x.LegalEntity.TermsVersion &&
+                    x.DocumentUrl == x.LegalEntity.TermsUrl
+            })
+            .ToListAsync();
+    }
+
     private async Task SetHomeLocationMembershipAsync(Client client, int locationId)
     {
         var memberships = await _context.ClientLocationMemberships

@@ -114,6 +114,36 @@ public class PublicGroupRegisterRequest
     public string? PhoneNumber { get; set; }
 
     public int LocationId { get; set; }
+
+    public bool AcceptTerms { get; set; }
+
+    public string? TermsVersion { get; set; }
+}
+
+public class PublicLegalRequirementsDto
+{
+    public int LocationId { get; set; }
+
+    public int? LegalEntityId { get; set; }
+
+    public string? LegalEntityName { get; set; }
+
+    public bool AcceptanceRequired { get; set; }
+
+    public bool IsAccepted { get; set; }
+
+    public string? TermsVersion { get; set; }
+
+    public string? TermsUrl { get; set; }
+}
+
+public class AcceptPublicLegalTermsRequest
+{
+    public int LocationId { get; set; }
+
+    public bool AcceptTerms { get; set; }
+
+    public string? TermsVersion { get; set; }
 }
 
 public class PublicGroupBookingDto

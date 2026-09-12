@@ -105,6 +105,39 @@ public class EmailService : IEmailService
         await SendEmailAsync(message);
     }
 
+    public async Task SendEmailVerificationAsync(
+        string toEmail,
+        string verificationLink)
+    {
+        var html = $"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; color: #111827;">
+            <h2>Potwierdź adres e-mail</h2>
+            <p>Dokończ rejestrację konta ATLAS, potwierdzając swój adres e-mail.</p>
+            <p>
+                <a href="{verificationLink}"
+                   style="display:inline-block; padding:12px 20px; background:#2563eb; color:white; text-decoration:none; border-radius:8px;">
+                    Potwierdź adres e-mail
+                </a>
+            </p>
+            <p>Link jest ważny przez 24 godziny. Jeśli przycisk nie działa, skopiuj ten link:</p>
+            <p style="word-break: break-all;">{verificationLink}</p>
+            <p style="font-size: 12px; color: #6b7280;">
+                Jeśli nie zakładałeś konta, możesz zignorować tę wiadomość.
+            </p>
+        </div>
+        """;
+
+        var message = new EmailMessage
+        {
+            From = _emailSettings.From,
+            Subject = "Potwierdź adres e-mail w ATLAS",
+            HtmlBody = html
+        };
+
+        message.To.Add(toEmail);
+        await SendEmailAsync(message);
+    }
+
     private async Task SendEmailAsync(EmailMessage message)
     {
         var response = await _resend.EmailSendAsync(message);

@@ -31,6 +31,15 @@ public partial class ClientPaymentService
             var location = package.Location;
             if (location is null || !location.IsActive || location.LegalEntity is null || !location.LegalEntity.IsActive)
                 throw new InvalidOperationException("Package location must have an active legal entity.");
+            if (!client.UserId.HasValue || !await _context.Users
+                    .AnyAsync(x => x.Id == client.UserId.Value && x.EmailVerifiedAt.HasValue, ct))
+            {
+                throw new InvalidOperationException("Email address must be verified before payment.");
+            }
+            await LegalConsentManager.EnsureAcceptedAsync(
+                _context,
+                client.UserId.Value,
+                location.Id);
             var accounts = await _context.PaymentProviderAccounts.Where(x => x.IsActive &&
                 x.Provider.ToLower() == "tpay" && x.LegalEntityId == location.LegalEntityId &&
                 (x.LocationId == null || x.LocationId == location.Id)).ToListAsync(ct);
