@@ -279,6 +279,31 @@ public class AuthService : IAuthService
 
         await _context.SaveChangesAsync();
 
+        var clientName = $"{client.FirstName} {client.LastName}".Trim();
+        var registrationSourceKey = $"public-group-registration:{user.Id}";
+        await NotificationWriter.QueueAsync(
+            _context,
+            new[] { user.Id },
+            registrationSourceKey,
+            "PublicGroupClientRegistered",
+            "Konto zostało utworzone",
+            "Możesz teraz kupić pakiet i zapisać się na zajęcia grupowe.",
+            relatedEntityType: "client",
+            relatedEntityId: client.Id,
+            actionUrl: "/group-classes",
+            createdAt: now);
+        await NotificationWriter.QueueForOwnersAsync(
+            _context,
+            registrationSourceKey,
+            "PublicGroupClientRegistered",
+            "Nowa rejestracja na zajęcia grupowe",
+            $"{clientName} ({client.Email})",
+            relatedEntityType: "client",
+            relatedEntityId: client.Id,
+            actionUrl: $"/clients/{client.Id}/workspace",
+            createdAt: now);
+        await _context.SaveChangesAsync();
+
         var registeredUser = await _context.Users
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)

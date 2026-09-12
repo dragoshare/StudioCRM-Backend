@@ -34,6 +34,7 @@ public class NotificationService : INotificationService
         if (isRead.HasValue)
             query = query.Where(n => n.IsRead == isRead.Value);
 
+        await SyncClientGroupClassRemindersAsync(userId);
         await SyncOperationalNotificationsAsync(userId);
 
         return await query
@@ -51,6 +52,7 @@ public class NotificationService : INotificationService
         var userId = GetRequiredUserId();
         var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId && !n.IsRead), category);
 
+        await SyncClientGroupClassRemindersAsync(userId);
         await SyncOperationalNotificationsAsync(userId);
 
         var counts = await query.GroupBy(n => n.Type)
@@ -86,6 +88,7 @@ public class NotificationService : INotificationService
         var userId = GetRequiredUserId();
         var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId && !n.IsRead), category);
 
+        await SyncClientGroupClassRemindersAsync(userId);
         await SyncOperationalNotificationsAsync(userId);
 
         var notifications = await query.ToListAsync();
@@ -205,6 +208,69 @@ public class NotificationService : INotificationService
 
         foreach (var notification in resolvedUnreadNotifications)
             MarkRead(notification);
+
+        await _context.SaveChangesAsync();
+    }
+
+    private async Task SyncClientGroupClassRemindersAsync(int userId)
+    {
+        var clientId = await _context.Clients
+            .Where(x => x.UserId == userId && !x.IsDeleted)
+            .Select(x => (int?)x.Id)
+            .FirstOrDefaultAsync();
+
+        if (!clientId.HasValue)
+            return;
+
+        var now = DateTime.UtcNow;
+        var reminderLimit = now.AddHours(24);
+        var sessions = await _context.SessionParticipants
+            .Where(x =>
+                x.ClientId == clientId.Value &&
+                x.PlannedBillingType == StudioCRM.Domain.Enums.SessionBillingType.Group &&
+                x.AttendanceStatus != "CancelledInTime" &&
+                x.AttendanceStatus != "CancelledLate" &&
+                x.Session.IsPubliclyBookable &&
+                x.Session.Status == "Planned" &&
+                x.Session.StartAt > now &&
+                x.Session.StartAt <= reminderLimit)
+            .Select(x => new
+            {
+                x.SessionId,
+                x.Session.Title,
+                x.Session.StartAt
+            })
+            .ToListAsync();
+
+        var activeKeys = sessions
+            .Select(x => $"group-reminder:{clientId.Value}:{x.SessionId}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var session in sessions)
+        {
+            await NotificationWriter.QueueAsync(
+                _context,
+                new[] { userId },
+                $"group-reminder:{clientId.Value}:{session.SessionId}",
+                "GroupClassReminder",
+                "Zbliżają się zajęcia grupowe",
+                $"{session.Title}. Zajęcia rozpoczną się w ciągu 24 godzin.",
+                relatedEntityType: "session",
+                relatedEntityId: session.SessionId,
+                actionUrl: $"/group-classes?sessionId={session.SessionId}",
+                createdAt: now);
+        }
+
+        var obsoleteReminders = await _context.Notifications
+            .Where(x =>
+                x.UserId == userId &&
+                !x.IsRead &&
+                x.SourceKey.StartsWith($"group-reminder:{clientId.Value}:") &&
+                !activeKeys.Contains(x.SourceKey))
+            .ToListAsync();
+
+        foreach (var reminder in obsoleteReminders)
+            MarkRead(reminder);
 
         await _context.SaveChangesAsync();
     }

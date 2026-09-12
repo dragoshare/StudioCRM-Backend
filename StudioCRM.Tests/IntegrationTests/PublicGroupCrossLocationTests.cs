@@ -69,6 +69,10 @@ public class PublicGroupCrossLocationTests
         Assert.True(membership.GroupAccessEnabled);
         Assert.False(membership.IsHomeLocation);
         Assert.Equal(storedPackage.Id, purchase.ClientPackageId);
+        Assert.True(await db.Notifications.AnyAsync(x =>
+            x.UserId == user.Id &&
+            x.Type == "GroupPackagePaymentRequired" &&
+            x.RelatedEntityId == storedPackage.Id));
     }
 
     private sealed class NoOutlookSync : IOutlookCalendarSyncService

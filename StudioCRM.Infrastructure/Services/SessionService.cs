@@ -237,6 +237,10 @@ public class SessionService : ISessionService
         if (session is null)
             return null;
 
+        var previousStatus = session.Status;
+        var previousStartAt = session.StartAt;
+        var previousEndAt = session.EndAt;
+
         var replaceParticipants = request.Participants is not null;
         var participants = request.Participants ?? session.Participants
             .Select(p => new CreateSessionParticipantDto
@@ -378,11 +382,33 @@ public class SessionService : ISessionService
                     transactionCommitted = true;
                 }
             }
-            else if (requestedStatus == "Cancelled")
+            else if (IsGroupClass(session) && requestedStatus == "Cancelled" && previousStatus != "Cancelled")
+            {
+                await QueueGroupClassChangeNotificationsAsync(
+                    session,
+                    "GroupClassCancelled",
+                    "Zajęcia grupowe zostały odwołane",
+                    $"{session.Title}. Wykorzystane wejście wróciło do pakietu.",
+                    $"group-session:{session.Id}:cancelled:{session.UpdatedAt.Ticks}");
+                await _context.SaveChangesAsync();
+            }
+            else if (IsGroupClass(session) && requestedStatus == "Planned" &&
+                (previousStartAt != session.StartAt || previousEndAt != session.EndAt))
+            {
+                await QueueGroupClassChangeNotificationsAsync(
+                    session,
+                    "GroupClassRescheduled",
+                    "Zmieniono termin zajęć grupowych",
+                    $"Nowy termin: {ToStudioDisplayDateTime(session.StartAt):dd.MM.yyyy HH:mm}.",
+                    $"group-session:{session.Id}:rescheduled:{session.UpdatedAt.Ticks}");
+                await _context.SaveChangesAsync();
+            }
+
+            if (requestedStatus == "Cancelled")
             {
                 await TryDeleteSessionFromOutlookAsync(session.Id);
             }
-            else
+            else if (requestedStatus != "Completed")
             {
                 await TrySyncSessionToOutlookAsync(session.Id);
             }
@@ -422,12 +448,81 @@ public class SessionService : ISessionService
             await RevertSessionPackageAccountingAsync(session);
         }
 
+        if (IsGroupClass(session))
+        {
+            await QueueGroupClassChangeNotificationsAsync(
+                session,
+                "GroupClassCancelled",
+                "Zajęcia grupowe zostały odwołane",
+                $"{session.Title}. Wykorzystane wejście wróciło do pakietu.",
+                $"group-session:{session.Id}:deleted:{DateTime.UtcNow.Ticks}");
+        }
+
         await TryDeleteSessionFromOutlookAsync(session.Id);
 
         _context.Sessions.Remove(session);
         await _context.SaveChangesAsync();
 
         return true;
+    }
+
+    private static bool IsGroupClass(Session session)
+    {
+        return session.IsPubliclyBookable ||
+            string.Equals(
+                session.PlannedSessionType,
+                nameof(SessionBillingType.Group),
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private async Task QueueGroupClassChangeNotificationsAsync(
+        Session session,
+        string type,
+        string title,
+        string message,
+        string sourceKey)
+    {
+        var clientUserIds = await _context.SessionParticipants
+            .Where(x =>
+                x.SessionId == session.Id &&
+                x.AttendanceStatus != "CancelledInTime" &&
+                x.AttendanceStatus != "CancelledLate" &&
+                x.Client.UserId.HasValue)
+            .Select(x => x.Client.UserId!.Value)
+            .Distinct()
+            .ToListAsync();
+
+        await NotificationWriter.QueueAsync(
+            _context,
+            clientUserIds,
+            sourceKey,
+            type,
+            title,
+            message,
+            type == "GroupClassCancelled" ? "Warning" : "Info",
+            "session",
+            session.Id,
+            $"/group-classes?sessionId={session.Id}");
+
+        var trainerUserId = await _context.Trainers
+            .Where(x => x.Id == session.TrainerId)
+            .Select(x => x.UserId)
+            .FirstOrDefaultAsync();
+
+        if (trainerUserId != 0)
+        {
+            await NotificationWriter.QueueAsync(
+                _context,
+                new[] { trainerUserId },
+                sourceKey,
+                type,
+                title,
+                message,
+                type == "GroupClassCancelled" ? "Warning" : "Info",
+                "session",
+                session.Id,
+                $"/sessions/{session.Id}/workspace");
+        }
     }
 
     public async Task<bool> RestoreAsync(int id)

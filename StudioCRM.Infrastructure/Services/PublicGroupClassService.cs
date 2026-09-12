@@ -225,6 +225,36 @@ public class PublicGroupClassService : IPublicGroupClassService
         client.UpdatedAt = now;
 
         await _context.SaveChangesAsync();
+
+        if (package.Price > 0)
+        {
+            await NotificationWriter.QueueAsync(
+                _context,
+                new[] { client.UserId!.Value },
+                $"group-package:{clientPackage.Id}:payment-required",
+                "GroupPackagePaymentRequired",
+                "Opłać pakiet zajęć grupowych",
+                $"Pakiet {package.Name}: {package.Price:0.00} {package.Currency}.",
+                "Warning",
+                "client_package",
+                clientPackage.Id,
+                "/client/payments");
+        }
+        else
+        {
+            await NotificationWriter.QueueAsync(
+                _context,
+                new[] { client.UserId!.Value },
+                $"group-package:{clientPackage.Id}:activated",
+                "GroupPackageActivated",
+                "Pakiet zajęć grupowych jest aktywny",
+                package.Name,
+                relatedEntityType: "client_package",
+                relatedEntityId: clientPackage.Id,
+                actionUrl: "/group-classes");
+        }
+
+        await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
         return MapPurchase(clientPackage, clientPackage.TotalSessions);
@@ -366,6 +396,30 @@ public class PublicGroupClassService : IPublicGroupClassService
 
         session.UpdatedAt = DateTime.UtcNow;
         await _context.SaveChangesAsync();
+
+        var sessionDate = ToStudioDisplayDateTime(session.StartAt);
+        var bookingSourceKey = $"group-booking:{existingParticipant.Id}:booked";
+        await NotificationWriter.QueueAsync(
+            _context,
+            new[] { client.UserId!.Value },
+            bookingSourceKey,
+            "GroupClassBooked",
+            "Zapisano na zajęcia grupowe",
+            $"{session.Title}, {sessionDate:dd.MM.yyyy HH:mm}.",
+            relatedEntityType: "session",
+            relatedEntityId: session.Id,
+            actionUrl: $"/group-classes?sessionId={session.Id}");
+        await NotificationWriter.QueueAsync(
+            _context,
+            new[] { session.Trainer.UserId },
+            bookingSourceKey,
+            "GroupClassBooked",
+            "Nowy zapis na zajęcia grupowe",
+            $"{client.FirstName} {client.LastName}: {session.Title}, {sessionDate:dd.MM.yyyy HH:mm}.",
+            relatedEntityType: "session",
+            relatedEntityId: session.Id,
+            actionUrl: $"/sessions/{session.Id}/workspace");
+        await _context.SaveChangesAsync();
         await transaction.CommitAsync();
         await TrySyncSessionToOutlookAsync(session.Id);
 
@@ -406,6 +460,34 @@ public class PublicGroupClassService : IPublicGroupClassService
 
         _context.SessionParticipants.Remove(participant);
         participant.Session.UpdatedAt = DateTime.UtcNow;
+
+        var sessionDate = ToStudioDisplayDateTime(participant.Session.StartAt);
+        var cancellationSourceKey = $"group-booking:{participant.Id}:cancelled";
+        await NotificationWriter.QueueAsync(
+            _context,
+            new[] { client.UserId!.Value },
+            cancellationSourceKey,
+            "GroupClassBookingCancelled",
+            "Anulowano zapis na zajęcia",
+            $"{participant.Session.Title}, {sessionDate:dd.MM.yyyy HH:mm}.",
+            relatedEntityType: "session",
+            relatedEntityId: participant.SessionId,
+            actionUrl: "/group-classes");
+
+        var trainerUserId = await _context.Trainers
+            .Where(x => x.Id == participant.Session.TrainerId)
+            .Select(x => x.UserId)
+            .SingleAsync();
+        await NotificationWriter.QueueAsync(
+            _context,
+            new[] { trainerUserId },
+            cancellationSourceKey,
+            "GroupClassBookingCancelled",
+            "Klient anulował zapis na zajęcia",
+            $"{client.FirstName} {client.LastName}: {participant.Session.Title}, {sessionDate:dd.MM.yyyy HH:mm}.",
+            relatedEntityType: "session",
+            relatedEntityId: participant.SessionId,
+            actionUrl: $"/sessions/{participant.SessionId}/workspace");
 
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();

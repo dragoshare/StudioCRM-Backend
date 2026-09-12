@@ -693,6 +693,39 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         await RefreshPackagePaymentStatusAsync(clientPackage);
         await ActivatePackageAfterPaymentIfNeededAsync(clientPackage);
+
+        if (clientPackage.ExpectedBillingType == SessionBillingType.Group)
+        {
+            var client = await _context.Clients
+                .Where(x => x.Id == payment.ClientId)
+                .Select(x => new { x.UserId, x.FirstName, x.LastName })
+                .SingleAsync();
+            var sourceKey = $"group-payment:{payment.Id}:confirmed";
+            var paymentMessage = $"{clientPackage.Name}: {payment.Amount:0.00} {payment.Currency}.";
+
+            if (client.UserId.HasValue)
+            {
+                await NotificationWriter.QueueAsync(
+                    _context,
+                    new[] { client.UserId.Value },
+                    sourceKey,
+                    "GroupPackagePaymentConfirmed",
+                    "Płatność za pakiet grupowy potwierdzona",
+                    paymentMessage,
+                    relatedEntityType: "payment",
+                    relatedEntityId: payment.Id,
+                    actionUrl: "/client/payments");
+            }
+            await NotificationWriter.QueueForOwnersAsync(
+                _context,
+                sourceKey,
+                "GroupPackagePaymentConfirmed",
+                "Otrzymano płatność za pakiet grupowy",
+                $"{client.FirstName} {client.LastName}: {paymentMessage}",
+                relatedEntityType: "payment",
+                relatedEntityId: payment.Id,
+                actionUrl: $"/clients/{payment.ClientId}/workspace");
+        }
     }
 
     private async Task ReverseConfirmedPaymentAsync(
