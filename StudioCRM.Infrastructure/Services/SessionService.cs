@@ -70,6 +70,28 @@ public class SessionService : ISessionService
         return await MapSessionDtoAsync(session);
     }
 
+    public async Task<List<SessionCorrectionDto>> GetCorrectionsAsync(int id)
+    {
+        var corrections = await _context.SessionCorrections
+            .AsNoTracking()
+            .Where(x => x.OriginalSessionId == id)
+            .OrderByDescending(x => x.CreatedAt)
+            .ToListAsync();
+
+        return corrections.Select(x => new SessionCorrectionDto
+        {
+            Id = x.Id,
+            SessionId = x.SessionId,
+            OriginalSessionId = x.OriginalSessionId,
+            ChangeType = x.ChangeType,
+            Reason = x.Reason,
+            BeforeState = JsonSerializer.Deserialize<JsonElement>(x.BeforeStateJson),
+            AfterState = JsonSerializer.Deserialize<JsonElement>(x.AfterStateJson),
+            ChangedByUserId = x.ChangedByUserId,
+            CreatedAt = x.CreatedAt
+        }).ToList();
+    }
+
     public async Task<SessionWorkspaceDto?> GetWorkspaceAsync(int id)
     {
         var session = await GetByIdAsync(id);
@@ -313,13 +335,17 @@ public class SessionService : ISessionService
             outlookCategories,
             request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
 
-        var transaction = requestedStatus == "Completed"
+        var transaction = locksCurrentSettlement || locksTargetSettlement
             ? await _context.Database.BeginTransactionAsync()
             : null;
         var transactionCommitted = false;
 
         try
         {
+            var correctionBefore = locksCurrentSettlement
+                ? await SessionCorrectionRecorder.CaptureAsync(_context, session.Id)
+                : null;
+
             session.Title = ResolveSessionTitle(
                 request.Title,
                 clients,
@@ -349,6 +375,19 @@ public class SessionService : ISessionService
                     EnsureCompletedSessionParticipantsWereNotChanged(session, participants);
 
                 await _context.SaveChangesAsync();
+
+                if (correctionBefore is not null)
+                {
+                    await SessionCorrectionRecorder.RecordAsync(
+                        _context,
+                        session.Id,
+                        "CompletedSessionUpdated",
+                        request.CorrectionReason,
+                        correctionBefore,
+                        _currentUser.UserId);
+                    await _context.SaveChangesAsync();
+                }
+
                 await TrySyncSessionToOutlookAsync(session.Id);
 
                 if (transaction is not null)
@@ -422,6 +461,19 @@ public class SessionService : ISessionService
                 await _context.SaveChangesAsync();
             }
 
+            if (correctionBefore is not null && requestedStatus != "Completed")
+            {
+                await _context.SaveChangesAsync();
+                await SessionCorrectionRecorder.RecordAsync(
+                    _context,
+                    session.Id,
+                    "SessionStatusCorrected",
+                    request.CorrectionReason,
+                    correctionBefore,
+                    _currentUser.UserId);
+                await _context.SaveChangesAsync();
+            }
+
             if (requestedStatus == "Cancelled")
             {
                 await TryDeleteSessionFromOutlookAsync(session.Id);
@@ -429,6 +481,12 @@ public class SessionService : ISessionService
             else if (requestedStatus != "Completed")
             {
                 await TrySyncSessionToOutlookAsync(session.Id);
+            }
+
+            if (transaction is not null && !transactionCommitted)
+            {
+                await transaction.CommitAsync();
+                transactionCommitted = true;
             }
 
             return await GetByIdAsync(session.Id);
@@ -460,28 +518,44 @@ public class SessionService : ISessionService
                 p.SessionId == session.Id &&
                 p.IsCountedFromPackage);
 
-        if (touchesCompletedSession)
+        await using var transaction = touchesCompletedSession
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+
+        try
         {
-            await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
-            await RevertSessionPackageAccountingAsync(session);
-        }
+            if (touchesCompletedSession)
+            {
+                await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+                await RevertSessionPackageAccountingAsync(session);
+            }
 
-        if (IsGroupClass(session))
+            if (IsGroupClass(session))
+            {
+                await QueueGroupClassChangeNotificationsAsync(
+                    session,
+                    "GroupClassCancelled",
+                    "Zajęcia grupowe zostały odwołane",
+                    $"{session.Title}. Wykorzystane wejście wróciło do pakietu.",
+                    $"group-session:{session.Id}:deleted:{DateTime.UtcNow.Ticks}");
+            }
+
+            await TryDeleteSessionFromOutlookAsync(session.Id);
+
+            _context.Sessions.Remove(session);
+            await _context.SaveChangesAsync();
+
+            if (transaction is not null)
+                await transaction.CommitAsync();
+
+            return true;
+        }
+        catch
         {
-            await QueueGroupClassChangeNotificationsAsync(
-                session,
-                "GroupClassCancelled",
-                "Zajęcia grupowe zostały odwołane",
-                $"{session.Title}. Wykorzystane wejście wróciło do pakietu.",
-                $"group-session:{session.Id}:deleted:{DateTime.UtcNow.Ticks}");
+            if (transaction is not null)
+                await transaction.RollbackAsync();
+            throw;
         }
-
-        await TryDeleteSessionFromOutlookAsync(session.Id);
-
-        _context.Sessions.Remove(session);
-        await _context.SaveChangesAsync();
-
-        return true;
     }
 
     private static bool IsGroupClass(Session session)
@@ -868,54 +942,7 @@ public class SessionService : ISessionService
 
     private async Task RevertSessionPackageAccountingAsync(Session session)
     {
-        var participants = await _context.SessionParticipants
-            .Where(p => p.SessionId == session.Id)
-            .ToListAsync();
-
-        var countedPackageGroups = participants
-            .Where(p => p.IsCountedFromPackage && p.ClientPackageId.HasValue)
-            .GroupBy(p => p.ClientPackageId!.Value)
-            .Select(g => new
-            {
-                ClientPackageId = g.Key,
-                SessionsCharged = g.Sum(p => Math.Max(0, p.SessionsCharged))
-            })
-            .ToList();
-
-        foreach (var countedPackage in countedPackageGroups)
-        {
-            var clientPackage = await _context.ClientPackages
-                .FirstOrDefaultAsync(cp => cp.Id == countedPackage.ClientPackageId);
-
-            if (clientPackage is not null)
-            {
-                clientPackage.UsedSessions = Math.Max(
-                    0,
-                    clientPackage.UsedSessions - countedPackage.SessionsCharged);
-            }
-        }
-
-        var adjustments = await _context.ClientBalanceTransactions
-            .Where(t =>
-                t.SessionId == session.Id &&
-                t.Type == BalanceTransactionType.PackageAdjustment)
-            .ToListAsync();
-
-        _context.ClientBalanceTransactions.RemoveRange(adjustments);
-
-        foreach (var participant in participants)
-        {
-            participant.CountsAgainstPackage = false;
-            participant.IsCountedFromPackage = false;
-            participant.ClientPackageId = null;
-            participant.PackageId = null;
-            participant.PlannedBillingType = null;
-            participant.ActualBillingType = null;
-            participant.ExpectedUnitPrice = null;
-            participant.ActualUnitPrice = null;
-            participant.BalanceDifference = null;
-            participant.UpdatedAt = DateTime.UtcNow;
-        }
+        await SessionAccountingCorrectionManager.RevertAsync(_context, session);
     }
 
     private static void EnsureCompletedSessionParticipantsWereNotChanged(
@@ -1249,6 +1276,7 @@ public class SessionService : ISessionService
         return new CompleteSessionDto
         {
             ActualSessionType = actualSessionType.ToString(),
+            CorrectionReason = request.CorrectionReason,
             Participants = request.Participants!
                 .Select(p => new CompleteSessionParticipantDto
                 {

@@ -59,6 +59,13 @@ public class SessionsController : ControllerBase
         });
     }
 
+    [HttpGet("{id:int}/corrections")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<List<SessionCorrectionDto>>> GetCorrections(int id)
+    {
+        return Ok(await _sessionService.GetCorrectionsAsync(id));
+    }
+
     [HttpPost("series")]
     [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionSeriesDto>> CreateSeries(CreateSessionSeriesDto request)

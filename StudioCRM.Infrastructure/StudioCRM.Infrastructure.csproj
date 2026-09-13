@@ -30,4 +30,8 @@
     <ProjectReference Include="..\StudioCRM.Domain\StudioCRM.Domain.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="StudioCRM.Tests" />
+  </ItemGroup>
+
 </Project>

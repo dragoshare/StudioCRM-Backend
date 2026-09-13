@@ -5,4 +5,6 @@ public class CompleteSessionDto
     public string ActualSessionType { get; set; } = "OneToOne";
 
     public List<CompleteSessionParticipantDto> Participants { get; set; } = new();
+
+    public string? CorrectionReason { get; set; }
 }

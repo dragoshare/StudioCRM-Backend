@@ -29,6 +29,7 @@ public class StudioCRMDbContext : DbContext
 
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
+    public DbSet<SessionCorrection> SessionCorrections => Set<SessionCorrection>();
     public DbSet<ClientLocationMembership> ClientLocationMemberships => Set<ClientLocationMembership>();
 
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
@@ -799,6 +800,20 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<Session>()
             .HasQueryFilter(s => !s.IsDeleted);
+
+        modelBuilder.Entity<SessionCorrection>(entity =>
+        {
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.ChangeType).IsRequired().HasMaxLength(50);
+            entity.Property(x => x.Reason).HasMaxLength(500);
+            entity.Property(x => x.BeforeStateJson).IsRequired().HasColumnType("text");
+            entity.Property(x => x.AfterStateJson).IsRequired().HasColumnType("text");
+            entity.HasOne(x => x.Session)
+                .WithMany(x => x.Corrections)
+                .HasForeignKey(x => x.SessionId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasIndex(x => new { x.OriginalSessionId, x.CreatedAt });
+        });
 
         // =========================
         // SESSION PARTICIPANTS

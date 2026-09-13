@@ -27,4 +27,6 @@ public class UpdateSessionDto
     public List<string> OutlookCategories { get; set; } = new();
 
     public List<CreateSessionParticipantDto>? Participants { get; set; }
+
+    public string? CorrectionReason { get; set; }
 }

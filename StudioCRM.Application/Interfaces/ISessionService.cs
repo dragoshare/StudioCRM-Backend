@@ -12,6 +12,8 @@ public interface ISessionService
 
     Task<SessionWorkspaceDto?> GetWorkspaceAsync(int id);
 
+    Task<List<SessionCorrectionDto>> GetCorrectionsAsync(int id);
+
     Task<SessionDto> CreateAsync(CreateSessionDto request);
 
     Task<SessionSeriesDto> CreateSeriesAsync(CreateSessionSeriesDto request);

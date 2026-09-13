@@ -136,15 +136,37 @@ public class SessionParticipantService : ISessionParticipantService
 
     public async Task<bool> CompleteSessionAsync(int sessionId, CompleteSessionDto request)
     {
-        return await CompleteSessionAsync(sessionId, request, skipUserAccessCheck: false);
+        return await CompleteSessionInTransactionAsync(sessionId, request, skipUserAccessCheck: false);
     }
 
     public async Task<bool> CompleteSessionAutomaticallyAsync(int sessionId, CompleteSessionDto request)
     {
-        return await CompleteSessionAsync(sessionId, request, skipUserAccessCheck: true);
+        return await CompleteSessionInTransactionAsync(sessionId, request, skipUserAccessCheck: true);
     }
 
-    private async Task<bool> CompleteSessionAsync(
+    private async Task<bool> CompleteSessionInTransactionAsync(
+        int sessionId,
+        CompleteSessionDto request,
+        bool skipUserAccessCheck)
+    {
+        if (_context.Database.CurrentTransaction is not null)
+            return await CompleteSessionCoreAsync(sessionId, request, skipUserAccessCheck);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            var result = await CompleteSessionCoreAsync(sessionId, request, skipUserAccessCheck);
+            await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+    }
+
+    private async Task<bool> CompleteSessionCoreAsync(
         int sessionId,
         CompleteSessionDto request,
         bool skipUserAccessCheck)
@@ -175,6 +197,9 @@ public class SessionParticipantService : ISessionParticipantService
         var updatesCompletedSession =
             session.Status == "Completed" ||
             session.Participants.Any(p => p.IsCountedFromPackage);
+        var correctionBefore = updatesCompletedSession
+            ? await SessionCorrectionRecorder.CaptureAsync(_context, session.Id)
+            : null;
 
         if (updatesCompletedSession)
         {
@@ -341,6 +366,19 @@ public class SessionParticipantService : ISessionParticipantService
             await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackageId);
         }
 
+        if (correctionBefore is not null)
+        {
+            await _context.SaveChangesAsync();
+            await SessionCorrectionRecorder.RecordAsync(
+                _context,
+                session.Id,
+                "SessionRecalculated",
+                request.CorrectionReason,
+                correctionBefore,
+                _currentUser.UserId);
+            await _context.SaveChangesAsync();
+        }
+
         await TrySyncSessionToOutlookAsync(sessionId);
 
         return true;
@@ -442,50 +480,7 @@ public class SessionParticipantService : ISessionParticipantService
 
     private async Task RevertSessionPackageAccountingAsync(Session session)
     {
-        var countedPackageGroups = session.Participants
-            .Where(p => p.IsCountedFromPackage && p.ClientPackageId.HasValue)
-            .GroupBy(p => p.ClientPackageId!.Value)
-            .Select(g => new
-            {
-                ClientPackageId = g.Key,
-                SessionsCharged = g.Sum(p => Math.Max(0, p.SessionsCharged))
-            })
-            .ToList();
-
-        foreach (var countedPackage in countedPackageGroups)
-        {
-            var clientPackage = await _context.ClientPackages
-                .FirstOrDefaultAsync(cp => cp.Id == countedPackage.ClientPackageId);
-
-            if (clientPackage is not null)
-            {
-                clientPackage.UsedSessions = Math.Max(
-                    0,
-                    clientPackage.UsedSessions - countedPackage.SessionsCharged);
-            }
-        }
-
-        var adjustments = await _context.ClientBalanceTransactions
-            .Where(t =>
-                t.SessionId == session.Id &&
-                t.Type == BalanceTransactionType.PackageAdjustment)
-            .ToListAsync();
-
-        _context.ClientBalanceTransactions.RemoveRange(adjustments);
-
-        foreach (var participant in session.Participants)
-        {
-            participant.CountsAgainstPackage = false;
-            participant.IsCountedFromPackage = false;
-            participant.ClientPackageId = null;
-            participant.PackageId = null;
-            participant.PlannedBillingType = null;
-            participant.ActualBillingType = null;
-            participant.ExpectedUnitPrice = null;
-            participant.ActualUnitPrice = null;
-            participant.BalanceDifference = null;
-            participant.UpdatedAt = DateTime.UtcNow;
-        }
+        await SessionAccountingCorrectionManager.RevertAsync(_context, session);
     }
 
     private async Task<ClientPackage?> ResolveActiveClientPackageAsync(

@@ -58,4 +58,6 @@ public class Session
     public string? RecurringGroupId { get; set; }
 
     public int? RecurrenceInstanceNumber { get; set; }
+
+    public ICollection<SessionCorrection> Corrections { get; set; } = new List<SessionCorrection>();
 }

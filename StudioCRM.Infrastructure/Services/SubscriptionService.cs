@@ -204,12 +204,30 @@ public class SubscriptionService : ISubscriptionService
         if (package is null)
             throw new InvalidOperationException("Next subscription package does not exist or is inactive.");
 
-        var nextAlreadyExists = await _context.ClientPackages.AnyAsync(cp =>
+        var existingNextCycle = await _context.ClientPackages.FirstOrDefaultAsync(cp =>
             cp.ClientId == client.Id &&
             cp.PreviousClientPackageId == completedPackage.Id);
 
-        if (nextAlreadyExists)
+        if (existingNextCycle is not null)
+        {
+            if (existingNextCycle.UsedSessions > 0 && !existingNextCycle.IsActive)
+                throw new InvalidOperationException("Existing renewal cycle is inactive but already used.");
+
+            if (!existingNextCycle.IsActive)
+            {
+                completedPackage.IsActive = false;
+                await _context.SaveChangesAsync();
+                existingNextCycle.IsActive = true;
+            }
+
+            client.ActivePackageId = existingNextCycle.PackageId;
+            client.NextPackageId = null;
+            client.Status = "Active";
+            client.BillingStatus = existingNextCycle.PaymentStatus.ToString();
+            client.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
             return;
+        }
 
         completedPackage.IsActive = false;
         var nextCycle = await CreateRenewalCycleAsync(client, completedPackage, package);
