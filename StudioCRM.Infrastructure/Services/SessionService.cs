@@ -16,6 +16,8 @@ public class SessionService : ISessionService
 {
     private const int LocationPeopleLimit = 8;
     private const int TrainerConcurrentParticipantLimit = 4;
+    private const int DefaultSeriesOccurrencesCount = 12;
+    private const int MaxSeriesOccurrencesCount = 104;
     private const string OutlookStudioTimeZone = "Central European Standard Time";
 
     private readonly StudioCRMDbContext _context;
@@ -110,7 +112,16 @@ public class SessionService : ISessionService
         };
     }
 
-    public async Task<SessionDto> CreateAsync(CreateSessionDto request)
+    public Task<SessionDto> CreateAsync(CreateSessionDto request)
+    {
+        return CreateAsync(request, recurringGroupId: null, recurrenceInstanceNumber: null, syncToOutlook: true);
+    }
+
+    private async Task<SessionDto> CreateAsync(
+        CreateSessionDto request,
+        string? recurringGroupId,
+        int? recurrenceInstanceNumber,
+        bool syncToOutlook)
     {
         var participants = request.Participants ?? new List<CreateSessionParticipantDto>();
         request.Participants = participants;
@@ -139,10 +150,12 @@ public class SessionService : ISessionService
         var clients = await GetClientsForParticipantsAsync(participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
-            request.OutlookCategories);
+            request.OutlookCategories,
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
-            outlookCategories);
+            outlookCategories,
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
 
         var title = ResolveSessionTitle(
             request.Title,
@@ -174,6 +187,9 @@ public class SessionService : ISessionService
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
                 OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors),
                 PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
+                IsRecurring = recurringGroupId is not null,
+                RecurringGroupId = recurringGroupId,
+                RecurrenceInstanceNumber = recurrenceInstanceNumber,
                 CreatedAt = DateTime.UtcNow,
                 UpdatedAt = DateTime.UtcNow,
                 CreatedBy = _currentUser.UserId
@@ -203,7 +219,7 @@ public class SessionService : ISessionService
                     transactionCommitted = true;
                 }
             }
-            else if (requestedStatus != "Cancelled")
+            else if (requestedStatus != "Cancelled" && syncToOutlook)
             {
                 await TrySyncSessionToOutlookAsync(session.Id);
             }
@@ -290,10 +306,12 @@ public class SessionService : ISessionService
         var clients = await GetClientsForParticipantsAsync(participants);
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
-            request.OutlookCategories);
+            request.OutlookCategories,
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
-            outlookCategories);
+            outlookCategories,
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
 
         var transaction = requestedStatus == "Completed"
             ? await _context.Database.BeginTransactionAsync()
@@ -523,6 +541,80 @@ public class SessionService : ISessionService
                 session.Id,
                 $"/sessions/{session.Id}/workspace");
         }
+    }
+
+    public async Task<SessionSeriesDto> CreateSeriesAsync(CreateSessionSeriesDto request)
+    {
+        if (request.Session is null || request.Recurrence is null)
+            throw new InvalidOperationException("Session and recurrence settings are required.");
+
+        var status = string.IsNullOrWhiteSpace(request.Session.Status)
+            ? "Planned"
+            : request.Session.Status.Trim();
+        if (!string.Equals(status, "Planned", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("A new session series must start with Planned status.");
+
+        var baseStartAt = NormalizeStudioDateTime(request.Session.StartAt);
+        var baseEndAt = await ResolveCreateSessionEndAtAsync(request.Session.EndAt, baseStartAt);
+        var duration = baseEndAt - baseStartAt;
+        var occurrenceStarts = BuildSeriesOccurrenceStarts(request.Session.StartAt, request.Recurrence);
+        var recurringGroupId = Guid.NewGuid().ToString("N");
+        var occurrenceRequests = occurrenceStarts
+            .Select((startAt, index) => CloneSeriesOccurrenceRequest(
+                request.Session,
+                startAt,
+                startAt.Add(duration),
+                index + 1))
+            .ToList();
+
+        // Validate the complete plan before writing the first occurrence.
+        foreach (var occurrence in occurrenceRequests)
+        {
+            await ValidateSessionRequestAsync(
+                occurrence.TrainerId,
+                occurrence.LocationId,
+                NormalizeStudioDateTime(occurrence.StartAt),
+                NormalizeStudioDateTime(occurrence.EndAt!.Value),
+                occurrence.IsPubliclyBookable,
+                occurrence.PublicCapacity,
+                occurrence.PlannedSessionType,
+                occurrence.Participants,
+                excludedSessionId: null);
+        }
+
+        var createdSessions = new List<SessionDto>();
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            for (var index = 0; index < occurrenceRequests.Count; index++)
+            {
+                createdSessions.Add(await CreateAsync(
+                    occurrenceRequests[index],
+                    recurringGroupId,
+                    index + 1,
+                    syncToOutlook: false));
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, request.Recurrence);
+
+        return new SessionSeriesDto
+        {
+            RecurringGroupId = recurringGroupId,
+            Frequency = NormalizeSeriesFrequency(request.Recurrence.Frequency),
+            Interval = request.Recurrence.Interval,
+            OccurrencesCount = createdSessions.Count,
+            OutlookSeriesSynced = outlookSync.IsSynced,
+            OutlookSyncWarning = outlookSync.Warning,
+            Sessions = createdSessions
+        };
     }
 
     public async Task<bool> RestoreAsync(int id)
@@ -961,6 +1053,29 @@ public class SessionService : ISessionService
                 $"Trainer already has a session in this exact time slot ({start:yyyy-MM-dd HH:mm}-{end:HH:mm}, session #{duplicateSlotSession.Id}). Add participants to the existing session instead of creating another one.");
         }
 
+        var roomBlockingSession = await _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.Status != "Cancelled" &&
+                s.LocationId == locationId &&
+                s.StartAt < endAt &&
+                s.EndAt > startAt &&
+                (!excludedSessionId.HasValue || s.Id != excludedSessionId.Value) &&
+                (isGroupSession || s.IsPubliclyBookable ||
+                    s.PlannedSessionType != null && s.PlannedSessionType.ToLower() == "group"))
+            .OrderBy(s => s.StartAt)
+            .Select(s => new { s.Id, s.Title, s.StartAt, s.EndAt })
+            .FirstOrDefaultAsync();
+
+        if (roomBlockingSession is not null)
+        {
+            var start = ToStudioDisplayDateTime(roomBlockingSession.StartAt);
+            var end = ToStudioDisplayDateTime(roomBlockingSession.EndAt);
+            throw new InvalidOperationException(
+                $"The studio room is not available because of session '{roomBlockingSession.Title}' " +
+                $"({start:yyyy-MM-dd HH:mm}-{end:HH:mm}, session #{roomBlockingSession.Id}).");
+        }
+
         if (!isGroupSession)
         {
             await EnsureTrainerConcurrentParticipantLimitAsync(
@@ -1212,6 +1327,22 @@ public class SessionService : ISessionService
         }
     }
 
+    private async Task<(bool IsSynced, string? Warning)> TrySyncSessionSeriesToOutlookAsync(
+        string recurringGroupId,
+        SessionRecurrenceDto recurrence)
+    {
+        try
+        {
+            await _outlookCalendarSyncService.SyncSessionSeriesAsync(recurringGroupId, recurrence);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not sync session series {RecurringGroupId} to Outlook.", recurringGroupId);
+            return (false, "Series was created in CRM, but could not be synchronized with Outlook.");
+        }
+    }
+
     private static string ResolveSessionTitle(
         string? requestedTitle,
         List<Client> clients,
@@ -1375,8 +1506,138 @@ public class SessionService : ISessionService
             PrimaryOutlookCategory = primaryOutlookCategory,
             PrimaryOutlookCategoryColor = outlookCategoryColors
                 .FirstOrDefault(c => string.Equals(c.Name, primaryOutlookCategory, StringComparison.OrdinalIgnoreCase))
-                ?.Color
+                ?.Color,
+            IsRecurring = s.IsRecurring,
+            RecurringGroupId = s.RecurringGroupId,
+            RecurrenceInstanceNumber = s.RecurrenceInstanceNumber
         };
+    }
+
+    private static List<DateTime> BuildSeriesOccurrenceStarts(
+        DateTime requestedStartAt,
+        SessionRecurrenceDto recurrence)
+    {
+        var frequency = NormalizeSeriesFrequency(recurrence.Frequency);
+        if (recurrence.Interval is < 1 or > 12)
+            throw new InvalidOperationException("Recurrence interval must be between 1 and 12.");
+
+        var requestedCount = recurrence.OccurrencesCount ??
+            (recurrence.EndDate.HasValue ? MaxSeriesOccurrencesCount : DefaultSeriesOccurrencesCount);
+        if (requestedCount is < 2 or > MaxSeriesOccurrencesCount)
+            throw new InvalidOperationException($"A series must contain between 2 and {MaxSeriesOccurrencesCount} sessions.");
+
+        var localStart = ToStudioDisplayDateTime(NormalizeStudioDateTime(requestedStartAt));
+        var localEndDate = recurrence.EndDate.HasValue
+            ? ToStudioDisplayDateTime(NormalizeStudioDateTime(recurrence.EndDate.Value)).Date
+            : (DateTime?)null;
+        if (localEndDate.HasValue && localEndDate.Value < localStart.Date)
+            throw new InvalidOperationException("Series end date cannot be earlier than its first session.");
+
+        var daysOfWeek = ResolveSeriesDaysOfWeek(frequency, recurrence.DaysOfWeek, localStart.DayOfWeek);
+        var anchorMonday = localStart.Date.AddDays(-((7 + (int)localStart.DayOfWeek - (int)DayOfWeek.Monday) % 7));
+        var results = new List<DateTime>();
+        var candidateDate = localStart.Date;
+        var safetyEndDate = localEndDate ?? localStart.Date.AddYears(3);
+
+        while (candidateDate <= safetyEndDate && results.Count < requestedCount)
+        {
+            var daysFromStart = (candidateDate - localStart.Date).Days;
+            var weeksFromAnchor = (candidateDate - anchorMonday).Days / 7;
+            var matches = frequency == "Daily"
+                ? daysFromStart % recurrence.Interval == 0
+                : weeksFromAnchor % recurrence.Interval == 0 && daysOfWeek.Contains(candidateDate.DayOfWeek);
+
+            if (matches)
+            {
+                results.Add(DateTime.SpecifyKind(
+                    candidateDate.Add(localStart.TimeOfDay),
+                    DateTimeKind.Unspecified));
+            }
+
+            candidateDate = candidateDate.AddDays(1);
+        }
+
+        if (results.Count < 2)
+            throw new InvalidOperationException("Recurrence settings produce fewer than two sessions.");
+
+        return results;
+    }
+
+    private static string NormalizeSeriesFrequency(string? value)
+    {
+        var normalized = value?.Trim();
+        if (string.Equals(normalized, "Daily", StringComparison.OrdinalIgnoreCase))
+            return "Daily";
+        if (string.Equals(normalized, "Weekly", StringComparison.OrdinalIgnoreCase))
+            return "Weekly";
+
+        throw new InvalidOperationException("Recurrence frequency must be Daily or Weekly.");
+    }
+
+    private static HashSet<DayOfWeek> ResolveSeriesDaysOfWeek(
+        string frequency,
+        List<string>? values,
+        DayOfWeek defaultDay)
+    {
+        if (frequency == "Daily")
+            return new HashSet<DayOfWeek>();
+
+        var days = (values ?? new List<string>())
+            .Select(value => Enum.TryParse<DayOfWeek>(value?.Trim(), true, out var day)
+                ? day
+                : (DayOfWeek?)null)
+            .ToList();
+
+        if (days.Any(day => !day.HasValue))
+            throw new InvalidOperationException("DaysOfWeek must use English weekday names, for example Monday.");
+
+        return days.Count == 0
+            ? new HashSet<DayOfWeek> { defaultDay }
+            : days.Select(day => day!.Value).ToHashSet();
+    }
+
+    private static CreateSessionDto CloneSeriesOccurrenceRequest(
+        CreateSessionDto source,
+        DateTime startAt,
+        DateTime endAt,
+        int occurrenceNumber)
+    {
+        return new CreateSessionDto
+        {
+            Title = source.Title,
+            Note = source.Note,
+            StartAt = startAt,
+            EndAt = endAt,
+            TrainerId = source.TrainerId,
+            LocationId = source.LocationId,
+            Status = "Planned",
+            IsPubliclyBookable = source.IsPubliclyBookable,
+            PublicSlug = BuildSeriesPublicSlug(source.PublicSlug, startAt, occurrenceNumber),
+            PublicCapacity = source.PublicCapacity,
+            PlannedSessionType = source.PlannedSessionType,
+            OutlookCategories = source.OutlookCategories?.ToList() ?? new List<string>(),
+            Participants = source.Participants?.Select(participant => new CreateSessionParticipantDto
+            {
+                ClientId = participant.ClientId,
+                CountsAgainstPackage = participant.CountsAgainstPackage,
+                SessionsCharged = participant.SessionsCharged,
+                Note = participant.Note
+            }).ToList() ?? new List<CreateSessionParticipantDto>()
+        };
+    }
+
+    private static string? BuildSeriesPublicSlug(
+        string? value,
+        DateTime startAt,
+        int occurrenceNumber)
+    {
+        var normalized = value?.Trim().ToLowerInvariant();
+        if (string.IsNullOrWhiteSpace(normalized))
+            return null;
+
+        var suffix = $"-{startAt:yyyyMMdd-HHmm}-{occurrenceNumber}";
+        var maximumBaseLength = Math.Max(1, 120 - suffix.Length);
+        return normalized[..Math.Min(normalized.Length, maximumBaseLength)] + suffix;
     }
 
     private static List<string> ReadStringList(string? json)
@@ -1483,7 +1744,8 @@ public class SessionService : ISessionService
 
     private async Task<List<string>> ResolveOutlookCategoriesForTrainerAsync(
         int trainerId,
-        List<string>? requestedCategories)
+        List<string>? requestedCategories,
+        bool isGroupSession)
     {
         var trainerCategory = await _context.Trainers
             .Where(t => t.Id == trainerId)
@@ -1491,6 +1753,9 @@ public class SessionService : ISessionService
             .FirstOrDefaultAsync();
 
         var categories = new List<string>();
+
+        if (isGroupSession)
+            categories.Add(SessionTitleBuilder.GroupClassOutlookCategory);
 
         if (!string.IsNullOrWhiteSpace(trainerCategory))
             categories.Add(trainerCategory);
@@ -1502,7 +1767,8 @@ public class SessionService : ISessionService
 
     private async Task<List<OutlookCategoryDto>> ResolveOutlookCategoryColorsForTrainerAsync(
         int trainerId,
-        List<string> categories)
+        List<string> categories,
+        bool isGroupSession)
     {
         var trainerCategory = await _context.Trainers
             .Where(t => t.Id == trainerId)
@@ -1517,7 +1783,12 @@ public class SessionService : ISessionService
             .Select(category => new OutlookCategoryDto
             {
                 Name = category,
-                Color = trainerCategory is not null &&
+                Color = isGroupSession && string.Equals(
+                    category,
+                    SessionTitleBuilder.GroupClassOutlookCategory,
+                    StringComparison.OrdinalIgnoreCase)
+                    ? "preset0"
+                    : trainerCategory is not null &&
                     string.Equals(category, trainerCategory.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
                     ? NormalizeOutlookCategoryColor(trainerCategory.OutlookCategoryColor)
                     : null

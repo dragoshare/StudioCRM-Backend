@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.Common;
+using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
@@ -130,6 +131,82 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         await _context.SaveChangesAsync();
     }
 
+    public async Task SyncSessionSeriesAsync(
+        string recurringGroupId,
+        SessionRecurrenceDto recurrence)
+    {
+        var sessions = await _context.Sessions
+            .Include(s => s.Trainer)
+                .ThenInclude(t => t.User)
+            .Include(s => s.Participants)
+                .ThenInclude(p => p.Client)
+            .Include(s => s.Location)
+            .Where(s => s.RecurringGroupId == recurringGroupId && s.IsRecurring)
+            .OrderBy(s => s.RecurrenceInstanceNumber)
+            .ToListAsync();
+
+        if (sessions.Count < 2)
+            throw new InvalidOperationException("Session series does not exist or has fewer than two occurrences.");
+
+        if (sessions.Select(s => s.TrainerId).Distinct().Count() != 1)
+            throw new InvalidOperationException("All sessions in an Outlook series must have the same trainer.");
+
+        var integration = await GetTrainerIntegrationAsync(sessions[0].Trainer.UserId)
+            ?? throw new InvalidOperationException("Trainer does not have active Outlook integration.");
+        await EnsureAccessTokenAsync(integration);
+
+        var sessionIds = sessions.Select(s => s.Id).ToList();
+        var alreadyLinkedCount = await _context.CalendarEventLinks.CountAsync(x =>
+            x.Provider == "Outlook" && sessionIds.Contains(x.SessionId));
+        if (alreadyLinkedCount == sessions.Count)
+            return;
+        if (alreadyLinkedCount > 0)
+            throw new InvalidOperationException("Session series is only partially linked to Outlook and requires reconciliation.");
+
+        var masterId = await CreateSeriesMasterEventAsync(sessions, recurrence, integration.AccessToken);
+        try
+        {
+            var instances = await GetSeriesInstancesAsync(
+                masterId,
+                integration.AccessToken,
+                sessions[0].StartAt.AddDays(-1),
+                sessions[^1].EndAt.AddDays(1));
+
+            if (instances.Count != sessions.Count)
+                throw new InvalidOperationException("Outlook returned a different number of series occurrences than CRM.");
+
+            for (var index = 0; index < sessions.Count; index++)
+            {
+                var session = sessions[index];
+                var instance = instances[index];
+                if (Math.Abs((instance.StartAt - session.StartAt).TotalMinutes) > 1)
+                    throw new InvalidOperationException("Outlook occurrence dates do not match the CRM series.");
+
+                await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
+                {
+                    SessionId = session.Id,
+                    CalendarIntegrationId = integration.Id,
+                    Provider = "Outlook",
+                    ExternalEventId = instance.Id,
+                    SyncedAt = DateTime.UtcNow
+                });
+                await UpsertExternalCalendarEventAsync(
+                    session,
+                    integration.Id,
+                    instance.Id,
+                    masterId,
+                    isRecurring: true);
+            }
+
+            await _context.SaveChangesAsync();
+        }
+        catch
+        {
+            await TryDeleteEventAsync(masterId, integration.AccessToken);
+            throw;
+        }
+    }
+
     public async Task DeleteSessionEventAsync(int sessionId)
     {
         var link = await _context.CalendarEventLinks
@@ -211,6 +288,105 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         return true;
     }
 
+    private async Task<string> CreateSeriesMasterEventAsync(
+        List<Session> sessions,
+        SessionRecurrenceDto recurrence,
+        string accessToken)
+    {
+        var first = sessions[0];
+        var categories = ResolveGraphEventCategories(first);
+        await EnsureTrainerMasterCategoryAsync(first, accessToken, categories);
+        var payload = BuildGraphEventPayload(first, categories);
+        var frequency = recurrence.Frequency.Trim().Equals("Daily", StringComparison.OrdinalIgnoreCase)
+            ? "daily"
+            : "weekly";
+        var pattern = new Dictionary<string, object?>
+        {
+            ["type"] = frequency,
+            ["interval"] = recurrence.Interval
+        };
+        if (frequency == "weekly")
+        {
+            pattern["daysOfWeek"] = (recurrence.DaysOfWeek?.Count > 0
+                    ? recurrence.DaysOfWeek
+                    : new List<string> { ToStudioLocalTime(first.StartAt).DayOfWeek.ToString() })
+                .Select(day => day.Trim().ToLowerInvariant())
+                .Distinct()
+                .ToList();
+            pattern["firstDayOfWeek"] = "monday";
+        }
+
+        payload["recurrence"] = new
+        {
+            pattern,
+            range = new
+            {
+                type = "numbered",
+                startDate = ToStudioLocalTime(first.StartAt).ToString("yyyy-MM-dd"),
+                numberOfOccurrences = sessions.Count,
+                recurrenceTimeZone = OutlookStudioTimeZone
+            }
+        };
+
+        using var request = new HttpRequestMessage(HttpMethod.Post, "https://graph.microsoft.com/v1.0/me/events");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        var response = await _httpClient.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft create recurring event error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Graph recurring event id is missing.");
+    }
+
+    private async Task<List<OutlookSeriesInstance>> GetSeriesInstancesAsync(
+        string masterId,
+        string accessToken,
+        DateTime startAt,
+        DateTime endAt)
+    {
+        var url = $"https://graph.microsoft.com/v1.0/me/events/{masterId}/instances" +
+            $"?startDateTime={Uri.EscapeDataString(startAt.ToString("o"))}" +
+            $"&endDateTime={Uri.EscapeDataString(endAt.ToString("o"))}" +
+            "&$select=id,start&$top=999";
+        using var request = new HttpRequestMessage(HttpMethod.Get, url);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        var response = await _httpClient.SendAsync(request);
+        var body = await response.Content.ReadAsStringAsync();
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Microsoft recurring event instances error: {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        return doc.RootElement.GetProperty("value")
+            .EnumerateArray()
+            .Select(item => new OutlookSeriesInstance
+            {
+                Id = item.GetProperty("id").GetString() ?? string.Empty,
+                StartAt = ReadGraphDateTime(item.GetProperty("start"))
+            })
+            .Where(item => !string.IsNullOrWhiteSpace(item.Id))
+            .OrderBy(item => item.StartAt)
+            .ToList();
+    }
+
+    private async Task TryDeleteEventAsync(string eventId, string accessToken)
+    {
+        try
+        {
+            using var request = new HttpRequestMessage(
+                HttpMethod.Delete,
+                $"https://graph.microsoft.com/v1.0/me/events/{eventId}");
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            await _httpClient.SendAsync(request);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not clean up Outlook series {EventId} after failed linking.", eventId);
+        }
+    }
+
     private Dictionary<string, object?> BuildGraphEventPayload(Session session, List<string> categories)
     {
         var clientName = string.Join(" + ",
@@ -227,9 +403,10 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             {
                 contentType = "HTML",
                 content = $"""
-                <p><strong>Klient:</strong> {clientName}</p>
+                <p><strong>{(IsGroupClass(session) ? "Zapisani" : "Klient")}:</strong> {clientName}</p>
                 <p><strong>Trener:</strong> {trainerName}</p>
                 <p><strong>Lokalizacja:</strong> {locationName}</p>
+                <p><strong>Sala:</strong> {(IsGroupClass(session) ? "zarezerwowana na wyłączność" : "zarezerwowana")}</p>
                 <p><strong>Status:</strong> {session.Status}</p>
                 <p><strong>Notatka:</strong> {session.Note}</p>
                 """
@@ -249,7 +426,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 displayName = locationName,
                 locationEmailAddress = session.Location.CalendarEmail
             },
-            ["attendees"] = attendees
+            ["attendees"] = attendees,
+            ["showAs"] = "busy"
         };
 
         if (categories.Count > 0)
@@ -362,7 +540,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
     private async Task UpsertExternalCalendarEventAsync(
         Session session,
         int calendarIntegrationId,
-        string externalEventId)
+        string externalEventId,
+        string? seriesMasterId = null,
+        bool isRecurring = false)
     {
         var externalEvent = await _context.ExternalCalendarEvents
             .FirstOrDefaultAsync(x =>
@@ -400,6 +580,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         externalEvent.CategoryColorsJson = JsonSerializer.Serialize(categoryColors);
         externalEvent.SessionId = session.Id;
         externalEvent.IsConvertedToSession = true;
+        externalEvent.SeriesMasterId = seriesMasterId;
+        externalEvent.IsRecurring = isRecurring;
         externalEvent.ImportedAt = DateTime.UtcNow;
 
         session.OutlookCategoryColorsJson = JsonSerializer.Serialize(categoryColors);
@@ -411,12 +593,21 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         List<string> categories)
     {
         var trainerCategoryName = NormalizeCategoryName(session.Trainer.OutlookCategoryName);
-
-        if (trainerCategoryName is null ||
-            !categories.Contains(trainerCategoryName, StringComparer.OrdinalIgnoreCase))
+        var managedCategories = new List<(string Name, string Color)>();
+        if (IsGroupClass(session) && categories.Contains(
+                SessionTitleBuilder.GroupClassOutlookCategory,
+                StringComparer.OrdinalIgnoreCase))
         {
-            return;
+            managedCategories.Add((SessionTitleBuilder.GroupClassOutlookCategory, "preset0"));
         }
+        if (trainerCategoryName is not null &&
+            categories.Contains(trainerCategoryName, StringComparer.OrdinalIgnoreCase))
+        {
+            managedCategories.Add((trainerCategoryName, NormalizeCategoryColor(session.Trainer.OutlookCategoryColor)));
+        }
+
+        if (managedCategories.Count == 0)
+            return;
 
         try
         {
@@ -442,26 +633,25 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
             using var doc = JsonDocument.Parse(listBody);
 
-            if (doc.RootElement.TryGetProperty("value", out var value) &&
-                value.ValueKind == JsonValueKind.Array &&
-                value.EnumerateArray().Any(category =>
-                    category.TryGetProperty("displayName", out var displayName) &&
-                    string.Equals(displayName.GetString(), trainerCategoryName, StringComparison.OrdinalIgnoreCase)))
-            {
-                return;
-            }
+            var existingNames = doc.RootElement.TryGetProperty("value", out var value) &&
+                value.ValueKind == JsonValueKind.Array
+                ? value.EnumerateArray()
+                    .Select(category => category.TryGetProperty("displayName", out var displayName)
+                        ? displayName.GetString()
+                        : null)
+                    .Where(name => !string.IsNullOrWhiteSpace(name))
+                    .Select(name => name!)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase)
+                : new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            await CreateMasterCategoryAsync(
-                accessToken,
-                trainerCategoryName,
-                NormalizeCategoryColor(session.Trainer.OutlookCategoryColor));
+            foreach (var category in managedCategories.Where(category => !existingNames.Contains(category.Name)))
+                await CreateMasterCategoryAsync(accessToken, category.Name, category.Color);
         }
         catch (Exception ex)
         {
             _logger.LogWarning(
                 ex,
-                "Could not ensure Outlook master category {CategoryName} for trainer {TrainerId}.",
-                trainerCategoryName,
+                "Could not ensure Outlook master categories for trainer {TrainerId}.",
                 session.TrainerId);
         }
     }
@@ -505,6 +695,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var categories = new List<string>();
         var trainerCategoryName = NormalizeCategoryName(session.Trainer.OutlookCategoryName);
 
+        if (IsGroupClass(session))
+            categories.Add(SessionTitleBuilder.GroupClassOutlookCategory);
+
         if (trainerCategoryName is not null)
             categories.Add(trainerCategoryName);
 
@@ -526,7 +719,9 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             .Select(category => new OutlookCategoryColor
             {
                 Name = category,
-                Color = string.Equals(category, session.Trainer.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
+                Color = string.Equals(category, SessionTitleBuilder.GroupClassOutlookCategory, StringComparison.OrdinalIgnoreCase)
+                    ? "preset0"
+                    : string.Equals(category, session.Trainer.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
                     ? NormalizeCategoryColor(session.Trainer.OutlookCategoryColor)
                     : null
             })
@@ -566,11 +761,48 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         }
     }
 
+    private static bool IsGroupClass(Session session)
+    {
+        return session.IsPubliclyBookable ||
+            string.Equals(session.PlannedSessionType, "Group", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static DateTime ReadGraphDateTime(JsonElement value)
+    {
+        var raw = value.GetProperty("dateTime").GetString()
+            ?? throw new InvalidOperationException("Graph occurrence start is missing.");
+        if (raw.EndsWith("Z", StringComparison.OrdinalIgnoreCase) &&
+            DateTimeOffset.TryParse(raw, out var offset))
+        {
+            return offset.UtcDateTime;
+        }
+
+        if (!DateTime.TryParse(raw, out var parsed))
+            throw new InvalidOperationException("Graph occurrence start is invalid.");
+
+        var timeZone = value.TryGetProperty("timeZone", out var timeZoneElement)
+            ? timeZoneElement.GetString()
+            : null;
+        if (string.Equals(timeZone, "UTC", StringComparison.OrdinalIgnoreCase))
+            return DateTime.SpecifyKind(parsed, DateTimeKind.Utc);
+
+        return TimeZoneInfo.ConvertTimeToUtc(
+            DateTime.SpecifyKind(parsed, DateTimeKind.Unspecified),
+            GetStudioTimeZone());
+    }
+
     private sealed class OutlookCategoryColor
     {
         public string Name { get; set; } = string.Empty;
 
         public string? Color { get; set; }
+    }
+
+    private sealed class OutlookSeriesInstance
+    {
+        public string Id { get; set; } = string.Empty;
+
+        public DateTime StartAt { get; set; }
     }
 
     private async Task EnsureAccessTokenAsync(CalendarIntegration integration)

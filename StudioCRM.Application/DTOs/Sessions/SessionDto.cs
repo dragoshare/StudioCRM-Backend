@@ -67,4 +67,10 @@ public class SessionDto
     public string? PrimaryOutlookCategory { get; set; }
 
     public string? PrimaryOutlookCategoryColor { get; set; }
+
+    public bool IsRecurring { get; set; }
+
+    public string? RecurringGroupId { get; set; }
+
+    public int? RecurrenceInstanceNumber { get; set; }
 }

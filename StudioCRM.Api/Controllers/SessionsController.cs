@@ -59,6 +59,17 @@ public class SessionsController : ControllerBase
         });
     }
 
+    [HttpPost("series")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<SessionSeriesDto>> CreateSeries(CreateSessionSeriesDto request)
+    {
+        return await HandleAsync<SessionSeriesDto>(async () =>
+        {
+            var result = await _sessionService.CreateSeriesAsync(request);
+            return StatusCode(StatusCodes.Status201Created, result);
+        });
+    }
+
     [HttpPut("{id:int}")]
     [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)

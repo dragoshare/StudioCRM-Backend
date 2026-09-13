@@ -4,6 +4,8 @@ namespace StudioCRM.Application.Common;
 
 public static class SessionTitleBuilder
 {
+    public const string GroupClassOutlookCategory = "Zajęcia grupowe";
+
     public static bool ShouldDeriveFromParticipants(
         bool isPubliclyBookable,
         string? plannedSessionType)
@@ -30,10 +32,10 @@ public static class SessionTitleBuilder
 
     public static string BuildOutlookSubject(Session session)
     {
-        var subject = $"StudioCRM: {session.Title}";
         if (!ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
-            return subject;
+            return $"ZAJĘCIA GRUPOWE: {session.Title} | {session.Location.Name}";
 
+        var subject = $"StudioCRM: {session.Title}";
         var clientName = string.Join(" + ", session.Participants.Select(p =>
             $"{p.Client.FirstName} {p.Client.LastName}".Trim()));
 

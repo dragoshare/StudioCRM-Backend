@@ -118,11 +118,22 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         if (isSeriesMaster)
         {
+            var knownSeriesRange = await _context.ExternalCalendarEvents
+                .Where(x =>
+                    x.CalendarIntegrationId == integration.Id &&
+                    x.SeriesMasterId == externalEventId)
+                .GroupBy(_ => 1)
+                .Select(group => new
+                {
+                    StartAt = group.Min(x => x.StartAt),
+                    EndAt = group.Max(x => x.EndAt)
+                })
+                .FirstOrDefaultAsync();
             var instances = await GetEventInstancesAsync(
                 integration,
                 externalEventId,
-                DateTime.UtcNow.AddDays(-14),
-                DateTime.UtcNow.AddMonths(3));
+                knownSeriesRange?.StartAt.AddDays(-7) ?? DateTime.UtcNow.AddDays(-14),
+                knownSeriesRange?.EndAt.AddDays(7) ?? DateTime.UtcNow.AddMonths(3));
 
             foreach (var instanceId in instances)
             {
@@ -243,7 +254,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             $"https://graph.microsoft.com/v1.0/me/events/{eventId}/instances" +
             $"?startDateTime={Uri.EscapeDataString(start.ToString("o"))}" +
             $"&endDateTime={Uri.EscapeDataString(end.ToString("o"))}" +
-            "&$select=id";
+            "&$select=id&$top=999";
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
@@ -277,6 +288,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         string currentOutlookTitle)
     {
         var session = await _context.Sessions
+            .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
 
         if (session == null)

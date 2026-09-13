@@ -52,4 +52,10 @@ public class Session
     public string? OutlookCategoryColorsJson { get; set; }
 
     public string? PrimaryOutlookCategory { get; set; }
+
+    public bool IsRecurring { get; set; }
+
+    public string? RecurringGroupId { get; set; }
+
+    public int? RecurrenceInstanceNumber { get; set; }
 }

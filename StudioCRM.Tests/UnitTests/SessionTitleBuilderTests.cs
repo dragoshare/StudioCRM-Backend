@@ -26,7 +26,7 @@ public class SessionTitleBuilderTests
 
         var subject = SessionTitleBuilder.BuildOutlookSubject(session);
 
-        Assert.Equal("StudioCRM: Mobility", subject);
+        Assert.Equal("ZAJĘCIA GRUPOWE: Mobility | Kłaj", subject);
     }
 
     [Fact]
@@ -49,6 +49,7 @@ public class SessionTitleBuilderTests
             Title = isPubliclyBookable ? "Mobility" : "Aldona W + Agata M",
             IsPubliclyBookable = isPubliclyBookable,
             PlannedSessionType = plannedSessionType,
+            Location = new Location { Name = "Kłaj" },
             Participants = new List<SessionParticipant>
             {
                 new() { Client = aldona },

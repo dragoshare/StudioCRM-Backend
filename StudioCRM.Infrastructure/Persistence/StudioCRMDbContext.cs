@@ -791,6 +791,13 @@ public class StudioCRMDbContext : DbContext
             .HasIndex(s => s.PublicSlug);
 
         modelBuilder.Entity<Session>()
+            .Property(s => s.RecurringGroupId)
+            .HasMaxLength(64);
+
+        modelBuilder.Entity<Session>()
+            .HasIndex(s => s.RecurringGroupId);
+
+        modelBuilder.Entity<Session>()
             .HasQueryFilter(s => !s.IsDeleted);
 
         // =========================

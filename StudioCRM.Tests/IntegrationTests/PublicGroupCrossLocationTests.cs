@@ -102,6 +102,9 @@ public class PublicGroupCrossLocationTests
     private sealed class NoOutlookSync : IOutlookCalendarSyncService
     {
         public Task SyncSessionAsync(int sessionId) => Task.CompletedTask;
+        public Task SyncSessionSeriesAsync(
+            string recurringGroupId,
+            StudioCRM.Application.DTOs.Sessions.SessionRecurrenceDto recurrence) => Task.CompletedTask;
         public Task DeleteSessionEventAsync(int sessionId) => Task.CompletedTask;
     }
 
