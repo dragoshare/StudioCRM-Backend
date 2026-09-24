@@ -207,6 +207,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
             try
             {
+                await using var transaction = await _context.Database.BeginTransactionAsync();
                 var sessions = await _context.Sessions
                     .Include(session => session.Trainer)
                         .ThenInclude(trainer => trainer.User)
@@ -226,38 +227,19 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 {
                     var session = sessions[index];
                     var instance = instances[index];
-                    var existingLink = await _context.CalendarEventLinks
-                        .FirstOrDefaultAsync(link =>
-                            link.SessionId == session.Id &&
-                            link.Provider == "Outlook");
-
-                    if (existingLink is null)
-                    {
-                        await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
-                        {
-                            SessionId = session.Id,
-                            CalendarIntegrationId = integrationId,
-                            Provider = "Outlook",
-                            ExternalEventId = instance.Id,
-                            SyncedAt = DateTime.UtcNow
-                        });
-                    }
-                    else
-                    {
-                        existingLink.CalendarIntegrationId = integrationId;
-                        existingLink.ExternalEventId = instance.Id;
-                        existingLink.SyncedAt = DateTime.UtcNow;
-                    }
-
-                    await UpsertExternalCalendarEventAsync(
+                    await UpsertSeriesExternalEventAsync(
                         session,
                         integrationId,
                         instance.Id,
-                        masterId,
-                        isRecurring: true);
+                        masterId);
+                    await UpsertSeriesCalendarLinkAsync(
+                        session.Id,
+                        integrationId,
+                        instance.Id);
                 }
 
                 await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
                 return;
             }
             catch (DbUpdateException ex) when (attempt < 3)
@@ -275,6 +257,80 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         throw new InvalidOperationException(
             $"Could not persist Outlook series mappings: {lastError?.GetBaseException().Message}",
             lastError);
+    }
+
+    private async Task UpsertSeriesCalendarLinkAsync(
+        int sessionId,
+        int integrationId,
+        string externalEventId)
+    {
+        const string provider = "Outlook";
+        var syncedAt = DateTime.UtcNow;
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "CalendarEventLinks"
+                ("SessionId", "CalendarIntegrationId", "Provider", "ExternalEventId", "SyncedAt")
+            VALUES
+                ({sessionId}, {integrationId}, {provider}, {externalEventId}, {syncedAt})
+            ON CONFLICT ("SessionId", "Provider") DO UPDATE SET
+                "CalendarIntegrationId" = EXCLUDED."CalendarIntegrationId",
+                "ExternalEventId" = EXCLUDED."ExternalEventId",
+                "SyncedAt" = EXCLUDED."SyncedAt";
+            """);
+    }
+
+    private async Task UpsertSeriesExternalEventAsync(
+        Session session,
+        int integrationId,
+        string externalEventId,
+        string masterId)
+    {
+        const string provider = "Outlook";
+        var categories = ResolveGraphEventCategories(session);
+        var categoryColors = ResolveGraphEventCategoryColors(session, categories);
+        var attendeesJson = JsonSerializer.Serialize(
+            session.Participants
+                .Select(participant => participant.Client.Email.Trim().ToLowerInvariant())
+                .Where(email => !string.IsNullOrWhiteSpace(email))
+                .Distinct()
+                .ToList());
+        var categoriesJson = JsonSerializer.Serialize(categories);
+        var categoryColorsJson = JsonSerializer.Serialize(categoryColors);
+        var importedAt = DateTime.UtcNow;
+        string? organizerEmail = null;
+        string? mappingWarningsJson = null;
+
+        await _context.Database.ExecuteSqlInterpolatedAsync($"""
+            INSERT INTO "ExternalCalendarEvents"
+                ("CalendarIntegrationId", "Provider", "ExternalEventId", "Subject", "BodyPreview",
+                 "StartAt", "EndAt", "LocationName", "LocationEmail", "OrganizerEmail",
+                 "AttendeesJson", "MappingWarningsJson", "SeriesMasterId", "IsRecurring",
+                 "IsConvertedToSession", "SessionId", "ImportedAt", "CategoriesJson",
+                 "CategoryColorsJson")
+            VALUES
+                ({integrationId}, {provider}, {externalEventId}, {session.Title}, {session.Note},
+                 {session.StartAt}, {session.EndAt}, {session.Location.Name}, {session.Location.CalendarEmail}, {organizerEmail},
+                 {attendeesJson}, {mappingWarningsJson}, {masterId}, {true},
+                 {true}, {session.Id}, {importedAt}, {categoriesJson},
+                 {categoryColorsJson})
+            ON CONFLICT ("CalendarIntegrationId", "ExternalEventId") DO UPDATE SET
+                "Provider" = EXCLUDED."Provider",
+                "Subject" = EXCLUDED."Subject",
+                "BodyPreview" = EXCLUDED."BodyPreview",
+                "StartAt" = EXCLUDED."StartAt",
+                "EndAt" = EXCLUDED."EndAt",
+                "LocationName" = EXCLUDED."LocationName",
+                "LocationEmail" = EXCLUDED."LocationEmail",
+                "AttendeesJson" = EXCLUDED."AttendeesJson",
+                "SeriesMasterId" = EXCLUDED."SeriesMasterId",
+                "IsRecurring" = EXCLUDED."IsRecurring",
+                "IsConvertedToSession" = EXCLUDED."IsConvertedToSession",
+                "SessionId" = EXCLUDED."SessionId",
+                "ImportedAt" = EXCLUDED."ImportedAt",
+                "CategoriesJson" = EXCLUDED."CategoriesJson",
+                "CategoryColorsJson" = EXCLUDED."CategoryColorsJson";
+            """);
+
+        session.OutlookCategoryColorsJson = categoryColorsJson;
     }
 
     public async Task DeleteSessionEventAsync(int sessionId)

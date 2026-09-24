@@ -78,9 +78,11 @@ Kazda sesja ma dodatkowo:
 - `recurringGroupId`,
 - `recurrenceInstanceNumber`.
 
-Jesli `outlookSeriesSynced` jest `false`, sesje zostaly utworzone w CRM, ale front
-powinien pokazac `outlookSyncWarning`. Nie nalezy wysylac drugi raz formularza,
-bo utworzyloby to druga serie CRM.
+Tworzenie nowej serii jest operacja typu wszystko albo nic. Odpowiedz sukcesu
+oznacza, ze seria istnieje w CRM i zostala powiazana z Outlookiem. Jezeli
+Outlook albo zapis powiazan zawiedzie, backend usuwa swiezo utworzone sesje CRM
+i zwraca blad `400`. Front nie powinien dopisyac kafelkow lokalnie ani ponawiac
+calego `POST /api/sessions/series` automatycznie.
 
 Synchronizacje istniejacej serii mozna bezpiecznie ponowic:
 
@@ -94,6 +96,8 @@ istniejacych terminow CRM.
 Endpoint nie tworzy kolejnych sesji CRM. Jesli cala seria jest juz polaczona,
 zwraca sukces bez duplikowania wydarzenia. Front powinien pokazac zwrocone
 `outlookSyncWarning`, gdy `outlookSeriesSynced` nadal ma wartosc `false`.
+Ta akcja sluzy do naprawy starszych serii lub pozniejszych rozjazdow. Nie jest
+sciezka awaryjna po nieudanym tworzeniu nowej serii.
 
 ## Usuwanie calej blednej serii
 

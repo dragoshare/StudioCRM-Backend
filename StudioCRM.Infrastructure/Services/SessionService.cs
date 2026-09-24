@@ -679,6 +679,13 @@ public class SessionService : ISessionService
 
         var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, request.Recurrence);
 
+        if (!outlookSync.IsSynced)
+        {
+            await RemoveFailedNewSeriesAsync(recurringGroupId);
+            throw new InvalidOperationException(
+                $"Session series was not created because Outlook synchronization failed: {outlookSync.Warning}");
+        }
+
         return new SessionSeriesDto
         {
             RecurringGroupId = recurringGroupId,
@@ -689,6 +696,21 @@ public class SessionService : ISessionService
             OutlookSyncWarning = outlookSync.Warning,
             Sessions = createdSessions
         };
+    }
+
+    private async Task RemoveFailedNewSeriesAsync(string recurringGroupId)
+    {
+        var sessions = await _context.Sessions
+            .Where(session =>
+                session.RecurringGroupId == recurringGroupId &&
+                session.IsRecurring)
+            .ToListAsync();
+
+        if (sessions.Count == 0)
+            return;
+
+        _context.Sessions.RemoveRange(sessions);
+        await _context.SaveChangesAsync();
     }
 
     public async Task<SessionSeriesOutlookSyncDto> SyncSeriesToOutlookAsync(
