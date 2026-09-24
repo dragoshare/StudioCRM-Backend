@@ -693,22 +693,127 @@ public class SessionService : ISessionService
 
     public async Task<SessionSeriesOutlookSyncDto> SyncSeriesToOutlookAsync(
         string recurringGroupId,
-        SessionRecurrenceDto recurrence)
+        SessionRecurrenceDto? recurrence)
     {
         if (string.IsNullOrWhiteSpace(recurringGroupId))
             throw new InvalidOperationException("Recurring group id is required.");
 
-        var seriesExists = await _context.Sessions.AnyAsync(session =>
-            session.RecurringGroupId == recurringGroupId && session.IsRecurring);
-        if (!seriesExists)
+        var seriesSessions = await _context.Sessions
+            .Where(session => session.RecurringGroupId == recurringGroupId && session.IsRecurring)
+            .OrderBy(session => session.StartAt)
+            .Select(session => session.StartAt)
+            .ToListAsync();
+        if (seriesSessions.Count < 2)
             throw new InvalidOperationException("Session series does not exist.");
 
+        recurrence ??= InferSeriesRecurrence(seriesSessions);
         var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, recurrence);
         return new SessionSeriesOutlookSyncDto
         {
             RecurringGroupId = recurringGroupId,
             OutlookSeriesSynced = outlookSync.IsSynced,
             OutlookSyncWarning = outlookSync.Warning
+        };
+    }
+
+    private static SessionRecurrenceDto InferSeriesRecurrence(List<DateTime> occurrenceStarts)
+    {
+        var localDates = occurrenceStarts
+            .Select(value => ToStudioDisplayDateTime(value).Date)
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+        var gaps = localDates
+            .Zip(localDates.Skip(1), (previous, next) => (next - previous).Days)
+            .ToList();
+
+        if (gaps.Count > 0 && gaps.All(gap => gap == gaps[0]) && gaps[0] is >= 1 and <= 12)
+        {
+            return new SessionRecurrenceDto
+            {
+                Frequency = "Daily",
+                Interval = gaps[0],
+                OccurrencesCount = occurrenceStarts.Count
+            };
+        }
+
+        var weekAnchors = localDates
+            .Select(date => date.AddDays(-((7 + (int)date.DayOfWeek - (int)DayOfWeek.Monday) % 7)))
+            .Distinct()
+            .OrderBy(value => value)
+            .ToList();
+        var weekGaps = weekAnchors
+            .Zip(weekAnchors.Skip(1), (previous, next) => Math.Max(1, (next - previous).Days / 7))
+            .ToList();
+        var interval = weekGaps.Count == 0
+            ? 1
+            : weekGaps.Aggregate(GreatestCommonDivisor);
+
+        return new SessionRecurrenceDto
+        {
+            Frequency = "Weekly",
+            Interval = Math.Clamp(interval, 1, 12),
+            DaysOfWeek = localDates
+                .Select(value => value.DayOfWeek.ToString())
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList(),
+            OccurrencesCount = occurrenceStarts.Count
+        };
+    }
+
+    private static int GreatestCommonDivisor(int left, int right)
+    {
+        while (right != 0)
+        {
+            var remainder = left % right;
+            left = right;
+            right = remainder;
+        }
+
+        return Math.Abs(left);
+    }
+
+    public async Task<DeleteSessionSeriesResultDto> DeleteSeriesAsync(string recurringGroupId)
+    {
+        if (string.IsNullOrWhiteSpace(recurringGroupId))
+            throw new InvalidOperationException("Recurring group id is required.");
+
+        var sessions = await _context.Sessions
+            .Include(session => session.Participants)
+            .Where(session => session.RecurringGroupId == recurringGroupId && session.IsRecurring)
+            .OrderBy(session => session.RecurrenceInstanceNumber)
+            .ToListAsync();
+        if (sessions.Count == 0)
+            throw new InvalidOperationException("Session series does not exist.");
+
+        if (sessions.Any(session =>
+                string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase) ||
+                session.Participants.Any(participant => participant.IsCountedFromPackage)))
+        {
+            throw new InvalidOperationException(
+                "A series containing completed or accounted sessions cannot be deleted as a whole.");
+        }
+
+        var outlookDeleted = await _outlookCalendarSyncService.DeleteSessionSeriesAsync(recurringGroupId);
+
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            _context.Sessions.RemoveRange(sessions);
+            await _context.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+        catch
+        {
+            await transaction.RollbackAsync();
+            throw;
+        }
+
+        return new DeleteSessionSeriesResultDto
+        {
+            RecurringGroupId = recurringGroupId,
+            DeletedSessionsCount = sessions.Count,
+            OutlookSeriesDeleted = outlookDeleted
         };
     }
 

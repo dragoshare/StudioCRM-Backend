@@ -45,3 +45,12 @@ public class SessionSeriesOutlookSyncDto
 
     public string? OutlookSyncWarning { get; set; }
 }
+
+public class DeleteSessionSeriesResultDto
+{
+    public string RecurringGroupId { get; set; } = string.Empty;
+
+    public int DeletedSessionsCount { get; set; }
+
+    public bool OutlookSeriesDeleted { get; set; }
+}

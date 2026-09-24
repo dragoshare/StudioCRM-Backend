@@ -106,6 +106,7 @@ public class PublicGroupCrossLocationTests
             string recurringGroupId,
             StudioCRM.Application.DTOs.Sessions.SessionRecurrenceDto recurrence) => Task.CompletedTask;
         public Task DeleteSessionEventAsync(int sessionId) => Task.CompletedTask;
+        public Task<bool> DeleteSessionSeriesAsync(string recurringGroupId) => Task.FromResult(false);
     }
 
     private sealed class ClientUser(int id) : ICurrentUserService

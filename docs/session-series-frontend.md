@@ -88,10 +88,34 @@ Synchronizacje istniejacej serii mozna bezpiecznie ponowic:
 POST /api/sessions/series/{recurringGroupId}/sync-outlook
 ```
 
-Body to ten sam obiekt `recurrence`, ktory zostal uzyty przy tworzeniu serii.
+Body moze zawierac ten sam obiekt `recurrence`, ktory zostal uzyty przy tworzeniu
+serii. Dla starszej serii mozna wyslac pusty body; backend odtworzy regule z
+istniejacych terminow CRM.
 Endpoint nie tworzy kolejnych sesji CRM. Jesli cala seria jest juz polaczona,
 zwraca sukces bez duplikowania wydarzenia. Front powinien pokazac zwrocone
 `outlookSyncWarning`, gdy `outlookSeriesSynced` nadal ma wartosc `false`.
+
+## Usuwanie calej blednej serii
+
+```http
+DELETE /api/sessions/series/{recurringGroupId}
+```
+
+Endpoint usuwa wszystkie wystapienia wskazanej serii z CRM oraz powiazana serie
+Outlook. Nie wolno wywolywac osobnego `DELETE /api/sessions/{id}` dla kazdego
+wystapienia. Backend blokuje usuniecie calej serii, jesli zawiera sesje
+zrealizowane albo naliczone z pakietu.
+
+```json
+{
+  "recurringGroupId": "d3fb4d76070441cab6cf9d51cbddc148",
+  "deletedSessionsCount": 12,
+  "outlookSeriesDeleted": true
+}
+```
+
+Przed usunieciem front powinien pokazac potwierdzenie z liczba wystapien i nazwa
+serii. Po sukcesie nalezy odswiezyc kalendarz, a nie usuwac kafelki tylko lokalnie.
 
 ## Widocznosc i blokada sali
 

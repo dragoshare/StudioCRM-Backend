@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using StudioCRM.Application.Common;
+using StudioCRM.Application.DTOs.Calendar;
+using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
@@ -17,18 +19,139 @@ public class OutlookWebhookService : IOutlookWebhookService
     private readonly StudioCRMDbContext _context;
     private readonly HttpClient _httpClient;
     private readonly IOutlookTokenService _tokenService;
+    private readonly IOutlookCalendarSyncService _calendarSyncService;
+    private readonly ICurrentUserService _currentUser;
     private readonly IConfiguration _configuration;
 
     public OutlookWebhookService(
         StudioCRMDbContext context,
         HttpClient httpClient,
         IConfiguration configuration,
-        IOutlookTokenService tokenService)
+        IOutlookTokenService tokenService,
+        IOutlookCalendarSyncService calendarSyncService,
+        ICurrentUserService currentUser)
     {
         _context = context;
         _httpClient = httpClient;
         _configuration = configuration;
         _tokenService = tokenService;
+        _calendarSyncService = calendarSyncService;
+        _currentUser = currentUser;
+    }
+
+    public async Task<OutlookReconciliationResultDto> ReconcileAsync(
+        OutlookReconciliationRequestDto request)
+    {
+        if (!_currentUser.IsOwner && !_currentUser.IsTrainer)
+            throw new InvalidOperationException("Current user cannot reconcile Outlook calendars.");
+
+        var pastDays = Math.Clamp(request.PastDays, 0, 365);
+        var futureDays = Math.Clamp(request.FutureDays, 1, 730);
+        var rangeStart = DateTime.UtcNow.Date.AddDays(-pastDays);
+        var rangeEnd = DateTime.UtcNow.Date.AddDays(futureDays + 1);
+        var integrationsQuery = _context.CalendarIntegrations
+            .Where(integration => integration.Provider == "Outlook" && integration.IsActive);
+        if (!_currentUser.IsOwner)
+        {
+            var userId = _currentUser.UserId
+                ?? throw new InvalidOperationException("Current user is not authenticated.");
+            integrationsQuery = integrationsQuery.Where(integration => integration.UserId == userId);
+        }
+
+        var integrations = await integrationsQuery.OrderBy(integration => integration.Id).ToListAsync();
+        var result = new OutlookReconciliationResultDto
+        {
+            RangeStartAt = rangeStart,
+            RangeEndAt = rangeEnd
+        };
+        var seriesRequiringAttention = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var integration in integrations)
+        {
+            try
+            {
+                await _tokenService.EnsureValidAccessTokenAsync(integration);
+                var outlookEventIds = await GetCalendarViewEventIdsAsync(integration, rangeStart, rangeEnd);
+                result.OutlookEventsFound += outlookEventIds.Count;
+
+                foreach (var externalEventId in outlookEventIds)
+                {
+                    await ImportOrUpdateEventAsync(integration, externalEventId);
+                    result.ImportedOrUpdatedEvents++;
+                }
+
+                var knownEventIds = await _context.ExternalCalendarEvents
+                    .Where(calendarEvent =>
+                        calendarEvent.CalendarIntegrationId == integration.Id &&
+                        calendarEvent.Provider == "Outlook" &&
+                        calendarEvent.StartAt < rangeEnd &&
+                        calendarEvent.EndAt > rangeStart &&
+                        !calendarEvent.Subject.StartsWith("[DELETED]"))
+                    .Select(calendarEvent => calendarEvent.ExternalEventId)
+                    .ToListAsync();
+                var missingEventIds = knownEventIds
+                    .Where(externalEventId => !outlookEventIds.Contains(externalEventId))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                foreach (var externalEventId in missingEventIds)
+                {
+                    await MarkDeletedAsync(integration.Id, externalEventId);
+                    result.MissingOutlookEventsMarkedDeleted++;
+                }
+
+                var missingSingleSessionIds = await _context.Sessions
+                    .Where(session =>
+                        session.Trainer.UserId == integration.UserId &&
+                        session.Status == "Planned" &&
+                        !session.IsRecurring &&
+                        session.StartAt < rangeEnd &&
+                        session.EndAt > rangeStart &&
+                        !_context.CalendarEventLinks.Any(link =>
+                            link.SessionId == session.Id && link.Provider == "Outlook"))
+                    .Select(session => session.Id)
+                    .ToListAsync();
+                foreach (var sessionId in missingSingleSessionIds)
+                {
+                    await _calendarSyncService.SyncSessionAsync(sessionId);
+                    result.CrmSessionsSyncedToOutlook++;
+                }
+
+                var recurringSessions = await _context.Sessions
+                    .Where(session =>
+                        session.Trainer.UserId == integration.UserId &&
+                        session.Status == "Planned" &&
+                        session.IsRecurring &&
+                        session.RecurringGroupId != null &&
+                        session.StartAt < rangeEnd &&
+                        session.EndAt > rangeStart)
+                    .Select(session => new { session.Id, session.RecurringGroupId })
+                    .ToListAsync();
+                var recurringSessionIds = recurringSessions.Select(session => session.Id).ToList();
+                var linkedRecurringSessionIds = recurringSessionIds.Count == 0
+                    ? new HashSet<int>()
+                    : (await _context.CalendarEventLinks
+                        .Where(link =>
+                            link.Provider == "Outlook" &&
+                            recurringSessionIds.Contains(link.SessionId))
+                        .Select(link => link.SessionId)
+                        .ToListAsync())
+                        .ToHashSet();
+                foreach (var group in recurringSessions.GroupBy(session => session.RecurringGroupId!))
+                {
+                    if (group.Any(session => !linkedRecurringSessionIds.Contains(session.Id)))
+                        seriesRequiringAttention.Add(group.Key);
+                }
+
+                result.IntegrationsProcessed++;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add($"{integration.Email}: {ex.Message}");
+            }
+        }
+
+        result.SeriesRequiringAttention = seriesRequiringAttention.OrderBy(value => value).ToList();
+        return result;
     }
 
     public async Task HandleNotificationAsync(string requestBody)
@@ -759,6 +882,58 @@ public class OutlookWebhookService : IOutlookWebhookService
         {
             return null;
         }
+    }
+
+    private async Task<HashSet<string>> GetCalendarViewEventIdsAsync(
+        CalendarIntegration integration,
+        DateTime rangeStart,
+        DateTime rangeEnd)
+    {
+        var eventIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var nextUrl = "https://graph.microsoft.com/v1.0/me/calendarView" +
+            $"?startDateTime={Uri.EscapeDataString(rangeStart.ToString("o"))}" +
+            $"&endDateTime={Uri.EscapeDataString(rangeEnd.ToString("o"))}" +
+            "&$select=id&$top=200";
+
+        for (var page = 0; page < 50 && nextUrl is not null; page++)
+        {
+            using var request = new HttpRequestMessage(HttpMethod.Get, nextUrl);
+            request.Headers.Authorization = new AuthenticationHeaderValue(
+                "Bearer",
+                integration.AccessToken);
+            using var response = await _httpClient.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+                throw new InvalidOperationException($"Microsoft calendar reconciliation error: {body}");
+
+            using var document = JsonDocument.Parse(body);
+            if (document.RootElement.TryGetProperty("value", out var value))
+            {
+                foreach (var item in value.EnumerateArray())
+                {
+                    if (item.TryGetProperty("id", out var idElement) &&
+                        !string.IsNullOrWhiteSpace(idElement.GetString()))
+                    {
+                        eventIds.Add(idElement.GetString()!);
+                    }
+                }
+            }
+
+            nextUrl = document.RootElement.TryGetProperty("@odata.nextLink", out var nextLinkElement)
+                ? nextLinkElement.GetString()
+                : null;
+            if (nextUrl is not null &&
+                (!Uri.TryCreate(nextUrl, UriKind.Absolute, out var nextUri) ||
+                 nextUri.Scheme != "https" ||
+                 nextUri.Host != "graph.microsoft.com" ||
+                 !nextUri.IsDefaultPort ||
+                 nextUri.UserInfo.Length != 0))
+            {
+                throw new InvalidOperationException("Microsoft returned an invalid calendar page URL.");
+            }
+        }
+
+        return eventIds;
     }
 
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)

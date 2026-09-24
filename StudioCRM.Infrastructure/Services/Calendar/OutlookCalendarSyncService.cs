@@ -226,6 +226,75 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         await _context.SaveChangesAsync();
     }
 
+    public async Task<bool> DeleteSessionSeriesAsync(string recurringGroupId)
+    {
+        var sessionIds = await _context.Sessions
+            .Where(session => session.RecurringGroupId == recurringGroupId && session.IsRecurring)
+            .Select(session => session.Id)
+            .ToListAsync();
+        if (sessionIds.Count == 0)
+            return false;
+
+        var links = await _context.CalendarEventLinks
+            .Include(link => link.CalendarIntegration)
+            .Where(link => link.Provider == "Outlook" && sessionIds.Contains(link.SessionId))
+            .ToListAsync();
+        var externalEvents = await _context.ExternalCalendarEvents
+            .Where(calendarEvent =>
+                calendarEvent.Provider == "Outlook" &&
+                calendarEvent.SessionId.HasValue &&
+                sessionIds.Contains(calendarEvent.SessionId.Value))
+            .ToListAsync();
+        var masterTargets = externalEvents
+            .Where(calendarEvent => !string.IsNullOrWhiteSpace(calendarEvent.SeriesMasterId))
+            .GroupBy(calendarEvent => new
+            {
+                calendarEvent.CalendarIntegrationId,
+                MasterId = calendarEvent.SeriesMasterId!
+            })
+            .Select(group => group.Key)
+            .ToList();
+        var deletedRemoteEvent = false;
+
+        foreach (var target in masterTargets)
+        {
+            var integration = links
+                .Select(link => link.CalendarIntegration)
+                .FirstOrDefault(item => item.Id == target.CalendarIntegrationId)
+                ?? await _context.CalendarIntegrations.FirstOrDefaultAsync(item =>
+                    item.Id == target.CalendarIntegrationId);
+            if (integration is null || !integration.IsActive)
+                throw new InvalidOperationException("Outlook integration for this series is not active.");
+
+            await DeleteEventAsync(integration, target.MasterId);
+            deletedRemoteEvent = true;
+        }
+
+        if (masterTargets.Count == 0)
+        {
+            foreach (var link in links.DistinctBy(item => item.ExternalEventId))
+            {
+                if (!link.CalendarIntegration.IsActive)
+                    throw new InvalidOperationException("Outlook integration for this series is not active.");
+
+                await DeleteEventAsync(link.CalendarIntegration, link.ExternalEventId);
+                deletedRemoteEvent = true;
+            }
+        }
+
+        _context.CalendarEventLinks.RemoveRange(links);
+        foreach (var calendarEvent in externalEvents)
+        {
+            if (!calendarEvent.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
+                calendarEvent.Subject = "[DELETED] " + calendarEvent.Subject;
+            calendarEvent.SessionId = null;
+            calendarEvent.IsConvertedToSession = false;
+        }
+
+        await _context.SaveChangesAsync();
+        return deletedRemoteEvent;
+    }
+
     private async Task<string> CreateEventAsync(Session session, string accessToken)
     {
         var categories = ResolveGraphEventCategories(session);
@@ -551,18 +620,24 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (integration is null || !integration.IsActive)
             return;
 
+        await DeleteEventAsync(integration, link.ExternalEventId);
+    }
+
+    private async Task DeleteEventAsync(CalendarIntegration integration, string externalEventId)
+    {
         await EnsureAccessTokenAsync(integration);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Delete,
-            $"https://graph.microsoft.com/v1.0/me/events/{link.ExternalEventId}");
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
 
         request.Headers.Authorization =
             new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
         var response = await _httpClient.SendAsync(request);
 
-        if (response.IsSuccessStatusCode || response.StatusCode == System.Net.HttpStatusCode.NotFound)
+        if (response.IsSuccessStatusCode ||
+            response.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
             return;
 
         var body = await response.Content.ReadAsStringAsync();

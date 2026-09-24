@@ -152,6 +152,23 @@ public class OutlookController : ControllerBase
         return Ok();
     }
 
+    [HttpPost("reconcile")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public async Task<ActionResult<OutlookReconciliationResultDto>> Reconcile(
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        OutlookReconciliationRequestDto? request)
+    {
+        try
+        {
+            return Ok(await _webhookService.ReconcileAsync(
+                request ?? new OutlookReconciliationRequestDto()));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpGet("imported-events")]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> GetImportedEvents()

@@ -81,10 +81,19 @@ public class SessionsController : ControllerBase
     [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionSeriesOutlookSyncDto>> SyncSeriesToOutlook(
         string recurringGroupId,
-        SessionRecurrenceDto recurrence)
+        [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
+        SessionRecurrenceDto? recurrence)
     {
         return await HandleAsync<SessionSeriesOutlookSyncDto>(async () =>
             Ok(await _sessionService.SyncSeriesToOutlookAsync(recurringGroupId, recurrence)));
+    }
+
+    [HttpDelete("series/{recurringGroupId}")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<DeleteSessionSeriesResultDto>> DeleteSeries(string recurringGroupId)
+    {
+        return await HandleAsync<DeleteSessionSeriesResultDto>(async () =>
+            Ok(await _sessionService.DeleteSeriesAsync(recurringGroupId)));
     }
 
     [HttpPut("{id:int}")]
