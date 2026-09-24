@@ -175,34 +175,106 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
             for (var index = 0; index < sessions.Count; index++)
             {
-                var session = sessions[index];
                 var instance = instances[index];
-                if (Math.Abs((instance.StartAt - session.StartAt).TotalMinutes) > 1)
+                if (Math.Abs((instance.StartAt - sessions[index].StartAt).TotalMinutes) > 1)
                     throw new InvalidOperationException("Outlook occurrence dates do not match the CRM series.");
-
-                await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
-                {
-                    SessionId = session.Id,
-                    CalendarIntegrationId = integration.Id,
-                    Provider = "Outlook",
-                    ExternalEventId = instance.Id,
-                    SyncedAt = DateTime.UtcNow
-                });
-                await UpsertExternalCalendarEventAsync(
-                    session,
-                    integration.Id,
-                    instance.Id,
-                    masterId,
-                    isRecurring: true);
             }
 
-            await _context.SaveChangesAsync();
+            await SaveSeriesMappingsWithRetryAsync(
+                recurringGroupId,
+                integration.Id,
+                masterId,
+                instances);
         }
         catch
         {
             await TryDeleteEventAsync(masterId, integration.AccessToken);
             throw;
         }
+    }
+
+    private async Task SaveSeriesMappingsWithRetryAsync(
+        string recurringGroupId,
+        int integrationId,
+        string masterId,
+        List<OutlookSeriesInstance> instances)
+    {
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= 3; attempt++)
+        {
+            _context.ChangeTracker.Clear();
+
+            try
+            {
+                var sessions = await _context.Sessions
+                    .Include(session => session.Trainer)
+                        .ThenInclude(trainer => trainer.User)
+                    .Include(session => session.Participants)
+                        .ThenInclude(participant => participant.Client)
+                    .Include(session => session.Location)
+                    .Where(session =>
+                        session.RecurringGroupId == recurringGroupId &&
+                        session.IsRecurring)
+                    .OrderBy(session => session.RecurrenceInstanceNumber)
+                    .ToListAsync();
+
+                if (sessions.Count != instances.Count)
+                    throw new InvalidOperationException("CRM and Outlook series occurrence counts do not match.");
+
+                for (var index = 0; index < sessions.Count; index++)
+                {
+                    var session = sessions[index];
+                    var instance = instances[index];
+                    var existingLink = await _context.CalendarEventLinks
+                        .FirstOrDefaultAsync(link =>
+                            link.SessionId == session.Id &&
+                            link.Provider == "Outlook");
+
+                    if (existingLink is null)
+                    {
+                        await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
+                        {
+                            SessionId = session.Id,
+                            CalendarIntegrationId = integrationId,
+                            Provider = "Outlook",
+                            ExternalEventId = instance.Id,
+                            SyncedAt = DateTime.UtcNow
+                        });
+                    }
+                    else
+                    {
+                        existingLink.CalendarIntegrationId = integrationId;
+                        existingLink.ExternalEventId = instance.Id;
+                        existingLink.SyncedAt = DateTime.UtcNow;
+                    }
+
+                    await UpsertExternalCalendarEventAsync(
+                        session,
+                        integrationId,
+                        instance.Id,
+                        masterId,
+                        isRecurring: true);
+                }
+
+                await _context.SaveChangesAsync();
+                return;
+            }
+            catch (DbUpdateException ex) when (attempt < 3)
+            {
+                lastError = ex;
+                _logger.LogWarning(
+                    ex,
+                    "Outlook webhook raced with series {RecurringGroupId} mapping save. Retrying attempt {Attempt}.",
+                    recurringGroupId,
+                    attempt + 1);
+                await Task.Delay(TimeSpan.FromMilliseconds(250 * attempt));
+            }
+        }
+
+        throw new InvalidOperationException(
+            $"Could not persist Outlook series mappings: {lastError?.GetBaseException().Message}",
+            lastError);
     }
 
     public async Task DeleteSessionEventAsync(int sessionId)

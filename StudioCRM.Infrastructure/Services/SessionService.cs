@@ -1493,7 +1493,7 @@ public class SessionService : ISessionService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not sync session series {RecurringGroupId} to Outlook.", recurringGroupId);
-            var detail = ex.Message.Trim();
+            var detail = ex.GetBaseException().Message.Trim();
             if (detail.Length > 600)
                 detail = detail[..600];
 
