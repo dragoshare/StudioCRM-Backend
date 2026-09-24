@@ -166,14 +166,12 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var masterId = await CreateSeriesMasterEventAsync(sessions, recurrence, integration.AccessToken);
         try
         {
-            var instances = await GetSeriesInstancesAsync(
+            var instances = await GetSeriesInstancesWithRetryAsync(
                 masterId,
                 integration.AccessToken,
                 sessions[0].StartAt.AddDays(-1),
-                sessions[^1].EndAt.AddDays(1));
-
-            if (instances.Count != sessions.Count)
-                throw new InvalidOperationException("Outlook returned a different number of series occurrences than CRM.");
+                sessions[^1].EndAt.AddDays(1),
+                sessions.Count);
 
             for (var index = 0; index < sessions.Count; index++)
             {
@@ -369,6 +367,40 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             .Where(item => !string.IsNullOrWhiteSpace(item.Id))
             .OrderBy(item => item.StartAt)
             .ToList();
+    }
+
+    private async Task<List<OutlookSeriesInstance>> GetSeriesInstancesWithRetryAsync(
+        string masterId,
+        string accessToken,
+        DateTime startAt,
+        DateTime endAt,
+        int expectedCount)
+    {
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= 5; attempt++)
+        {
+            try
+            {
+                var instances = await GetSeriesInstancesAsync(masterId, accessToken, startAt, endAt);
+                if (instances.Count == expectedCount)
+                    return instances;
+
+                lastError = new InvalidOperationException(
+                    $"Outlook returned {instances.Count} of {expectedCount} expected series occurrences.");
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            if (attempt < 5)
+                await Task.Delay(TimeSpan.FromMilliseconds(500 * attempt));
+        }
+
+        throw new InvalidOperationException(
+            $"Outlook did not make all recurring event occurrences available in time. {lastError?.Message}",
+            lastError);
     }
 
     private async Task TryDeleteEventAsync(string eventId, string accessToken)

@@ -77,6 +77,16 @@ public class SessionsController : ControllerBase
         });
     }
 
+    [HttpPost("series/{recurringGroupId}/sync-outlook")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<SessionSeriesOutlookSyncDto>> SyncSeriesToOutlook(
+        string recurringGroupId,
+        SessionRecurrenceDto recurrence)
+    {
+        return await HandleAsync<SessionSeriesOutlookSyncDto>(async () =>
+            Ok(await _sessionService.SyncSeriesToOutlookAsync(recurringGroupId, recurrence)));
+    }
+
     [HttpPut("{id:int}")]
     [Authorize(Roles = "Owner")]
     public async Task<ActionResult<SessionDto>> Update(int id, UpdateSessionDto request)

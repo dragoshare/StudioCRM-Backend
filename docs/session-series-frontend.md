@@ -82,6 +82,17 @@ Jesli `outlookSeriesSynced` jest `false`, sesje zostaly utworzone w CRM, ale fro
 powinien pokazac `outlookSyncWarning`. Nie nalezy wysylac drugi raz formularza,
 bo utworzyloby to druga serie CRM.
 
+Synchronizacje istniejacej serii mozna bezpiecznie ponowic:
+
+```http
+POST /api/sessions/series/{recurringGroupId}/sync-outlook
+```
+
+Body to ten sam obiekt `recurrence`, ktory zostal uzyty przy tworzeniu serii.
+Endpoint nie tworzy kolejnych sesji CRM. Jesli cala seria jest juz polaczona,
+zwraca sukces bez duplikowania wydarzenia. Front powinien pokazac zwrocone
+`outlookSyncWarning`, gdy `outlookSeriesSynced` nadal ma wartosc `false`.
+
 ## Widocznosc i blokada sali
 
 Zajecia grupowe w Outlooku otrzymuja:

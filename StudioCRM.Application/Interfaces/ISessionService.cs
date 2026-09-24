@@ -18,6 +18,10 @@ public interface ISessionService
 
     Task<SessionSeriesDto> CreateSeriesAsync(CreateSessionSeriesDto request);
 
+    Task<SessionSeriesOutlookSyncDto> SyncSeriesToOutlookAsync(
+        string recurringGroupId,
+        SessionRecurrenceDto recurrence);
+
     Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request);
 
     Task<bool> DeleteAsync(int id);

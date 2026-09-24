@@ -691,6 +691,27 @@ public class SessionService : ISessionService
         };
     }
 
+    public async Task<SessionSeriesOutlookSyncDto> SyncSeriesToOutlookAsync(
+        string recurringGroupId,
+        SessionRecurrenceDto recurrence)
+    {
+        if (string.IsNullOrWhiteSpace(recurringGroupId))
+            throw new InvalidOperationException("Recurring group id is required.");
+
+        var seriesExists = await _context.Sessions.AnyAsync(session =>
+            session.RecurringGroupId == recurringGroupId && session.IsRecurring);
+        if (!seriesExists)
+            throw new InvalidOperationException("Session series does not exist.");
+
+        var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, recurrence);
+        return new SessionSeriesOutlookSyncDto
+        {
+            RecurringGroupId = recurringGroupId,
+            OutlookSeriesSynced = outlookSync.IsSynced,
+            OutlookSyncWarning = outlookSync.Warning
+        };
+    }
+
     public async Task<bool> RestoreAsync(int id)
     {
         var session = await _context.Sessions
@@ -1367,7 +1388,11 @@ public class SessionService : ISessionService
         catch (Exception ex)
         {
             _logger.LogWarning(ex, "Could not sync session series {RecurringGroupId} to Outlook.", recurringGroupId);
-            return (false, "Series was created in CRM, but could not be synchronized with Outlook.");
+            var detail = ex.Message.Trim();
+            if (detail.Length > 600)
+                detail = detail[..600];
+
+            return (false, $"Series exists in CRM, but Outlook synchronization failed: {detail}");
         }
     }
 

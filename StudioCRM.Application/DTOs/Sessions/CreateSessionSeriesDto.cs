@@ -36,3 +36,12 @@ public class SessionSeriesDto
 
     public List<SessionDto> Sessions { get; set; } = new();
 }
+
+public class SessionSeriesOutlookSyncDto
+{
+    public string RecurringGroupId { get; set; } = string.Empty;
+
+    public bool OutlookSeriesSynced { get; set; }
+
+    public string? OutlookSyncWarning { get; set; }
+}
