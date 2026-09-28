@@ -3,6 +3,8 @@
 public class TrainerPortalClientDto
 {
     public int ClientId { get; set; }
+    public int? UserId { get; set; }
+    public string PortalAccessStatus { get; set; } = "NoAccount";
 
     public string FullName { get; set; } = string.Empty;
 

@@ -9,4 +9,5 @@ public class CreateInvitationDto
     public int LocationId { get; set; }
 
     public int? TrainerId { get; set; }
+    public int? ClientId { get; set; }
 }

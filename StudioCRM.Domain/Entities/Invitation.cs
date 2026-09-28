@@ -13,6 +13,8 @@ public class Invitation
     public int LocationId { get; set; }
 
     public int? TrainerId { get; set; }
+    public int? ClientId { get; set; }
+    public Client? Client { get; set; }
 
     public DateTime ExpiresAt { get; set; }
 

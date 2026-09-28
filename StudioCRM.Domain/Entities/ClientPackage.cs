@@ -44,6 +44,12 @@ public class ClientPackage
     public int? ActivatedByUserId { get; set; }
 
     public bool IsActive { get; set; } = true;
+    public string? ClosureDisposition { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public string? ClosureReason { get; set; }
+    public decimal RefundAmount { get; set; }
+    public DateTime? RefundConfirmedAt { get; set; }
+    public string? RefundReference { get; set; }
 
     public ICollection<ClientPayment> Payments { get; set; } = new List<ClientPayment>();
     public ICollection<ClientBalanceTransaction> BalanceTransactions { get; set; } = new List<ClientBalanceTransaction>();

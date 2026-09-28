@@ -4,6 +4,7 @@ public class Client
 {
     public int Id { get; set; }
     public int? UserId { get; set; }
+    public bool PortalAccessBlocked { get; set; }
     public int? TrainerId { get; set; }
 
     public int? ActivePackageId { get; set; }

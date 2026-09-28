@@ -152,4 +152,17 @@ public class EmailService : IEmailService
             throw new InvalidOperationException($"Resend email send failed: {reason}");
         }
     }
+
+    public async Task SendLoginEmailChangeVerificationAsync(string toEmail, string verificationLink)
+    {
+        var link = System.Net.WebUtility.HtmlEncode(verificationLink);
+        var message = new EmailMessage
+        {
+            From = _emailSettings.From,
+            Subject = "Potwierdź nowy adres logowania do ATLAS",
+            HtmlBody = $"<h2>Zmiana adresu logowania</h2><p>Potwierdź zmianę adresu konta ATLAS. Link jest ważny 24 godziny.</p><p><a href=\"{link}\">Potwierdź zmianę</a></p><p>Jeśli nie prosiłeś o zmianę, zignoruj tę wiadomość.</p>"
+        };
+        message.To.Add(toEmail);
+        await SendEmailAsync(message);
+    }
 }

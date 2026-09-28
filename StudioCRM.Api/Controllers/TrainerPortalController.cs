@@ -51,6 +51,14 @@ public class TrainerPortalController : ControllerBase
         _avatarService = avatarService;
     }
 
+    [HttpGet("clients/{id:int}/sessions")]
+    public async Task<IActionResult> GetClientSessions(int id, [FromQuery] ClientHistoryFilter filter, [FromServices] IClientService clients)
+        => Ok(await clients.GetSessionHistoryAsync(id, filter));
+
+    [HttpGet("clients/{id:int}/packages/history")]
+    public async Task<IActionResult> GetClientPackages(int id, int page, int pageSize, [FromServices] IClientService clients)
+        => Ok(await clients.GetPackageHistoryAsync(id, page == 0 ? 1 : page, pageSize == 0 ? 25 : pageSize));
+
     [HttpGet("me")]
     public async Task<ActionResult<TrainerPortalMeDto>> GetMe()
     {
@@ -162,6 +170,7 @@ public class TrainerPortalController : ControllerBase
     }
 
     [HttpPost("clients/{clientId:int}/deactivate")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> DeactivateClient(int clientId)
     {
         var result = await _trainerPortalService.DeactivateClientAsync(clientId);

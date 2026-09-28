@@ -9,6 +9,11 @@ public class ClientPackageBillingDto
     public string PackageName { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }
+    public string? ClosureDisposition { get; set; }
+    public DateTime? ClosedAt { get; set; }
+    public decimal RefundAmount { get; set; }
+    public DateTime? RefundConfirmedAt { get; set; }
+    public string? RefundReference { get; set; }
     public string ActivationMode { get; set; } = string.Empty;
 
     public int TotalSessions { get; set; }

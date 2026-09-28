@@ -21,11 +21,14 @@ internal static class SessionAccountingCorrectionManager
 
         foreach (var counted in countedPackages)
         {
-            var package = await context.ClientPackages
+            var package = await context.ClientPackages.IgnoreQueryFilters()
                 .Include(x => x.Client)
                 .FirstOrDefaultAsync(x => x.Id == counted.ClientPackageId);
             if (package is null)
                 continue;
+
+            if (package.Client.IsDeleted || package.ClosureDisposition != null)
+                throw new InvalidOperationException("Session belongs to an archived client or a closed package and requires manual reconciliation before correction.");
 
             var newUsedSessions = Math.Max(0, package.UsedSessions - counted.SessionsCharged);
             var reopensPackage = package.UsedSessions >= package.TotalSessions &&
@@ -44,6 +47,8 @@ internal static class SessionAccountingCorrectionManager
                 renewal = renewals.SingleOrDefault();
                 if (renewal is not null)
                 {
+                    if (renewal.ClosureDisposition != null)
+                        throw new InvalidOperationException("Renewal package has a closure decision and cannot be corrected automatically.");
                     var renewalWasUsed = renewal.UsedSessions > 0 ||
                         await context.SessionParticipants.AnyAsync(x =>
                             x.ClientPackageId == renewal.Id && x.IsCountedFromPackage);

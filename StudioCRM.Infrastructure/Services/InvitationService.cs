@@ -42,11 +42,41 @@ public class InvitationService : IInvitationService
         var email = NormalizeEmail(request.Email);
         var role = NormalizeRole(request.Role);
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        // Prevent concurrent requests from issuing multiple invitations for one email or client.
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(hashtextextended({email}, 71844730))");
+        if (request.ClientId.HasValue)
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(71844731, {request.ClientId.Value})");
+
         if (string.IsNullOrWhiteSpace(email))
             throw new InvalidOperationException("Email is required.");
+        if (!System.Net.Mail.MailAddress.TryCreate(email, out var address) || address.Address != email)
+            throw new InvalidOperationException("Email is invalid.");
 
         if (role != "Trainer" && role != "Client")
             throw new InvalidOperationException("Only Trainer and Client invitations are supported.");
+
+        if (request.ClientId.HasValue)
+        {
+            if (role != "Client")
+                throw new InvalidOperationException("ClientId is supported only for client invitations.");
+            var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == request.ClientId.Value)
+                ?? throw new InvalidOperationException("Client does not exist or is archived.");
+            if (client.UserId.HasValue || client.PortalAccessBlocked)
+                throw new InvalidOperationException("Client already has an account or portal access is blocked.");
+            if (!_currentUser.IsOwner && !await _context.Trainers.AnyAsync(t =>
+                    t.Id == client.TrainerId && t.UserId == _currentUser.UserId))
+                throw new UnauthorizedAccessException("Cannot invite this client.");
+            if (await _context.Invitations.AnyAsync(i => i.ClientId == client.Id &&
+                    !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow))
+                throw new InvalidOperationException("Client already has an active invitation.");
+            request.LocationId = client.LocationId;
+            request.TrainerId = client.TrainerId;
+        }
+        else if (role == "Client" && await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == email))
+        {
+            throw new InvalidOperationException("A client with this email exists. Invite the existing client using ClientId.");
+        }
 
         var trainerId = await ResolveInvitationTrainerIdAsync(role, request.LocationId, request.TrainerId);
 
@@ -78,6 +108,7 @@ public class InvitationService : IInvitationService
         {
             Email = email,
             Role = role,
+            ClientId = request.ClientId,
             Token = GenerateToken(),
             LocationId = request.LocationId,
             Location = location,
@@ -90,6 +121,7 @@ public class InvitationService : IInvitationService
 
         await _context.Invitations.AddAsync(invitation);
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         var inviteLink = $"{_appSettings.FrontendBaseUrl}/accept-invitation?token={invitation.Token}";
 
@@ -184,6 +216,7 @@ public class InvitationService : IInvitationService
     public async Task<ValidateInvitationDto?> ValidateAsync(string token)
     {
         var invitation = await _context.Invitations
+            .Include(i => i.Client)
             .Include(i => i.Location)
                 .ThenInclude(l => l.LegalEntity)
             .Include(i => i.Trainer)
@@ -198,6 +231,9 @@ public class InvitationService : IInvitationService
 
         return new ValidateInvitationDto
         {
+            ClientId = invitation.ClientId,
+            FirstName = invitation.Client?.FirstName,
+            LastName = invitation.Client?.LastName,
             Email = invitation.Email,
             Role = invitation.Role,
             LocationId = invitation.LocationId,
@@ -216,6 +252,7 @@ public class InvitationService : IInvitationService
 
     public async Task<bool> AcceptAsync(AcceptInvitationDto request)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         if (string.IsNullOrWhiteSpace(request.FirstName))
             throw new InvalidOperationException("First name is required.");
 
@@ -238,7 +275,7 @@ public class InvitationService : IInvitationService
             invitation.ExpiresAt <= DateTime.UtcNow)
             return false;
 
-        var existingUser = await _context.Users.AnyAsync(u => u.Email == invitation.Email);
+        var existingUser = await _context.Users.AnyAsync(u => u.Email.ToLower() == invitation.Email.ToLower());
         if (existingUser)
             throw new InvalidOperationException("User with this email already exists.");
 
@@ -258,7 +295,9 @@ public class InvitationService : IInvitationService
             throw new InvalidOperationException("Current terms must be accepted before activating the account.");
         }
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+        if (invitation.ClientId.HasValue && !await _context.Clients.AnyAsync(c =>
+                c.Id == invitation.ClientId && c.UserId == null && !c.PortalAccessBlocked))
+            throw new InvalidOperationException("Client is archived, blocked or already has an account.");
 
         var user = new User
         {
@@ -448,6 +487,22 @@ public class InvitationService : IInvitationService
         Invitation invitation,
         AcceptInvitationDto request)
     {
+        if (invitation.ClientId.HasValue)
+        {
+            var existing = await _context.Clients.SingleAsync(c => c.Id == invitation.ClientId.Value);
+            if (existing.UserId.HasValue || existing.PortalAccessBlocked)
+                throw new InvalidOperationException("Client already has an account or is blocked.");
+            existing.UserId = user.Id;
+            // Preserve the staff-maintained identity and all existing relationships/history.
+            user.FirstName = existing.FirstName;
+            user.LastName = existing.LastName;
+            if (string.IsNullOrWhiteSpace(existing.Email)) existing.Email = invitation.Email;
+            existing.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return;
+        }
+        if (await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == invitation.Email.ToLower()))
+            throw new InvalidOperationException("A client now exists with this email. Cancel this invitation and invite the existing client.");
         var client = new Client
         {
             UserId = user.Id,
@@ -483,6 +538,7 @@ public class InvitationService : IInvitationService
         return new InvitationDto
         {
             Id = invitation.Id,
+            ClientId = invitation.ClientId,
             Email = invitation.Email,
             Role = invitation.Role,
             LocationId = invitation.LocationId,

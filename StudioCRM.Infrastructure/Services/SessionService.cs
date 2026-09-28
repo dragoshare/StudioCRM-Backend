@@ -860,7 +860,7 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetDeletedAsync()
     {
-        var sessions = await BaseQuery()
+        var sessions = await BaseQuery(includeDeleted: true)
             .IgnoreQueryFilters()
             .Where(s => s.Status == "Deleted")
             .OrderByDescending(s => s.UpdatedAt)
@@ -1129,9 +1129,9 @@ public class SessionService : ISessionService
         return decimal.Round(amount, 2);
     }
 
-    private IQueryable<Session> BaseQuery()
+    private IQueryable<Session> BaseQuery(bool includeDeleted = false)
     {
-        return _context.Sessions
+        return _context.Sessions.IgnoreQueryFilters().Where(s => includeDeleted || !s.IsDeleted)
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
             .Include(s => s.Location)

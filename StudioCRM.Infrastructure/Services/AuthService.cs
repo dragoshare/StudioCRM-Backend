@@ -1,4 +1,4 @@
-﻿using System.IdentityModel.Tokens.Jwt;
+using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -209,6 +209,8 @@ public class AuthService : IAuthService
         if (existingUser)
             throw new InvalidOperationException("User with this email already exists.");
 
+        if (await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == email.ToLower()))
+            throw new InvalidOperationException("A client profile with this email already exists. Ask the studio for a portal invitation.");
         var locationExists = await _context.Locations
             .AnyAsync(l => l.Id == request.LocationId && l.IsActive);
 
@@ -354,7 +356,7 @@ public class AuthService : IAuthService
                 .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Email == request.Email);
 
-        if (user is null || !user.IsActive)
+        if (user is null || !user.IsActive || await ClientAccountAccess.IsBlockedAsync(_context, user.Id))
         {
             return null;
         }
@@ -450,7 +452,8 @@ public class AuthService : IAuthService
                     .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
 
-        if (refreshToken is null || !refreshToken.IsActive || !refreshToken.User.IsActive)
+        if (refreshToken is null || !refreshToken.IsActive || !refreshToken.User.IsActive ||
+            await ClientAccountAccess.IsBlockedAsync(_context, refreshToken.UserId))
         {
             throw new InvalidOperationException("Invalid refresh token.");
         }

@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Subscriptions;
@@ -10,7 +10,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class ClientService : IClientService
+public partial class ClientService : IClientService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -31,6 +31,7 @@ public class ClientService : IClientService
 
     public async Task<ClientDto> CreateAsync(CreateClientDto request)
     {
+        ValidateClientIdentity(request.FirstName, request.LastName, request.Email);
         if (request.TrainerId.HasValue)
         {
             var trainerExists = await _context.Trainers.AnyAsync(t => t.Id == request.TrainerId.Value);
@@ -59,13 +60,15 @@ public class ClientService : IClientService
             request.TrainerId = currentTrainer.Id;
         }
 
+        await ValidateTrainerLocationAsync(request.TrainerId, request.LocationId);
         var client = new Client
         {
             TrainerId = request.TrainerId,
             LocationId = request.LocationId,
-            FirstName = request.FirstName,
-            LastName = request.LastName,
-            Email = request.Email,
+            FirstName = request.FirstName.Trim(),
+            LastName = request.LastName.Trim(),
+            Email = NormalizeContactEmail(request.Email),
+            Source = "StaffCreation",
             PhoneNumber = request.PhoneNumber,
             Goal = request.Goal,
             Notes = request.Notes,
@@ -75,7 +78,7 @@ public class ClientService : IClientService
             TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
-            CreatedBy = request.CreatedBy
+            CreatedBy = _currentUser.UserId
         };
 
         await _context.Clients.AddAsync(client);
@@ -107,7 +110,7 @@ public class ClientService : IClientService
 
     public async Task<ClientDto?> GetByIdAsync(int id)
     {
-        var query = ApplyAccessControl(BuildClientQuery());
+        var query = ApplyAccessControl(BuildClientQuery(includeArchived: true));
 
         var client = await query
             .FirstOrDefaultAsync(c => c.Id == id);
@@ -126,7 +129,7 @@ public class ClientService : IClientService
         if (profile is null)
             return null;
 
-        var client = await _context.Clients
+        var client = await ReadableClients()
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Include(c => c.Location)
@@ -163,7 +166,10 @@ public class ClientService : IClientService
             CountedSessions = await BuildCountedSessionsAsync(id),
             QuickActions = new ClientWorkspaceQuickActionsDto
             {
-                CanDeactivate = !client.IsDeleted,
+                CanDeactivate = _currentUser.IsOwner && !client.IsDeleted,
+                CanChangeTrainer = _currentUser.IsOwner && !client.IsDeleted,
+                CanChangePackage = !client.IsDeleted,
+                CanAddPayment = !client.IsDeleted,
                 GoogleDriveFolderUrl = trainingPlan?.GoogleDriveFolderUrl,
                 TrainingPlanUrl = trainingPlan?.Url
             }
@@ -183,7 +189,7 @@ public class ClientService : IClientService
         if (!locationExists)
             throw new InvalidOperationException("Location does not exist.");
 
-        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
+        var client = await _context.Clients.Include(c => c.User).FirstOrDefaultAsync(c => c.Id == id);
         if (client is null)
             return null;
 
@@ -206,12 +212,16 @@ public class ClientService : IClientService
             request.TrainerId = currentTrainer.Id;
         }
 
+        await ValidateTrainerLocationAsync(request.TrainerId, request.LocationId);
+        ValidateClientIdentity(request.FirstName, request.LastName, request.Email);
+        var before = ClientAuditState(client);
         client.TrainerId = request.TrainerId;
         await SetHomeLocationMembershipAsync(client, request.LocationId);
         client.LocationId = request.LocationId;
-        client.FirstName = request.FirstName;
-        client.LastName = request.LastName;
-        client.Email = request.Email;
+        ValidateClientIdentity(request.FirstName, request.LastName, request.Email);
+        client.FirstName = request.FirstName.Trim();
+        client.LastName = request.LastName.Trim();
+        client.Email = NormalizeContactEmail(request.Email);
         client.PhoneNumber = request.PhoneNumber;
         client.Goal = request.Goal;
         client.Notes = request.Notes;
@@ -228,6 +238,7 @@ public class ClientService : IClientService
             client.User.UpdatedAt = DateTime.UtcNow;
         }
 
+        AuditClient(client, "ProfileUpdated", before);
         await _context.SaveChangesAsync();
 
         return await GetProjectedById(id);
@@ -235,7 +246,8 @@ public class ClientService : IClientService
 
     public async Task<List<ClientLegalConsentDto>> GetLegalConsentsAsync(int clientId)
     {
-        var userId = await _context.Clients
+        if (await GetByIdAsync(clientId) is null) throw new KeyNotFoundException("Client not found.");
+        var userId = await ReadableClients()
             .Where(x => x.Id == clientId)
             .Select(x => x.UserId)
             .FirstOrDefaultAsync();
@@ -296,16 +308,27 @@ public class ClientService : IClientService
 
     public async Task<bool> DeleteAsync(int id)
     {
+        EnsureOwner();
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == id);
         if (client is null)
             return false;
 
+        var check = await CheckArchiveAsync(id);
+        if (!check.CanArchive)
+            throw new InvalidOperationException(string.Join("; ", check.Blockers));
+        await CancelClientInvitationsAsync(id);
+        await RevokeClientAccessTokensAsync(client);
+
+        var before = ClientAuditState(client);
         client.IsDeleted = true;
         client.DeletedAt = DateTime.UtcNow;
         client.Status = "Inactive";
         client.UpdatedAt = DateTime.UtcNow;
 
+        AuditClient(client, "Archived", before);
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
         return true;
     }
 
@@ -329,8 +352,11 @@ public class ClientService : IClientService
                 throw new InvalidOperationException("Trainer does not exist.");
         }
 
+        await ValidateTrainerLocationAsync(request.TrainerId, client.LocationId);
+        var before = ClientAuditState(client);
         client.TrainerId = request.TrainerId;
         client.UpdatedAt = DateTime.UtcNow;
+        AuditClient(client, "TrainerChanged", before);
 
         await _context.SaveChangesAsync();
         return true;
@@ -338,6 +364,7 @@ public class ClientService : IClientService
 
     public async Task<bool> RestoreAsync(int id)
     {
+        EnsureOwner();
         var client = await _context.Clients
             .IgnoreQueryFilters()
             .FirstOrDefaultAsync(c => c.Id == id);
@@ -345,10 +372,12 @@ public class ClientService : IClientService
         if (client is null || !client.IsDeleted)
             return false;
 
+        var before = ClientAuditState(client);
         client.IsDeleted = false;
         client.DeletedAt = null;
         client.Status = await ResolveClientStatusAsync(client.Id);
         client.UpdatedAt = DateTime.UtcNow;
+        AuditClient(client, "Restored", before);
 
         await _context.SaveChangesAsync();
         return true;
@@ -356,6 +385,7 @@ public class ClientService : IClientService
 
     public async Task<List<ClientDto>> GetDeletedAsync()
     {
+        EnsureOwner();
         return await _context.Clients
             .IgnoreQueryFilters()
             .Include(c => c.Trainer)
@@ -366,6 +396,13 @@ public class ClientService : IClientService
             .Select(c => new ClientDto
             {
                 Id = c.Id,
+                UserId = c.UserId,
+                LoginEmail = c.User != null ? c.User.Email : null,
+                IsArchived = c.IsDeleted,
+                ArchivedAt = c.DeletedAt,
+                PortalAccessStatus = c.IsDeleted || c.PortalAccessBlocked || (c.User != null && !c.User.IsActive) ? "Blocked"
+                    : c.UserId != null ? "Active"
+                    : _context.Invitations.Any(i => i.ClientId == c.Id && !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow) ? "Invited" : "NoAccount",
                 TrainerId = c.TrainerId,
                 ActivePackageId = c.ActivePackageId,
                 LocationId = c.LocationId,
@@ -374,7 +411,7 @@ public class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
-                EmailContactUrl = "mailto:" + c.Email,
+                EmailContactUrl = c.Email == "" ? "" : "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
                 PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
@@ -435,7 +472,7 @@ public class ClientService : IClientService
                     .ThenInclude(t => t.User)
             .Include(p => p.Session)
                 .ThenInclude(s => s.Location)
-            .Where(p => p.ClientId == clientId && p.Session.StartAt >= now)
+            .Where(p => p.ClientId == clientId && p.Session.StartAt >= now && p.Session.Status != "Cancelled")
             .OrderBy(p => p.Session.StartAt)
             .Take(8)
             .ToListAsync();
@@ -530,15 +567,25 @@ public class ClientService : IClientService
         return TimeZoneInfo.Utc;
     }
 
-    private IQueryable<ClientDto> BuildClientQuery()
+    private IQueryable<Client> ReadableClients() => _currentUser.IsOwner
+        ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+
+    private IQueryable<ClientDto> BuildClientQuery(bool includeArchived = false)
     {
-        return _context.Clients
+        return (includeArchived ? ReadableClients() : _context.Clients)
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Include(c => c.Location)
             .Select(c => new ClientDto
             {
                 Id = c.Id,
+                UserId = c.UserId,
+                LoginEmail = c.User != null ? c.User.Email : null,
+                IsArchived = c.IsDeleted,
+                ArchivedAt = c.DeletedAt,
+                PortalAccessStatus = c.IsDeleted || c.PortalAccessBlocked || (c.User != null && !c.User.IsActive) ? "Blocked"
+                    : c.UserId != null ? "Active"
+                    : _context.Invitations.Any(i => i.ClientId == c.Id && !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow) ? "Invited" : "NoAccount",
                 TrainerId = c.TrainerId,
                 ActivePackageId = c.ActivePackageId,
                 LocationId = c.LocationId,
@@ -547,7 +594,7 @@ public class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
-                EmailContactUrl = "mailto:" + c.Email,
+                EmailContactUrl = c.Email == "" ? "" : "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
                 PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,

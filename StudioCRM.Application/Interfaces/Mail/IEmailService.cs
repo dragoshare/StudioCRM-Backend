@@ -2,6 +2,8 @@
 
 public interface IEmailService
 {
+    Task SendLoginEmailChangeVerificationAsync(string toEmail, string verificationLink)
+        => throw new NotSupportedException("Login email verification is not configured.");
     Task SendInvitationEmailAsync(
         string toEmail,
         string role,

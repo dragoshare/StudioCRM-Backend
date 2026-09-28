@@ -65,6 +65,7 @@ builder.Services.AddScoped<IAuthService, AuthService>();
 builder.Services.AddScoped<ITrainerService, TrainerService>();
 builder.Services.AddScoped<ITrainerContractService, TrainerContractService>();
 builder.Services.AddScoped<IClientService, ClientService>();
+builder.Services.AddScoped<IClientEmailChangeService, ClientEmailChangeService>();
 builder.Services.AddScoped<IPackageService, PackageService>();
 builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
@@ -103,6 +104,21 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
+    options.Events = new JwtBearerEvents
+    {
+        OnTokenValidated = async context =>
+        {
+            var rawId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier)
+                ?? context.Principal?.FindFirstValue("sub");
+            var db = context.HttpContext.RequestServices.GetRequiredService<StudioCRMDbContext>();
+            var tokenEmail = context.Principal?.FindFirstValue(ClaimTypes.Email)
+                ?? context.Principal?.FindFirstValue("email");
+            if (!int.TryParse(rawId, out var userId) ||
+                !await db.Users.AnyAsync(u => u.Id == userId && u.IsActive && u.Email == tokenEmail &&
+                    !db.Clients.IgnoreQueryFilters().Any(c => c.UserId == u.Id && (c.IsDeleted || c.PortalAccessBlocked))))
+                context.Fail("Account is inactive or client portal access is blocked.");
+        }
+    };
     options.TokenValidationParameters = new TokenValidationParameters
     {
         ValidateIssuer = true,

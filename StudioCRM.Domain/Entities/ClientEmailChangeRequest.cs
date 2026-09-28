@@ -20,4 +20,8 @@ public class ClientEmailChangeRequest
     public DateTime? ReviewedAt { get; set; }
 
     public int? ReviewedByUserId { get; set; }
+    public string? VerificationTokenHash { get; set; }
+    public DateTime? VerificationExpiresAt { get; set; }
+    public DateTime? VerifiedAt { get; set; }
+    public string? ReviewReason { get; set; }
 }

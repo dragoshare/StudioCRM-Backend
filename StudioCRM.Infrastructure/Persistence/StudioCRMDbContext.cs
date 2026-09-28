@@ -20,6 +20,7 @@ public class StudioCRMDbContext : DbContext
     public DbSet<TrainerContract> TrainerContracts => Set<TrainerContract>();
     public DbSet<TrainerContractLocation> TrainerContractLocations => Set<TrainerContractLocation>();
     public DbSet<Client> Clients => Set<Client>();
+    public DbSet<ClientAuditEntry> ClientAuditEntries => Set<ClientAuditEntry>();
     public DbSet<Package> Packages => Set<Package>();
     public DbSet<ClientPackage> ClientPackages => Set<ClientPackage>();
     public DbSet<ClientBalanceTransaction> ClientBalanceTransactions => Set<ClientBalanceTransaction>();
@@ -80,6 +81,19 @@ public class StudioCRMDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<ClientPackage>().Property(p => p.RefundAmount).HasPrecision(18, 2);
+        modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureDisposition).HasMaxLength(30);
+        modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureReason).HasMaxLength(1000);
+        modelBuilder.Entity<ClientPackage>().Property(p => p.RefundReference).HasMaxLength(1000);
+        modelBuilder.Entity<ClientAuditEntry>(entity =>
+        {
+            entity.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(x => new { x.ClientId, x.CreatedAt });
+            entity.Property(x => x.Action).HasMaxLength(80);
+            entity.Property(x => x.Reason).HasMaxLength(1000);
+        });
+        modelBuilder.Entity<Invitation>().HasOne(i => i.Client).WithMany()
+            .HasForeignKey(i => i.ClientId).OnDelete(DeleteBehavior.Restrict);
 
         // =========================
         // USER / ROLES
@@ -401,6 +415,8 @@ public class StudioCRMDbContext : DbContext
 
         modelBuilder.Entity<ClientEmailChangeRequest>(entity =>
         {
+            entity.Property(x => x.VerificationTokenHash).HasMaxLength(64);
+            entity.Property(x => x.ReviewReason).HasMaxLength(1000);
             entity.HasKey(x => x.Id);
 
             entity.Property(x => x.CurrentEmail)

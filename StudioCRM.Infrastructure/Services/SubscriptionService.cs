@@ -32,7 +32,7 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task<SubscriptionDto> GetClientSubscriptionAsync(int clientId)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
         return await BuildSubscriptionAsync(clientId);
     }
 
@@ -134,7 +134,7 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task<SubscriptionUsageDto> GetClientUsageAsync(int clientId)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
         return await BuildUsageAsync(clientId);
     }
 
@@ -146,9 +146,9 @@ public class SubscriptionService : ISubscriptionService
 
     public async Task<TrainingPlanDto> GetClientTrainingPlanAsync(int clientId)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
-        var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == clientId);
+        var client = await _context.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == clientId);
         if (client is null)
             throw new InvalidOperationException("Client not found.");
 
@@ -210,6 +210,8 @@ public class SubscriptionService : ISubscriptionService
 
         if (existingNextCycle is not null)
         {
+            if (existingNextCycle.ClosureDisposition != null)
+                throw new InvalidOperationException("Closed renewal cycle cannot be reactivated automatically.");
             if (existingNextCycle.UsedSessions > 0 && !existingNextCycle.IsActive)
                 throw new InvalidOperationException("Existing renewal cycle is inactive but already used.");
 
@@ -304,7 +306,7 @@ public class SubscriptionService : ISubscriptionService
 
     private async Task<SubscriptionDto> BuildSubscriptionAsync(int clientId)
     {
-        var client = await _context.Clients
+        var client = await _context.Clients.IgnoreQueryFilters()
             .Include(c => c.Location)
             .FirstOrDefaultAsync(c => c.Id == clientId);
 
@@ -526,10 +528,15 @@ public class SubscriptionService : ISubscriptionService
         return trainer ?? throw new InvalidOperationException("Trainer profile not found.");
     }
 
-    private async Task EnsureStaffAccessToClientAsync(int clientId)
+    private async Task EnsureStaffAccessToClientAsync(int clientId, bool readOnly = false)
     {
         if (_currentUser.IsOwner)
+        {
+            var clients = readOnly ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+            if (!await clients.AnyAsync(c => c.Id == clientId))
+                throw new InvalidOperationException("Client not found or archived.");
             return;
+        }
 
         if (!_currentUser.IsTrainer)
             throw new InvalidOperationException("Current user cannot manage this subscription.");

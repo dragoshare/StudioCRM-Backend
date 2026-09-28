@@ -35,7 +35,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     public async Task<ClientBillingSummaryDto> GetClientSummaryAsync(int clientId)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
         return await BuildSummaryAsync(clientId);
     }
 
@@ -46,7 +46,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             var trainer = await GetCurrentTrainerAsync();
-            query = query.Where(p => p.Client.TrainerId == trainer.Id);
+            query = query.Where(p => !p.Client.IsDeleted && p.Client.TrainerId == trainer.Id);
         }
 
         query = ApplyPaymentFilters(query, filter);
@@ -61,7 +61,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var payoutFrom = NormalizeNullableDateTime(filter.PayoutFrom);
         var payoutTo = NormalizeNullableDateTime(filter.PayoutTo);
 
-        var query = _context.ClientPayments
+        var query = _context.ClientPayments.IgnoreQueryFilters()
             .Include(p => p.Client)
                 .ThenInclude(c => c.Trainer)
                 .ThenInclude(t => t!.User)
@@ -244,7 +244,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         int clientId,
         ClientPaymentFilterDto filter)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
         filter.ClientId = clientId;
         var query = ApplyPaymentFilters(BasePaymentQuery(), filter);
@@ -257,7 +257,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         int page,
         int pageSize)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
         page = NormalizePage(page);
         pageSize = NormalizePageSize(pageSize);
@@ -296,7 +296,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     public async Task<ClientPackageBillingDto?> GetActivePackageAsync(int clientId)
     {
-        await EnsureStaffAccessToClientAsync(clientId);
+        await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
         var activePackage = await _context.ClientPackages
             .Include(cp => cp.Client)
@@ -317,7 +317,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             var trainer = await GetCurrentTrainerAsync();
-            query = query.Where(p => p.Client.TrainerId == trainer.Id);
+            query = query.Where(p => !p.Client.IsDeleted && p.Client.TrainerId == trainer.Id);
         }
 
         var payments = await query
@@ -342,7 +342,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
             var trainer = await GetCurrentTrainerAsync();
-            query = query.Where(p => p.Client.TrainerId == trainer.Id);
+            query = query.Where(p => !p.Client.IsDeleted && p.Client.TrainerId == trainer.Id);
         }
 
         var payments = await query
@@ -846,7 +846,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task ActivatePackageAfterPaymentIfNeededAsync(ClientPackage clientPackage)
     {
-        if (clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive ||
+        if (clientPackage.ClosureDisposition != null || clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive ||
             clientPackage.UsedSessions >= clientPackage.TotalSessions ||
             clientPackage.ValidUntil.HasValue && clientPackage.ValidUntil.Value <= DateTime.UtcNow)
             return;
@@ -931,8 +931,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task<ClientBillingSummaryDto> BuildSummaryAsync(int clientId)
     {
-        var client = await _context.Clients
-            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted);
+        var client = await _context.Clients.IgnoreQueryFilters()
+            .FirstOrDefaultAsync(c => c.Id == clientId);
 
         if (client is null)
             throw new InvalidOperationException("Client not found.");
@@ -954,7 +954,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim()))
             .ToList();
 
-        var paymentEntities = await _context.ClientPayments
+        var paymentEntities = await _context.ClientPayments.IgnoreQueryFilters()
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
@@ -1013,7 +1013,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private IQueryable<ClientPayment> BasePaymentQuery()
     {
-        return _context.ClientPayments
+        return _context.ClientPayments.IgnoreQueryFilters()
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
@@ -1125,10 +1125,15 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         return trainer ?? throw new InvalidOperationException("Trainer profile not found.");
     }
 
-    private async Task EnsureStaffAccessToClientAsync(int clientId)
+    private async Task EnsureStaffAccessToClientAsync(int clientId, bool readOnly = false)
     {
         if (_currentUser.IsOwner)
+        {
+            var clients = readOnly ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+            if (!await clients.AnyAsync(c => c.Id == clientId))
+                throw new InvalidOperationException("Client not found or archived.");
             return;
+        }
 
         if (!_currentUser.IsTrainer)
             throw new InvalidOperationException("Current user cannot manage client payments.");
@@ -1144,7 +1149,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task<ClientPaymentDto> GetPaymentDtoAsync(int paymentId)
     {
-        var payment = await _context.ClientPayments
+        var payment = await _context.ClientPayments.IgnoreQueryFilters()
             .Include(p => p.Client)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
@@ -1252,7 +1257,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         return decimal.Round(payment.ProviderNetAmount ?? payment.Amount - payment.ProviderFeeAmount, 2);
     }
 
-    private static ClientPackageBillingDto MapPackage(
+    internal static ClientPackageBillingDto MapPackage(
         ClientPackage clientPackage,
         string? clientFullName = null)
     {
@@ -1269,6 +1274,11 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             PackageId = clientPackage.PackageId,
             PackageName = clientPackage.Name,
             IsActive = clientPackage.IsActive,
+            ClosureDisposition = clientPackage.ClosureDisposition,
+            ClosedAt = clientPackage.ClosedAt,
+            RefundAmount = clientPackage.RefundAmount,
+            RefundConfirmedAt = clientPackage.RefundConfirmedAt,
+            RefundReference = clientPackage.RefundReference,
             ActivationMode = clientPackage.ActivationMode.ToString(),
             TotalSessions = clientPackage.TotalSessions,
             SessionsPerWeek = clientPackage.SessionsPerWeek,

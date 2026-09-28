@@ -87,9 +87,11 @@ public class TrainerPortalService : ITrainerPortalService
             .Select(c => new TrainerPortalClientDto
             {
                 ClientId = c.Id,
+                UserId = c.UserId,
+                PortalAccessStatus = c.PortalAccessBlocked || (c.User != null && !c.User.IsActive) ? "Blocked" : c.UserId != null ? "Active" : _context.Invitations.Any(i => i.ClientId == c.Id && !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow) ? "Invited" : "NoAccount",
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
-                EmailContactUrl = "mailto:" + c.Email,
+                EmailContactUrl = c.Email == "" ? "" : "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
                 PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
                 AvatarUrl = c.User != null ? c.User.AvatarUrl : null,
@@ -103,96 +105,13 @@ public class TrainerPortalService : ITrainerPortalService
             .ToListAsync();
     }
 
-    public async Task<ClientDto?> GetClientAsync(int clientId)
-    {
-        var trainerId = await GetCurrentTrainerIdAsync();
-        if (trainerId is null)
-            return null;
+    public Task<ClientDto?> GetClientAsync(int clientId) => _clientService.GetByIdAsync(clientId);
 
-        return await BuildTrainerClientQuery(trainerId.Value)
-            .FirstOrDefaultAsync(c => c.Id == clientId);
-    }
+    public Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId) => _clientService.GetWorkspaceAsync(clientId);
 
-    public async Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId)
-    {
-        var trainerId = await GetCurrentTrainerIdAsync();
-        if (trainerId is null)
-            return null;
+    public Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request) => _clientService.UpdateAsync(clientId, request);
 
-        var ownsClient = await _context.Clients
-            .AnyAsync(c => c.Id == clientId && c.TrainerId == trainerId.Value);
-
-        if (!ownsClient)
-            return null;
-
-        return await _clientService.GetWorkspaceAsync(clientId);
-    }
-
-    public async Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request)
-    {
-        var trainerId = await GetCurrentTrainerIdAsync();
-        if (trainerId is null)
-            return null;
-
-        var client = await _context.Clients
-            .Include(c => c.User)
-            .FirstOrDefaultAsync(c => c.Id == clientId && c.TrainerId == trainerId.Value);
-
-        if (client is null)
-            return null;
-
-        var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId);
-        if (!locationExists)
-            throw new InvalidOperationException("Location does not exist.");
-
-        await EnsureActivePackageMatchesLocationAsync(client.Id, request.LocationId);
-
-        client.FirstName = request.FirstName;
-        client.LastName = request.LastName;
-        client.Email = request.Email;
-        client.PhoneNumber = request.PhoneNumber;
-        client.Goal = request.Goal;
-        client.Notes = request.Notes;
-        client.BillingStatus = request.BillingStatus;
-        client.Status = await ResolveClientStatusAsync(client.Id);
-        client.LocationId = request.LocationId;
-        client.NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt);
-        client.TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate);
-        client.UpdatedAt = DateTime.UtcNow;
-
-        if (client.User is not null)
-        {
-            client.User.FirstName = client.FirstName;
-            client.User.LastName = client.LastName;
-            client.User.UpdatedAt = DateTime.UtcNow;
-        }
-
-        await _context.SaveChangesAsync();
-
-        return await BuildTrainerClientQuery(trainerId.Value)
-            .FirstOrDefaultAsync(c => c.Id == clientId);
-    }
-
-    public async Task<bool> DeactivateClientAsync(int clientId)
-    {
-        var trainerId = await GetCurrentTrainerIdAsync();
-        if (trainerId is null)
-            return false;
-
-        var client = await _context.Clients
-            .FirstOrDefaultAsync(c => c.Id == clientId && c.TrainerId == trainerId.Value);
-
-        if (client is null)
-            return false;
-
-        client.IsDeleted = true;
-        client.DeletedAt = DateTime.UtcNow;
-        client.Status = "Inactive";
-        client.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-        return true;
-    }
+    public Task<bool> DeactivateClientAsync(int clientId) => _clientService.DeleteAsync(clientId);
 
     public async Task<List<TrainerPortalSessionDto>> GetSessionsAsync()
     {

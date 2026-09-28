@@ -3,6 +3,11 @@
 public class ClientDto
 {
     public int Id { get; set; }
+    public int? UserId { get; set; }
+    public string? LoginEmail { get; set; }
+    public string PortalAccessStatus { get; set; } = "NoAccount";
+    public bool IsArchived { get; set; }
+    public DateTime? ArchivedAt { get; set; }
 
     public int? TrainerId { get; set; }
 

@@ -147,6 +147,8 @@ public class ClientPackageService : IClientPackageService
 
         await EnsureStaffAccessToClientAsync(clientId);
 
+        if (clientPackage.ClosureDisposition != null)
+            throw new InvalidOperationException("Closed package requires the dedicated retained-package resume action; refunded packages cannot be activated.");
         var isGroupPackage = clientPackage.ExpectedBillingType == SessionBillingType.Group;
         var activePackages = isGroupPackage
             ? new List<ClientPackage>()
@@ -188,6 +190,9 @@ public class ClientPackageService : IClientPackageService
             return false;
 
         await EnsureStaffAccessToClientAsync(clientId);
+
+        if (clientPackage.ClosureDisposition != null)
+            throw new InvalidOperationException("Closed packages must remain in the client history.");
 
         var hasPayments = await _context.ClientPayments
             .AnyAsync(p => p.ClientPackageId == clientPackageId);
@@ -240,7 +245,11 @@ public class ClientPackageService : IClientPackageService
     private async Task EnsureStaffAccessToClientAsync(int clientId)
     {
         if (_currentUser.IsOwner)
+        {
+            if (!await _context.Clients.AnyAsync(c => c.Id == clientId))
+                throw new InvalidOperationException("Client not found or archived.");
             return;
+        }
 
         if (!_currentUser.IsTrainer)
             throw new InvalidOperationException("Current user cannot manage client packages.");

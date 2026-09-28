@@ -80,6 +80,63 @@ public class ClientsController : ControllerBase
         return Ok(await _clientService.GetLegalConsentsAsync(id));
     }
 
+    [HttpGet("{id:int}/locations")]
+    public async Task<IActionResult> GetLocations(int id) => Ok(await _clientService.GetLocationsAsync(id));
+
+    [HttpPut("{id:int}/locations/{locationId:int}")]
+    public async Task<IActionResult> SetLocationAccess(int id, int locationId, SetClientLocationAccessRequest request)
+    {
+        await _clientService.SetLocationAccessAsync(id, locationId, request);
+        return NoContent();
+    }
+
+    [HttpDelete("{id:int}/locations/{locationId:int}")]
+    public async Task<IActionResult> RemoveLocation(int id, int locationId)
+    {
+        await _clientService.RemoveLocationAsync(id, locationId);
+        return NoContent();
+    }
+
+    [HttpGet("duplicates")]
+    public async Task<IActionResult> FindDuplicates([FromQuery] ClientDuplicateFilter filter) => Ok(await _clientService.FindDuplicatesAsync(filter));
+
+    [HttpGet("{id:int}/packages/history")]
+    public async Task<IActionResult> GetPackageHistory(int id, int page = 1, int pageSize = 25)
+        => Ok(await _clientService.GetPackageHistoryAsync(id, page, pageSize));
+
+    [HttpGet("refunds")]
+    public async Task<IActionResult> GetRefunds(int? clientId, int page = 1, int pageSize = 25)
+        => Ok(await _clientService.GetRefundsAsync(clientId, page, pageSize));
+
+    [HttpGet("{id:int}/sessions")]
+    public async Task<IActionResult> GetSessionHistory(int id, [FromQuery] ClientHistoryFilter filter)
+        => Ok(await _clientService.GetSessionHistoryAsync(id, filter));
+
+    [HttpGet("{id:int}/audit")]
+    public async Task<IActionResult> GetAudit(int id, int page = 1, int pageSize = 25)
+        => Ok(await _clientService.GetAuditAsync(id, page, pageSize));
+
+    [HttpGet("{id:int}/closure-preview")]
+    public async Task<IActionResult> GetClosurePreview(int id) => Ok(await _clientService.GetClosurePreviewAsync(id));
+
+    [HttpPost("{id:int}/close-cooperation")]
+    public async Task<IActionResult> CloseCooperation(int id, CloseClientRequest request)
+        => Ok(await _clientService.CloseCooperationAsync(id, request));
+
+    [HttpPost("{id:int}/packages/{packageId:int}/confirm-refund")]
+    public async Task<IActionResult> ConfirmRefund(int id, int packageId, ConfirmClientRefundRequest request)
+    {
+        await _clientService.ConfirmRefundAsync(id, packageId, request);
+        return NoContent();
+    }
+
+    [HttpPost("{id:int}/packages/{packageId:int}/resume-retained")]
+    public async Task<IActionResult> ResumeRetained(int id, int packageId, ResumeRetainedPackageRequest request)
+    {
+        await _clientService.ResumeRetainedPackageAsync(id, packageId, request);
+        return NoContent();
+    }
+
     [HttpPost("{id:int}/avatar")]
     [Consumes("multipart/form-data")]
     public async Task<ActionResult<AvatarDto>> UploadAvatar(
@@ -113,6 +170,7 @@ public class ClientsController : ControllerBase
     }
 
     [HttpPost("{id:int}/deactivate")]
+    [HttpPost("{id:int}/archive")]
     public async Task<IActionResult> Deactivate(int id)
     {
         try
@@ -221,10 +279,27 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet("deleted")]
+    [HttpGet("archived")]
     public async Task<ActionResult<List<ClientDto>>> GetDeleted()
     {
         return Ok(await _clientService.GetDeletedAsync());
     }
+
+    [HttpGet("{id:int}/archive-check")]
+    public async Task<ActionResult<ClientArchiveCheckDto>> CheckArchive(int id)
+        => Ok(await _clientService.CheckArchiveAsync(id));
+
+    [HttpPost("archive-batch")]
+    public async Task<ActionResult<List<ClientArchiveResultDto>>> ArchiveMany(BulkArchiveClientsRequest request)
+        => Ok(await _clientService.ArchiveManyAsync(request));
+
+    [HttpPut("{id:int}/portal-access")]
+    public async Task<IActionResult> SetPortalAccess(int id, SetClientPortalAccessRequest request)
+        => await _clientService.SetPortalAccessAsync(id, request.Blocked) ? NoContent() : NotFound();
+
+    [HttpDelete("{id:int}/permanent")]
+    public async Task<IActionResult> DeletePermanently(int id)
+        => await _clientService.DeletePermanentlyAsync(id) ? NoContent() : NotFound();
 
     private async Task<ActionResult<T>> HandleAsync<T>(Func<Task<ActionResult<T>>> action)
     {

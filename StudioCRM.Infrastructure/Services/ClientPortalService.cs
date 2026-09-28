@@ -80,18 +80,21 @@ public class ClientPortalService : IClientPortalService
         if (string.IsNullOrWhiteSpace(request.RequestedEmail))
             throw new InvalidOperationException("Requested email is required.");
 
-        var client = await GetCurrentClientQuery().FirstOrDefaultAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var client = await GetCurrentClientQuery().Include(c => c.User).FirstOrDefaultAsync();
         if (client is null)
             throw new InvalidOperationException("Client profile not found for current user.");
 
-        var requestedEmail = request.RequestedEmail.Trim();
-        var emailAlreadyExists = await _context.Users.AnyAsync(u => u.Email == requestedEmail);
+        var requestedEmail = request.RequestedEmail.Trim().ToLowerInvariant();
+        if (requestedEmail.Length > 320 || !System.Net.Mail.MailAddress.TryCreate(requestedEmail, out var parsed) || parsed.Address != requestedEmail)
+            throw new InvalidOperationException("Requested email is invalid.");
+        var emailAlreadyExists = await _context.Users.AnyAsync(u => u.Email.ToLower() == requestedEmail);
         if (emailAlreadyExists)
             throw new InvalidOperationException("User with this email already exists.");
 
         var existingPending = await _context.ClientEmailChangeRequests.AnyAsync(r =>
             r.ClientId == client.Id &&
-            r.Status == "Pending");
+            (r.Status == "Pending" || r.Status == "DeliveryFailed" || (r.Status == "AwaitingVerification" && r.VerificationExpiresAt > DateTime.UtcNow)));
 
         if (existingPending)
             throw new InvalidOperationException("There is already a pending email change request.");
@@ -99,7 +102,7 @@ public class ClientPortalService : IClientPortalService
         await _context.ClientEmailChangeRequests.AddAsync(new ClientEmailChangeRequest
         {
             ClientId = client.Id,
-            CurrentEmail = client.Email,
+            CurrentEmail = client.User?.Email ?? throw new InvalidOperationException("Client account not found."),
             RequestedEmail = requestedEmail,
             Status = "Pending",
             CreatedAt = DateTime.UtcNow,
@@ -107,6 +110,7 @@ public class ClientPortalService : IClientPortalService
         });
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     public async Task<ClientPortalDashboardDto?> GetDashboardAsync()
