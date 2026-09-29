@@ -431,6 +431,15 @@ public class OutlookWebhookService : IOutlookWebhookService
         session.OutlookCategoryColorsJson = evt.CategoryColorsJson;
         session.PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson);
 
+        var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
+            _context, evt.CategoriesJson, session.LocationId);
+        var categoryWarning = OutlookTrainerCategoryResolver.ApplyToSession(
+            session, categoryTrainer.Trainer, categoryTrainer.Warning);
+        var warnings = JsonSerializer.Deserialize<List<string>>(evt.MappingWarningsJson ?? "[]") ?? new();
+        warnings.RemoveAll(w => w.StartsWith(OutlookTrainerCategoryResolver.WarningPrefix, StringComparison.Ordinal));
+        if (categoryWarning != null) warnings.Add(categoryWarning);
+        evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
+
         await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
         var newTitle = session.Title;

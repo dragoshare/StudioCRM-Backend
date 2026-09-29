@@ -47,17 +47,20 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (session is null)
             throw new InvalidOperationException("Session does not exist.");
 
-        var integration = await GetTrainerIntegrationAsync(session.Trainer.UserId);
+        var existingLink = await _context.CalendarEventLinks
+            .Include(x => x.CalendarIntegration)
+            .FirstOrDefaultAsync(x => x.SessionId == session.Id && x.Provider == "Outlook");
+        var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
+            _context, session.OutlookCategoriesJson, session.LocationId);
+        // A category changes the instructor, not ownership of the Outlook event.
+        var integration = existingLink != null && categoryTrainer.Trainer?.Id == session.TrainerId
+            ? existingLink.CalendarIntegration
+            : await GetTrainerIntegrationAsync(session.Trainer.UserId);
 
-        if (integration is null)
+        if (integration is null || !integration.IsActive)
             throw new InvalidOperationException("Trainer does not have active Outlook integration.");
 
         await EnsureAccessTokenAsync(integration);
-
-        var existingLink = await _context.CalendarEventLinks
-            .FirstOrDefaultAsync(x =>
-                x.SessionId == session.Id &&
-                x.Provider == "Outlook");
 
         if (existingLink is null)
         {

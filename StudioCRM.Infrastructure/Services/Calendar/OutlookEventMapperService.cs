@@ -62,6 +62,15 @@ public class OutlookEventMapperService
             return (null, warnings);
         }
 
+        var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(_context, evt.CategoriesJson, location.Id);
+        if (categoryTrainer.Warning != null)
+        {
+            warnings.Add(categoryTrainer.Warning);
+            await SaveWarningsAsync(evt, warnings);
+            return (null, warnings);
+        }
+        trainer = categoryTrainer.Trainer ?? trainer;
+
         var attendeeEmails = ReadAttendeeEmails(evt.AttendeesJson)
             .Select(NormalizeEmail)
             .Where(e =>
