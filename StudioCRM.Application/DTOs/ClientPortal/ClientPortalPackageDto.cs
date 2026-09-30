@@ -1,7 +1,11 @@
-﻿namespace StudioCRM.Application.DTOs.ClientPortal;
+namespace StudioCRM.Application.DTOs.ClientPortal;
 
 public class ClientPortalPackageDto
 {
+    public int? ClientPackageId { get; set; }
+    public string? PackageType { get; set; }
+    public DateTime? NextSessionAt { get; set; }
+
     public int? PackageId { get; set; }
 
     public string? Name { get; set; }

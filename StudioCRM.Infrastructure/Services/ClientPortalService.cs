@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.ClientPortal;
 using StudioCRM.Application.DTOs.Profiles;
@@ -227,6 +227,7 @@ public class ClientPortalService : IClientPortalService
             };
         }
 
+        var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, client.Id, new[] { activeCycle.Id });
         var usedSessionsCount = activeCycle.UsedSessions;
         var sessionsLimit = activeCycle.TotalSessions;
         var remainingSessions = Math.Max(0, sessionsLimit - usedSessionsCount);
@@ -237,6 +238,9 @@ public class ClientPortalService : IClientPortalService
 
         return new ClientPortalPackageDto
         {
+            ClientPackageId = activeCycle.Id,
+            PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(activeCycle.ExpectedBillingType),
+            NextSessionAt = nextSessions.TryGetValue(activeCycle.Id, out var next) ? next : null,
             PackageId = activeCycle.PackageId,
             Name = activeCycle.Name,
             Description = activeCycle.Package?.Description,

@@ -323,6 +323,7 @@ public class SubscriptionService : ISubscriptionService
             ? await _context.Packages.FirstOrDefaultAsync(p => p.Id == nextPackageId.Value)
             : null;
 
+        var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, client.Id, currentCycle is null ? Array.Empty<int>() : new[] { currentCycle.Id });
         var balance = await GetCarryOverBalanceAsync(client.Id);
 
         return new SubscriptionDto
@@ -333,7 +334,7 @@ public class SubscriptionService : ISubscriptionService
             AutoRenewEnabled = client.SubscriptionAutoRenewEnabled,
             CancelRenewalRequested = client.RenewalCancellationRequestedAt.HasValue,
             RenewalCancellationRequestedAt = client.RenewalCancellationRequestedAt,
-            CurrentCycle = currentCycle is null ? null : MapCycle(currentCycle),
+            CurrentCycle = currentCycle is null ? null : MapCycle(currentCycle, nextSessions.TryGetValue(currentCycle.Id, out var next) ? next : null),
             NextPackage = nextPackage is null ? null : MapNextPackage(nextPackage),
             CarryOverBalance = balance
         };
@@ -440,7 +441,7 @@ public class SubscriptionService : ISubscriptionService
         return currentCycle.UsedSessions >= currentCycle.TotalSessions ? "Completed" : "Active";
     }
 
-    private static SubscriptionCycleDto MapCycle(ClientPackage cycle)
+    private static SubscriptionCycleDto MapCycle(ClientPackage cycle, DateTime? nextSessionAt)
     {
         var originalPrice = cycle.OriginalPrice > 0 ? cycle.OriginalPrice : cycle.TotalPrice;
 
@@ -459,6 +460,8 @@ public class SubscriptionService : ISubscriptionService
             AmountPaid = cycle.AmountPaid,
             AmountDue = Math.Max(0, cycle.TotalPrice - cycle.AmountPaid),
             Currency = cycle.Currency,
+            PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(cycle.ExpectedBillingType),
+            NextSessionAt = nextSessionAt,
             ExpectedBillingType = cycle.ExpectedBillingType.ToString(),
             PaymentStatus = cycle.PaymentStatus.ToString(),
             PurchaseDate = cycle.PurchaseDate,

@@ -298,7 +298,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     {
         await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
-        var activePackage = await _context.ClientPackages
+        var activePackage = await _context.ClientPackages.IgnoreQueryFilters()
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
@@ -306,7 +306,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 
-        return activePackage is null ? null : MapPackage(activePackage);
+        if (activePackage is null) return null;
+        var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, clientId, new[] { activePackage.Id });
+        return MapPackage(activePackage, nextSessionAt: nextSessions.TryGetValue(activePackage.Id, out var next) ? next : null);
     }
 
     public async Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync()
@@ -950,8 +952,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .ThenByDescending(cp => cp.PurchaseDate)
             .ToListAsync();
 
+        var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, clientId, clientPackageEntities.Select(cp => cp.Id));
         var clientPackages = clientPackageEntities
-            .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim()))
+            .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim(), nextSessions.TryGetValue(cp.Id, out var next) ? next : null))
             .ToList();
 
         var paymentEntities = await _context.ClientPayments.IgnoreQueryFilters()
@@ -1259,7 +1262,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     internal static ClientPackageBillingDto MapPackage(
         ClientPackage clientPackage,
-        string? clientFullName = null)
+        string? clientFullName = null, DateTime? nextSessionAt = null)
     {
         var amountDue = Math.Max(0, clientPackage.TotalPrice - clientPackage.AmountPaid);
         var resolvedClientFullName = !string.IsNullOrWhiteSpace(clientFullName)
@@ -1291,6 +1294,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             AmountPaid = clientPackage.AmountPaid,
             AmountDue = amountDue,
             Currency = clientPackage.Currency,
+            PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(clientPackage.ExpectedBillingType),
+            NextSessionAt = nextSessionAt,
             ExpectedBillingType = clientPackage.ExpectedBillingType.ToString(),
             LocationId = clientPackage.LocationId,
             LocationName = clientPackage.Location != null ? clientPackage.Location.Name : null,

@@ -15,6 +15,9 @@ public class SubscriptionDto
 
 public class SubscriptionCycleDto
 {
+    public string PackageType { get; set; } = string.Empty;
+    public DateTime? NextSessionAt { get; set; }
+
     public int ClientPackageId { get; set; }
     public int PackageId { get; set; }
     public string PackageName { get; set; } = string.Empty;

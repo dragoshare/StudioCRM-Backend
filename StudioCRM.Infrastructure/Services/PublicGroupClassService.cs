@@ -281,11 +281,14 @@ public class PublicGroupClassService : IPublicGroupClassService
             .OrderByDescending(x => x.PurchaseDate)
             .ToListAsync();
 
+        var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, client.Id, packages.Select(x => x.Id));
         var packageDtos = new List<PublicGroupClientPackageDto>();
         foreach (var package in packages)
         {
             packageDtos.Add(new PublicGroupClientPackageDto
             {
+                PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(package.ExpectedBillingType),
+                NextSessionAt = nextSessions.TryGetValue(package.Id, out var next) ? next : null,
                 ClientPackageId = package.Id,
                 PackageId = package.PackageId,
                 PackageName = package.Name,
