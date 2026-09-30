@@ -12,6 +12,10 @@ public class StudioCRMDbContext : DbContext
     {
     }
 
+    public DbSet<OrganizationBrandingProfile> OrganizationBrandingProfiles => Set<OrganizationBrandingProfile>();
+    public DbSet<OrganizationBrandingVersion> OrganizationBrandingVersions => Set<OrganizationBrandingVersion>();
+    public DbSet<OrganizationBrandingAsset> OrganizationBrandingAssets => Set<OrganizationBrandingAsset>();
+    public DbSet<OrganizationBrandingAudit> OrganizationBrandingAudits => Set<OrganizationBrandingAudit>();
     public DbSet<User> Users => Set<User>();
     public DbSet<Role> Roles => Set<Role>();
     public DbSet<UserRole> UserRoles => Set<UserRole>();
@@ -81,6 +85,7 @@ public class StudioCRMDbContext : DbContext
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        BrandingModel.Configure(modelBuilder);
         modelBuilder.Entity<ClientPackage>().Property(p => p.RefundAmount).HasPrecision(18, 2);
         modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureDisposition).HasMaxLength(30);
         modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureReason).HasMaxLength(1000);

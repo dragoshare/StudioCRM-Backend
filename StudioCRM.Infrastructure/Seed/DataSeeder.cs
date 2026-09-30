@@ -90,7 +90,7 @@ public static class DataSeeder
 
     private static async Task SeedRolesAsync(StudioCRMDbContext context)
     {
-        var roles = new[] { "Owner", "Trainer", "Client" };
+        var roles = new[] { "Owner", "Trainer", "Client", "SuperAdmin" };
 
         foreach (var roleName in roles)
         {

@@ -22,6 +22,10 @@ using StudioCRM.Application.Interfaces.Storage;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.Configure<BrandingOptions>(builder.Configuration.GetSection("Branding"));
+builder.Services.AddScoped<IBrandingProfileContext, StudioCRM.Infrastructure.Services.Branding.BrandingProfileContext>();
+builder.Services.AddScoped<StudioCRM.Infrastructure.Services.Branding.BrandingAccess>();
+builder.Services.AddScoped<IBrandingService, StudioCRM.Infrastructure.Services.Branding.BrandingService>();
 var defaultConnectionName = builder.Environment.IsDevelopment()
     ? "TestConnection"
     : "DefaultConnection";
