@@ -164,9 +164,14 @@ public partial class ClientPaymentService
             account is null || account.LegalEntityId != payment.LegalEntityId)
             throw new InvalidOperationException("Payment provider mismatch.");
         var credentials = RequireTpayAccount(account.AccountKey ?? string.Empty);
-        if (Field("id") != credentials.MerchantId || Field("test_mode") != "1" ||
-            payment.ProviderStatus?.StartsWith("sandbox:", StringComparison.Ordinal) != true)
-            throw new InvalidOperationException("Merchant or payment environment mismatch.");
+        var merchantIdMatches = Field("id") == credentials.MerchantId;
+        var notificationIsSandbox = Field("test_mode") == "1";
+        var paymentIsSandbox = payment.ProviderStatus?.StartsWith("sandbox:", StringComparison.Ordinal) == true;
+        if (!merchantIdMatches || !notificationIsSandbox || !paymentIsSandbox)
+            // Report every failed condition without exposing credentials or untrusted notification fields.
+            throw new InvalidOperationException(
+                $"Tpay notification context mismatch. PaymentId={payment.Id}; " +
+                $"MerchantIdMatches={merchantIdMatches}; NotificationIsSandbox={notificationIsSandbox}; PaymentIsSandbox={paymentIsSandbox}.");
         var title = Field("tr_id");
         if (string.IsNullOrWhiteSpace(title) || payment.ExternalPaymentId is not null && payment.ExternalPaymentId != title)
             throw new InvalidOperationException("Transaction title mismatch.");
