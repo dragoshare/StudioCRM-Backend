@@ -5,6 +5,30 @@ namespace StudioCRM.Tests.UnitTests;
 public class TpayNotificationContextTests
 {
     [Theory]
+    [InlineData("true")]
+    [InlineData("TRUE")]
+    [InlineData("True")]
+    public void AcceptsSuccessfulStatusRegardlessOfLetterCase(string status)
+    {
+        ClientPaymentService.EnsureSuccessfulTpayNotification(status);
+    }
+
+    [Theory]
+    [InlineData("false")]
+    [InlineData("FALSE")]
+    [InlineData("chargeback")]
+    [InlineData("CHARGEBACK")]
+    [InlineData("pending")]
+    [InlineData("1")]
+    [InlineData("")]
+    [InlineData("true ")]
+    public void RejectsUnsuccessfulOrMalformedStatus(string status)
+    {
+        var error = Assert.Throws<InvalidOperationException>(() => ClientPaymentService.EnsureSuccessfulTpayNotification(status));
+        Assert.Contains("NotificationStatus=", error.Message);
+    }
+
+    [Theory]
     [InlineData("0")]
     [InlineData("1")]
     public void SandboxAcceptsBothDocumentedTransactionModes(string testMode)

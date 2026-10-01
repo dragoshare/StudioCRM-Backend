@@ -180,8 +180,7 @@ public partial class ClientPaymentService
             amount != payment.Amount || paid != payment.Amount || payment.Currency != "PLN" ||
             form.ContainsKey("tr_currency") && Field("tr_currency") != payment.Currency || Field("tr_error") != "none")
             throw new InvalidOperationException("Payment amount or currency mismatch. Manual review required.");
-        if (Field("tr_status") != "true")
-            throw new InvalidOperationException("Notification is not a successful payment. Refunds require manual review.");
+        EnsureSuccessfulTpayNotification(Field("tr_status"));
         if (payment.Status is ClientPaymentStatus.Confirmed or ClientPaymentStatus.Reversed)
         {
             await transaction.CommitAsync(ct);
@@ -201,6 +200,19 @@ public partial class ClientPaymentService
         await ApplyConfirmedPaymentAsync(payment, payment.ClientPackage);
         await _context.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+    }
+
+    internal static void EnsureSuccessfulTpayNotification(string status)
+    {
+        // Tpay documentation uses "true", while its integrations also handle "TRUE".
+        // Do not treat refunds, pending states or arbitrary truthy values as payment success.
+        if (string.Equals(status, "true", StringComparison.OrdinalIgnoreCase))
+            return;
+        var loggedStatus = System.Text.Json.JsonSerializer.Serialize(
+            status.Length <= 32 ? status : status[..32] + "[truncated]");
+        throw new InvalidOperationException(
+            $"Notification is not a successful payment. NotificationStatus={loggedStatus}; " +
+            $"NotificationStatusLength={status.Length}. Refunds require manual review.");
     }
 
     internal static void EnsureTpayNotificationContext(int paymentId, string merchantId, string configuredMerchantId,
