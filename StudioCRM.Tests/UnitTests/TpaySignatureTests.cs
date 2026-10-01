@@ -36,6 +36,63 @@ public class TpaySignatureTests
         Assert.Equal(2, handler.Requests);
     }
 
+    [Theory]
+    [InlineData("intermediate-first", true)]
+    [InlineData("root-first", true)]
+    [InlineData("missing-root", false)]
+    [InlineData("wrong-root", false)]
+    [InlineData("expired-leaf", false)]
+    public async Task ValidatesCompleteCaBundleWithoutTrustingAnIncompleteOrInvalidChain(string scenario, bool expected)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var uniqueName = Guid.NewGuid().ToString("N");
+        using var rootKey = RSA.Create(2048);
+        var rootRequest = new CertificateRequest($"CN=Root {uniqueName}", rootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        rootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        rootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        using var root = rootRequest.CreateSelfSigned(now.AddDays(-3), now.AddDays(3));
+
+        using var intermediateKey = RSA.Create(2048);
+        var intermediateRequest = new CertificateRequest($"CN=Intermediate {uniqueName}", intermediateKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        intermediateRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, true, 0, true));
+        intermediateRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        using var intermediatePublic = intermediateRequest.Create(root, now.AddDays(-2), now.AddDays(2), new byte[] { 2 });
+        using var intermediate = intermediatePublic.CopyWithPrivateKey(intermediateKey);
+
+        using var signingKey = RSA.Create(2048);
+        var signingRequest = new CertificateRequest($"CN=Signing {uniqueName}", signingKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        signingRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(false, false, 0, true));
+        signingRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        using var certificate = signingRequest.Create(intermediate, now.AddDays(-1),
+            scenario == "expired-leaf" ? now.AddHours(-1) : now.AddDays(1), new byte[] { 3 });
+
+        using var otherRootKey = RSA.Create(2048);
+        // Same subject, different key: name matching alone must not establish trust.
+        var otherRootRequest = new CertificateRequest(root.SubjectName, otherRootKey, HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1);
+        otherRootRequest.CertificateExtensions.Add(new X509BasicConstraintsExtension(true, false, 0, true));
+        otherRootRequest.CertificateExtensions.Add(new X509KeyUsageExtension(X509KeyUsageFlags.KeyCertSign, true));
+        using var otherRoot = otherRootRequest.CreateSelfSigned(now.AddDays(-3), now.AddDays(3));
+        var bundle = scenario switch
+        {
+            "root-first" => root.ExportCertificatePem() + "\n" + intermediate.ExportCertificatePem(),
+            "missing-root" => intermediate.ExportCertificatePem(),
+            "wrong-root" => intermediate.ExportCertificatePem() + "\n" + otherRoot.ExportCertificatePem(),
+            _ => intermediate.ExportCertificatePem() + "\n" + root.ExportCertificatePem()
+        };
+        using var handler = new CertificateHandler(certificate.ExportCertificatePem(), bundle);
+        using var http = new HttpClient(handler);
+        using var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new TpayConnectionService(http, Options.Create(new TpaySettings { UseSandbox = true }), cache);
+        var body = Encoding.UTF8.GetBytes("tr_id=TR-test&tr_amount=1.00");
+        var header = Encode(Encoding.UTF8.GetBytes("{\"alg\":\"RS256\",\"x5u\":\"https://secure.sandbox.tpay.com/x509/notifications-jws.pem\"}"));
+        var signature = header + ".." + Encode(signingKey.SignData(
+            Encoding.ASCII.GetBytes(header + "." + Encode(body)), HashAlgorithmName.SHA256, RSASignaturePadding.Pkcs1));
+
+        Assert.Equal(expected, await service.VerifySignatureAsync(body, signature, default));
+        Assert.False(await service.VerifySignatureAsync(Encoding.UTF8.GetBytes("tampered"), signature, default));
+        Assert.Equal(2, handler.Requests);
+    }
+
     private static string Encode(byte[] bytes) => Convert.ToBase64String(bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 
     private sealed class CertificateHandler(string certificate, string root) : HttpMessageHandler
