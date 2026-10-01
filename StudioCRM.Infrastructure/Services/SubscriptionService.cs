@@ -50,6 +50,9 @@ public class SubscriptionService : ISubscriptionService
         if (nextPackage is null)
             throw new InvalidOperationException("Package does not exist or is inactive.");
 
+        if (nextPackage.BillingType == SessionBillingType.Group)
+            throw new InvalidOperationException("Group packages are purchased separately and cannot be scheduled as an individual subscription cycle.");
+
         if (nextPackage.LocationId.HasValue && nextPackage.LocationId.Value != client.LocationId)
             throw new InvalidOperationException("Package is not available for this client's location.");
 
@@ -187,6 +190,15 @@ public class SubscriptionService : ISubscriptionService
 
         var client = completedPackage.Client;
 
+        // Group passes are independent purchases, never cycles of the personal subscription.
+        if (completedPackage.ExpectedBillingType == SessionBillingType.Group)
+        {
+            completedPackage.IsActive = false;
+            client.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return;
+        }
+
         if (!client.SubscriptionAutoRenewEnabled || client.RenewalCancellationRequestedAt is not null)
         {
             completedPackage.IsActive = false;
@@ -203,6 +215,9 @@ public class SubscriptionService : ISubscriptionService
 
         if (package is null)
             throw new InvalidOperationException("Next subscription package does not exist or is inactive.");
+
+        if (package.BillingType == SessionBillingType.Group)
+            throw new InvalidOperationException("Group packages cannot renew an individual subscription. Correct the next package configuration.");
 
         var existingNextCycle = await _context.ClientPackages.FirstOrDefaultAsync(cp =>
             cp.ClientId == client.Id &&
@@ -314,13 +329,16 @@ public class SubscriptionService : ISubscriptionService
             throw new InvalidOperationException("Client not found.");
 
         var currentCycle = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
-            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null &&
+                cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
-        var nextPackageId = client.NextPackageId ?? currentCycle?.PackageId;
+        var nextPackageId = client.SubscriptionAutoRenewEnabled
+            ? client.NextPackageId ?? currentCycle?.PackageId : null;
         var nextPackage = nextPackageId.HasValue
-            ? await _context.Packages.FirstOrDefaultAsync(p => p.Id == nextPackageId.Value)
+            ? await _context.Packages.FirstOrDefaultAsync(p => p.Id == nextPackageId.Value &&
+                !p.IsDeleted && p.IsActive && p.BillingType != SessionBillingType.Group)
             : null;
 
         var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, client.Id, currentCycle is null ? Array.Empty<int>() : new[] { currentCycle.Id });
@@ -343,8 +361,9 @@ public class SubscriptionService : ISubscriptionService
     private async Task<SubscriptionUsageDto> BuildUsageAsync(int clientId)
     {
         var currentCycle = await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive)
-            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null &&
+                cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
         if (currentCycle is null)
@@ -422,19 +441,18 @@ public class SubscriptionService : ISubscriptionService
         return balance;
     }
 
-    private static string ResolveSubscriptionStatus(Client client, ClientPackage? currentCycle)
+    internal static string ResolveSubscriptionStatus(Client client, ClientPackage? currentCycle)
     {
-        if (!client.SubscriptionAutoRenewEnabled)
-            return "Cancelled";
-
-        if (client.RenewalCancellationRequestedAt.HasValue)
-            return "CancelRequested";
-
         if (currentCycle is null)
-            return client.NextPackageId.HasValue ? "PendingActivation" : "Inactive";
+            return !client.SubscriptionAutoRenewEnabled ? "Cancelled"
+                : client.NextPackageId.HasValue ? "PendingActivation" : "Inactive";
+
+        if (client.RenewalCancellationRequestedAt.HasValue && client.SubscriptionAutoRenewEnabled)
+            return "CancelRequested";
 
         if (currentCycle.PaymentStatus == PaymentStatus.Unpaid ||
             currentCycle.PaymentStatus == PaymentStatus.PendingConfirmation ||
+            currentCycle.PaymentStatus == PaymentStatus.PartiallyPaid ||
             currentCycle.PaymentStatus == PaymentStatus.Overdue)
             return "PendingPayment";
 
