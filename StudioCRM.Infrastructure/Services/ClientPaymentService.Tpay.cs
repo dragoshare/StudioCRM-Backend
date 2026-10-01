@@ -164,20 +164,8 @@ public partial class ClientPaymentService
             account is null || account.LegalEntityId != payment.LegalEntityId)
             throw new InvalidOperationException("Payment provider mismatch.");
         var credentials = RequireTpayAccount(account.AccountKey ?? string.Empty);
-        var merchantIdMatches = Field("id") == credentials.MerchantId;
-        var notificationTestMode = Field("test_mode");
-        var notificationIsSandbox = notificationTestMode == "1";
-        var paymentIsSandbox = payment.ProviderStatus?.StartsWith("sandbox:", StringComparison.Ordinal) == true;
-        if (!merchantIdMatches || !notificationIsSandbox || !paymentIsSandbox)
-        {
-            // Bound and JSON-escape this non-secret field to prevent multiline/log injection.
-            var loggedTestMode = System.Text.Json.JsonSerializer.Serialize(
-                notificationTestMode.Length <= 32 ? notificationTestMode : notificationTestMode[..32] + "[truncated]");
-            throw new InvalidOperationException(
-                $"Tpay notification context mismatch. PaymentId={payment.Id}; " +
-                $"MerchantIdMatches={merchantIdMatches}; NotificationIsSandbox={notificationIsSandbox}; " +
-                $"PaymentIsSandbox={paymentIsSandbox}; NotificationTestMode={loggedTestMode}; NotificationTestModeLength={notificationTestMode.Length}.");
-        }
+        EnsureTpayNotificationContext(payment.Id, Field("id"), credentials.MerchantId,
+            Field("test_mode"), payment.ProviderStatus, _tpaySettings.UseSandbox);
         var title = Field("tr_id");
         if (string.IsNullOrWhiteSpace(title) || payment.ExternalPaymentId is not null && payment.ExternalPaymentId != title)
             throw new InvalidOperationException("Transaction title mismatch.");
@@ -213,6 +201,25 @@ public partial class ClientPaymentService
         await ApplyConfirmedPaymentAsync(payment, payment.ClientPackage);
         await _context.SaveChangesAsync(ct);
         await transaction.CommitAsync(ct);
+    }
+
+    internal static void EnsureTpayNotificationContext(int paymentId, string merchantId, string configuredMerchantId,
+        string notificationTestMode, string? providerStatus, bool useSandbox)
+    {
+        var merchantIdMatches = merchantId == configuredMerchantId;
+        // test_mode describes transaction mode, not the API environment. Sandbox can send "0".
+        // The JWS verifier separately restricts the certificate host to the configured environment.
+        var testModeIsValid = notificationTestMode is "0" or "1";
+        var paymentIsSandbox = providerStatus?.StartsWith("sandbox:", StringComparison.Ordinal) == true;
+        if (!merchantIdMatches || !testModeIsValid || !paymentIsSandbox || !useSandbox)
+        {
+            var loggedTestMode = System.Text.Json.JsonSerializer.Serialize(
+                notificationTestMode.Length <= 32 ? notificationTestMode : notificationTestMode[..32] + "[truncated]");
+            throw new InvalidOperationException(
+                $"Tpay notification context mismatch. PaymentId={paymentId}; MerchantIdMatches={merchantIdMatches}; " +
+                $"ConfiguredSandbox={useSandbox}; PaymentIsSandbox={paymentIsSandbox}; TestModeIsValid={testModeIsValid}; " +
+                $"NotificationTestMode={loggedTestMode}; NotificationTestModeLength={notificationTestMode.Length}.");
+        }
     }
 
     private StudioCRM.Application.Settings.TpayAccountSettings RequireTpayAccount(string key)

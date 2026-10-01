@@ -54,12 +54,13 @@ public partial class TpayConnectionService : ITpayApiClient
                 return RejectSignature("invalid detached JWS format");
             using var header = JsonDocument.Parse(DecodeBase64Url(parts[0]));
             var data = header.RootElement;
+            var expectedHost = options.Value.UseSandbox ? "secure.sandbox.tpay.com" : "secure.tpay.com";
             if (data.GetProperty("alg").GetString() != "RS256" || data.TryGetProperty("crit", out _) ||
                 !Uri.TryCreate(data.GetProperty("x5u").GetString(), UriKind.Absolute, out var url) ||
                 url.Scheme != "https" || !url.IsDefaultPort || url.UserInfo.Length != 0 ||
                 url.Query.Length != 0 || url.Fragment.Length != 0 ||
                 url.AbsolutePath != "/x509/notifications-jws.pem" ||
-                !(url.Host == "secure.tpay.com" || options.Value.UseSandbox && url.Host == "secure.sandbox.tpay.com"))
+                url.Host != expectedHost)
                 return RejectSignature("unsupported JWS header or disallowed certificate URL");
 
             var certificatePem = await GetCertificatePemAsync(url.AbsoluteUri, ct);
