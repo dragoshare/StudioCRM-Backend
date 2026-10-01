@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using StudioCRM.Api.Filters;
 using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Api.Controllers;
@@ -27,6 +28,7 @@ public class TpayPaymentsController(ITpayPaymentService payments, ILogger<TpayPa
     [AllowAnonymous]
     [HttpPost("notifications")]
     [RequestSizeLimit(65536)]
+    [DisableFormValueModelBinding]
     public async Task<IActionResult> Notification(CancellationToken ct)
     {
         using var scope = logger.BeginScope(new Dictionary<string, object>
