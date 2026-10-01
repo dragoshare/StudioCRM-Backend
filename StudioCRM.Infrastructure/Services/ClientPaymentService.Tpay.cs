@@ -165,13 +165,19 @@ public partial class ClientPaymentService
             throw new InvalidOperationException("Payment provider mismatch.");
         var credentials = RequireTpayAccount(account.AccountKey ?? string.Empty);
         var merchantIdMatches = Field("id") == credentials.MerchantId;
-        var notificationIsSandbox = Field("test_mode") == "1";
+        var notificationTestMode = Field("test_mode");
+        var notificationIsSandbox = notificationTestMode == "1";
         var paymentIsSandbox = payment.ProviderStatus?.StartsWith("sandbox:", StringComparison.Ordinal) == true;
         if (!merchantIdMatches || !notificationIsSandbox || !paymentIsSandbox)
-            // Report every failed condition without exposing credentials or untrusted notification fields.
+        {
+            // Bound and JSON-escape this non-secret field to prevent multiline/log injection.
+            var loggedTestMode = System.Text.Json.JsonSerializer.Serialize(
+                notificationTestMode.Length <= 32 ? notificationTestMode : notificationTestMode[..32] + "[truncated]");
             throw new InvalidOperationException(
                 $"Tpay notification context mismatch. PaymentId={payment.Id}; " +
-                $"MerchantIdMatches={merchantIdMatches}; NotificationIsSandbox={notificationIsSandbox}; PaymentIsSandbox={paymentIsSandbox}.");
+                $"MerchantIdMatches={merchantIdMatches}; NotificationIsSandbox={notificationIsSandbox}; " +
+                $"PaymentIsSandbox={paymentIsSandbox}; NotificationTestMode={loggedTestMode}; NotificationTestModeLength={notificationTestMode.Length}.");
+        }
         var title = Field("tr_id");
         if (string.IsNullOrWhiteSpace(title) || payment.ExternalPaymentId is not null && payment.ExternalPaymentId != title)
             throw new InvalidOperationException("Transaction title mismatch.");
