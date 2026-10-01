@@ -22,6 +22,7 @@ using StudioCRM.Application.Interfaces.Storage;
 using System.Text.Json;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddScoped<IPlatformOrganizationService, StudioCRM.Infrastructure.Services.Branding.PlatformOrganizationService>();
 builder.Services.Configure<BrandingOptions>(builder.Configuration.GetSection("Branding"));
 builder.Services.AddScoped<IBrandingProfileContext, StudioCRM.Infrastructure.Services.Branding.BrandingProfileContext>();
 builder.Services.AddScoped<StudioCRM.Infrastructure.Services.Branding.BrandingAccess>();

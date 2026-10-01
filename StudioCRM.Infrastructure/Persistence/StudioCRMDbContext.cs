@@ -12,6 +12,7 @@ public class StudioCRMDbContext : DbContext
     {
     }
 
+    public DbSet<Organization> Organizations => Set<Organization>();
     public DbSet<OrganizationBrandingProfile> OrganizationBrandingProfiles => Set<OrganizationBrandingProfile>();
     public DbSet<OrganizationBrandingVersion> OrganizationBrandingVersions => Set<OrganizationBrandingVersion>();
     public DbSet<OrganizationBrandingAsset> OrganizationBrandingAssets => Set<OrganizationBrandingAsset>();
