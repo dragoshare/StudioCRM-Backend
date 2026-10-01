@@ -302,15 +302,13 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
-            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null)
-            .OrderByDescending(cp => cp.PurchaseDate).ThenByDescending(cp => cp.Id)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 
         if (activePackage is null) return null;
         var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, clientId, new[] { activePackage.Id });
-        var result = MapPackage(activePackage, nextSessionAt: nextSessions.TryGetValue(activePackage.Id, out var next) ? next : null);
-        await ClientPackageDeletion.DescribeAsync(_context, new[] { result });
-        return result;
+        return MapPackage(activePackage, nextSessionAt: nextSessions.TryGetValue(activePackage.Id, out var next) ? next : null);
     }
 
     public async Task<List<ClientPaymentDto>> GetPendingConfirmationsAsync()
@@ -942,8 +940,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             throw new InvalidOperationException("Client not found.");
 
         var activePackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null)
-            .OrderByDescending(cp => cp.PurchaseDate).ThenByDescending(cp => cp.Id)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 
         var clientPackageEntities = await _context.ClientPackages
@@ -958,7 +956,6 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var clientPackages = clientPackageEntities
             .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim(), nextSessions.TryGetValue(cp.Id, out var next) ? next : null))
             .ToList();
-        await ClientPackageDeletion.DescribeAsync(_context, clientPackages);
 
         var paymentEntities = await _context.ClientPayments.IgnoreQueryFilters()
             .Include(p => p.Client)
@@ -991,19 +988,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
                 : Math.Max(0, activePackage.TotalPrice - activePackage.AmountPaid),
             ActivePackagePaymentStatus = activePackage?.PaymentStatus.ToString() ?? string.Empty,
             Packages = clientPackages,
-            OutstandingAmounts = BuildOutstandingAmounts(clientPackages),
             Payments = paymentEntities.Select(MapPayment).ToList()
         };
     }
-
-    internal static List<ClientOutstandingAmountDto> BuildOutstandingAmounts(IEnumerable<ClientPackageBillingDto> packages)
-        => packages.Where(p => p.AmountDue > 0)
-            .GroupBy(p => p.Currency)
-            .OrderBy(g => g.Key)
-            .Select(g => new ClientOutstandingAmountDto
-            {
-                Currency = g.Key, AmountDue = g.Sum(p => p.AmountDue), PackageCount = g.Count()
-            }).ToList();
 
     private async Task<ClientPackage?> ResolveClientPackageAsync(int clientId, int? clientPackageId)
     {

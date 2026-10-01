@@ -11,8 +11,6 @@ public class ClientPackageBillingDto
     public string PackageName { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }
-    public bool CanDelete { get; set; }
-    public string? DeleteBlockReason { get; set; }
     public string? ClosureDisposition { get; set; }
     public DateTime? ClosedAt { get; set; }
     public decimal RefundAmount { get; set; }

@@ -638,7 +638,7 @@ public partial class ClientService : IClientService
         var clientIds = clients.Select(c => c.Id).ToList();
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null)
+            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive)
             .OrderByDescending(cp => cp.PurchaseDate)
             .ThenByDescending(cp => cp.Id)
             .Select(cp => new

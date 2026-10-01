@@ -92,9 +92,7 @@ public partial class ClientService
         var total = await query.CountAsync();
         var packages = await query.OrderByDescending(x => x.PurchaseDate).ThenByDescending(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, clientId, packages.Select(x => x.Id));
-        var items = packages.Select(x => ClientPaymentService.MapPackage(x, nextSessionAt: nextSessions.TryGetValue(x.Id, out var next) ? next : null)).ToList();
-        await ClientPackageDeletion.DescribeAsync(_context, items);
-        return Page(items, total, page, pageSize);
+        return Page(packages.Select(x => ClientPaymentService.MapPackage(x, nextSessionAt: nextSessions.TryGetValue(x.Id, out var next) ? next : null)).ToList(), total, page, pageSize);
     }
 
     public async Task<PagedResultDto<ClientRefundDto>> GetRefundsAsync(int? clientId, int page = 1, int pageSize = 25)
