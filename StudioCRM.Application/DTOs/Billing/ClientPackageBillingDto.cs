@@ -12,6 +12,8 @@ public class ClientPackageBillingDto
 
     public bool IsActive { get; set; }
     public string? ClosureDisposition { get; set; }
+    public string? ClosureReason { get; set; }
+    public string Origin { get; set; } = "";
     public DateTime? ClosedAt { get; set; }
     public decimal RefundAmount { get; set; }
     public DateTime? RefundConfirmedAt { get; set; }

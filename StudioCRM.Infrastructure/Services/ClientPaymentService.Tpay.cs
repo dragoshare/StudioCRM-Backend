@@ -28,7 +28,7 @@ public partial class ClientPaymentService
             var package = await _context.ClientPackages.Include(x => x.Location).ThenInclude(x => x!.LegalEntity)
                 .SingleOrDefaultAsync(x => x.Id == clientPackageId && x.ClientId == client.Id, ct)
                 ?? throw new InvalidOperationException("Client package not found.");
-            if (package.ClosureDisposition != null) throw new InvalidOperationException("Package is closed.");
+            if (package.ClosureDisposition != null && package.ClosureDisposition != "ClosedWithDebt") throw new InvalidOperationException("Package is closed.");
             var location = package.Location;
             if (location is null || !location.IsActive || location.LegalEntity is null || !location.LegalEntity.IsActive)
                 throw new InvalidOperationException("Package location must have an active legal entity.");
@@ -252,7 +252,7 @@ public partial class ClientPaymentService
             return;
         await LockTpayPackageAsync(package.Id, default);
         await _context.Entry(package).ReloadAsync();
-        if (package.ClosureDisposition != null) throw new InvalidOperationException("Package is closed. Existing payments cannot be changed after closure.");
+        if (package.ClosureDisposition != null && package.ClosureDisposition != "ClosedWithDebt") throw new InvalidOperationException("Package is closed. Existing payments cannot be changed after closure.");
         if (await _context.ClientPayments.AnyAsync(x => x.ClientPackageId == package.Id &&
             x.Source == ClientPaymentSource.PaymentGateway && x.Status == ClientPaymentStatus.PendingConfirmation))
             throw new InvalidOperationException("A gateway payment is pending for this package. Reconcile it before entering another payment.");

@@ -5,6 +5,7 @@ public class ClientBillingSummaryDto
     public int ClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;
 
+    public decimal TotalAmountDue { get; set; }
     public decimal CurrentBalance { get; set; }
     public decimal ActivePackageTotalPrice { get; set; }
     public decimal ActivePackageAmountPaid { get; set; }

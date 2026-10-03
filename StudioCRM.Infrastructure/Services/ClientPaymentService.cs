@@ -302,8 +302,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
-            .Where(cp => cp.ClientId == clientId && cp.IsActive)
-            .OrderByDescending(cp => cp.PurchaseDate)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
         if (activePackage is null) return null;
@@ -455,6 +455,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             throw new InvalidOperationException("Payment not found.");
 
         await EnsureStaffAccessToClientAsync(payment.ClientId);
+
+        if (payment.ClientPackage?.ClosureDisposition != null)
+            throw new InvalidOperationException("Closed package payments require reconciliation before reversal.");
 
         if (payment.Source == ClientPaymentSource.PaymentGateway)
             throw new InvalidOperationException("Gateway payments must be confirmed by the provider.");
@@ -627,7 +630,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (payment.Source == ClientPaymentSource.PaymentGateway)
             throw new InvalidOperationException("Tpay refunds require provider reconciliation; automatic refunds are not enabled.");
 
-        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         await PrepareManualPackagePaymentAsync(payment.ClientPackage);
         await _context.Entry(payment).ReloadAsync();
 
@@ -637,6 +640,14 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (payment.ReceiptStatus == ReceiptStatus.Issued)
             throw new InvalidOperationException("Cancel the receipt before reversing this payment.");
 
+        if (payment.BalanceCreditAmount > 0)
+        {
+            var availableBalance = await _context.ClientBalanceTransactions
+                .Where(t => t.ClientId == payment.ClientId && t.Type != BalanceTransactionType.PaymentCredit && t.Type != BalanceTransactionType.PaymentReversal)
+                .SumAsync(t => t.Amount);
+            if (availableBalance < payment.BalanceCreditAmount)
+                throw new InvalidOperationException("Payment overpayment has already been used. Reconcile the receiving package before reversal.");
+        }
         await ReverseConfirmedPaymentAsync(payment, request);
 
         await _context.SaveChangesAsync();
@@ -879,7 +890,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var hasActivePackage = await _context.ClientPackages
             .AnyAsync(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && cp.ExpectedBillingType != SessionBillingType.Group);
 
-        if (hasActivePackage && clientPackage.ActivationMode != ClientPackageActivationMode.Immediately)
+        if (hasActivePackage)
             return;
 
         var activePackages = await _context.ClientPackages
@@ -940,8 +951,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             throw new InvalidOperationException("Client not found.");
 
         var activePackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
-            .OrderByDescending(cp => cp.PurchaseDate)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
         var clientPackageEntities = await _context.ClientPackages
@@ -979,6 +990,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             ClientId = client.Id,
             ClientName = $"{client.FirstName} {client.LastName}".Trim(),
             CurrentBalance = currentBalance,
+            TotalAmountDue = clientPackages.Sum(p => p.AmountDue),
             ActiveClientPackageId = activePackage?.Id,
             ActivePackageName = activePackage?.Name,
             ActivePackageTotalPrice = activePackage?.TotalPrice ?? 0,
@@ -1009,8 +1021,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         }
 
         return await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive)
-            .OrderByDescending(cp => cp.PurchaseDate)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
     }
 
@@ -1278,6 +1290,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             PackageName = clientPackage.Name,
             IsActive = clientPackage.IsActive,
             ClosureDisposition = clientPackage.ClosureDisposition,
+            ClosureReason = clientPackage.ClosureReason,
+            Origin = clientPackage.RenewalSource,
             ClosedAt = clientPackage.ClosedAt,
             RefundAmount = clientPackage.RefundAmount,
             RefundConfirmedAt = clientPackage.RefundConfirmedAt,

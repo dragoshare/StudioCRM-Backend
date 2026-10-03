@@ -19,6 +19,7 @@ public class TrainerSettlementItemDto
 
     public decimal Hours { get; set; }
     public decimal Rate { get; set; }
+    public string RateType { get; set; } = "Hourly";
     public decimal Amount { get; set; }
 
     public int ParticipantsCount { get; set; }

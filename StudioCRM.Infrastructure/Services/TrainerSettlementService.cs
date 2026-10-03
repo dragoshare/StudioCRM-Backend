@@ -330,7 +330,7 @@ public class TrainerSettlementService : ITrainerSettlementService
         return result;
     }
 
-    private static List<TrainerSettlementItemDto> BuildSettlementItems(
+    internal static List<TrainerSettlementItemDto> BuildSettlementItems(
         List<Session> sessions,
         List<TrainerRate> rates,
         Dictionary<int, TrainerContract> contractCoverage)
@@ -341,8 +341,9 @@ public class TrainerSettlementService : ITrainerSettlementService
         {
             var sessionType = ResolveSettlementSessionType(session);
             var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
-            var rate = ResolveHourlyRate(rates, session.StartAt);
-            var amount = hours * rate;
+            var groupRate = TrainerGroupRate.Resolve(session, sessionType, rates);
+            var rate = groupRate ?? ResolveHourlyRate(rates, session.StartAt);
+            var amount = groupRate ?? hours * rate;
             var isCovered = contractCoverage.TryGetValue(session.LocationId, out var contract);
 
             items.Add(new TrainerSettlementItemDto
@@ -359,6 +360,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 ContractNumber = contract?.ContractNumber,
                 Hours = hours,
                 Rate = rate,
+                RateType = groupRate.HasValue ? "PerSession" : "Hourly",
                 Amount = amount,
                 ParticipantsCount = session.ActualParticipantsCount ?? session.Participants.Count
             });
