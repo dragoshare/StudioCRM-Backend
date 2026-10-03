@@ -2,6 +2,11 @@
 
 public class OutlookSettings
 {
+    public string CalendarEmailDomain { get; set; } = string.Empty;
+
+    // Enable only after the receiving domain has been verified.
+    public bool UseCalendarEmails { get; set; }
+
     public string ClientId { get; set; } = string.Empty;
 
     public string ClientSecret { get; set; } = string.Empty;

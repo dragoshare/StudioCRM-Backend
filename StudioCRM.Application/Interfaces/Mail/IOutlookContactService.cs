@@ -3,4 +3,5 @@
 public interface IOutlookContactService
 {
     Task SyncClientsAsync();
+    Task<int> PrepareCalendarAddressesAsync();
 }

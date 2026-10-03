@@ -87,7 +87,7 @@ public class OutlookEventMapperService
         {
             var client = await _context.Clients
                 .FirstOrDefaultAsync(c =>
-                    c.Email.ToLower() == email &&
+                    ((c.CalendarEmail != null && c.CalendarEmail.ToLower() == email) || c.Email.ToLower() == email) &&
                     !c.IsDeleted);
 
             if (client == null)

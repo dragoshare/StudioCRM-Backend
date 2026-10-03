@@ -1,5 +1,8 @@
 ﻿using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
+using Microsoft.Extensions.Options;
+using StudioCRM.Application.Settings;
+using StudioCRM.Infrastructure.Services.Calendar;
 
 namespace StudioCRM.Infrastructure.Persistence;
 
@@ -7,9 +10,12 @@ public class StudioCRMDbContext : DbContext
 {
     private const string WindowsStudioTimeZone = "Central European Standard Time";
 
-    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options)
+    private readonly OutlookSettings _outlookSettings;
+
+    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options, IOptions<OutlookSettings>? outlookSettings = null)
         : base(options)
     {
+        _outlookSettings = outlookSettings?.Value ?? new OutlookSettings();
     }
 
     public DbSet<User> Users => Set<User>();
@@ -60,12 +66,14 @@ public class StudioCRMDbContext : DbContext
 
     public override int SaveChanges()
     {
+        PrepareCalendarAddresses();
         NormalizeDateTimesToUtc();
         return base.SaveChanges();
     }
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        PrepareCalendarAddresses();
         NormalizeDateTimesToUtc();
         return base.SaveChangesAsync(cancellationToken);
     }
@@ -74,13 +82,45 @@ public class StudioCRMDbContext : DbContext
         bool acceptAllChangesOnSuccess,
         CancellationToken cancellationToken = default)
     {
+        PrepareCalendarAddresses();
         NormalizeDateTimesToUtc();
         return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
+    }
+
+    private void PrepareCalendarAddresses()
+    {
+        if (string.IsNullOrWhiteSpace(_outlookSettings.CalendarEmailDomain)) return;
+        foreach (var entry in ChangeTracker.Entries()
+                     .Where(e => e.State is EntityState.Added or EntityState.Modified))
+        {
+            var email = entry.Entity switch
+            {
+                Client client => client.Email,
+                User user => user.Email,
+                Invitation invitation => invitation.Email,
+                ClientEmailChangeRequest change => change.RequestedEmail,
+                _ => null
+            };
+            if (ClientCalendarAddress.IsTechnical(email, _outlookSettings.CalendarEmailDomain))
+                throw new InvalidOperationException("A technical calendar address cannot be used for login, contact or invitations.");
+        }
+        foreach (var entry in ChangeTracker.Entries<Client>()
+                     .Where(e => e.State is EntityState.Added or EntityState.Modified))
+            ClientCalendarAddress.Ensure(entry.Entity, _outlookSettings.CalendarEmailDomain);
+    }
+
+    public override int SaveChanges(bool acceptAllChangesOnSuccess)
+    {
+        PrepareCalendarAddresses();
+        NormalizeDateTimesToUtc();
+        return base.SaveChanges(acceptAllChangesOnSuccess);
     }
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        modelBuilder.Entity<Client>().Property(c => c.CalendarEmail).HasMaxLength(320);
+        modelBuilder.Entity<Client>().HasIndex(c => c.CalendarEmail).IsUnique();
         modelBuilder.Entity<ClientPackage>().Property(p => p.RefundAmount).HasPrecision(18, 2);
         modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureDisposition).HasMaxLength(30);
         modelBuilder.Entity<ClientPackage>().Property(p => p.ClosureReason).HasMaxLength(1000);
