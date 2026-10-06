@@ -6,16 +6,17 @@ using StudioCRM.Infrastructure.Services.Calendar;
 
 namespace StudioCRM.Infrastructure.Persistence;
 
-public class StudioCRMDbContext : DbContext
+public partial class StudioCRMDbContext : DbContext
 {
     private const string WindowsStudioTimeZone = "Central European Standard Time";
 
     private readonly OutlookSettings _outlookSettings;
 
-    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options, IOptions<OutlookSettings>? outlookSettings = null)
+    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options, IOptions<OutlookSettings>? outlookSettings = null, StudioCRM.Application.Interfaces.ICurrentUserService? currentUser = null)
         : base(options)
     {
         _outlookSettings = outlookSettings?.Value ?? new OutlookSettings();
+        _activityCurrentUser = currentUser;
     }
 
     public DbSet<User> Users => Set<User>();
@@ -64,28 +65,10 @@ public class StudioCRMDbContext : DbContext
     public DbSet<MilestoneDefinition> MilestoneDefinitions => Set<MilestoneDefinition>();
     public DbSet<ClientMilestone> ClientMilestones => Set<ClientMilestone>();
 
-    public override int SaveChanges()
-    {
-        PrepareCalendarAddresses();
-        NormalizeDateTimesToUtc();
-        return base.SaveChanges();
-    }
+    public override int SaveChanges() => SaveChanges(true);
 
     public override Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
-    {
-        PrepareCalendarAddresses();
-        NormalizeDateTimesToUtc();
-        return base.SaveChangesAsync(cancellationToken);
-    }
-
-    public override Task<int> SaveChangesAsync(
-        bool acceptAllChangesOnSuccess,
-        CancellationToken cancellationToken = default)
-    {
-        PrepareCalendarAddresses();
-        NormalizeDateTimesToUtc();
-        return base.SaveChangesAsync(acceptAllChangesOnSuccess, cancellationToken);
-    }
+        => SaveChangesAsync(true, cancellationToken);
 
     private void PrepareCalendarAddresses()
     {
@@ -109,16 +92,10 @@ public class StudioCRMDbContext : DbContext
             ClientCalendarAddress.Ensure(entry.Entity, _outlookSettings.CalendarEmailDomain);
     }
 
-    public override int SaveChanges(bool acceptAllChangesOnSuccess)
-    {
-        PrepareCalendarAddresses();
-        NormalizeDateTimesToUtc();
-        return base.SaveChanges(acceptAllChangesOnSuccess);
-    }
-
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+        ConfigureActivityLog(modelBuilder);
         modelBuilder.Entity<Client>().Property(c => c.CalendarEmail).HasMaxLength(320);
         modelBuilder.Entity<Client>().HasIndex(c => c.CalendarEmail).IsUnique();
         modelBuilder.Entity<ClientPackage>().Property(p => p.RefundAmount).HasPrecision(18, 2);

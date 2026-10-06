@@ -25,6 +25,8 @@ public class ClientPackagePresentationTests
         var secondGroup = Package(SessionBillingType.Group);
         var individual = Package(SessionBillingType.OneToOne);
         var semi = Package(SessionBillingType.ThreeToOne);
+        // The database permits only one active non-group package per client.
+        semi.IsActive = false;
         var next = DateTime.UtcNow.Date.AddDays(5);
         void Book(ClientPackage package, DateTime start, string status = "Planned", string attendance = "Planned", bool deleted = false)
         {
@@ -66,8 +68,9 @@ public class ClientPackagePresentationTests
         db.ChangeTracker.Clear();
         var active = await billing.GetActivePackageAsync(client.Id);
         Assert.NotNull(active);
-        Assert.Equal(group.Id, active.ClientPackageId);
-        Assert.Equal(next, active.NextSessionAt);
+        // A newer group package must not replace the active individual subscription.
+        Assert.Equal(individual.Id, active.ClientPackageId);
+        Assert.Null(active.NextSessionAt);
         Assert.NotNull(await clients.GetByIdAsync(client.Id));
         Assert.Equal(4, (await clients.GetPackageHistoryAsync(client.Id)).TotalCount);
     }

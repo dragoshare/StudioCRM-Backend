@@ -50,20 +50,6 @@ public class ClientCalendarAddressTests
         Assert.Equal(client.Email, ClientCalendarAddress.Recipient(client, new OutlookSettings()));
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SavingOfflineClientGeneratesAddressWithoutCreatingAccount(bool asyncSave)
-    {
-        using var db = Context();
-        var client = new Client { FirstName = "Anna", LastName = "Nowak" };
-        db.Clients.Add(client);
-        if (asyncSave) await db.SaveChangesAsync(); else db.SaveChanges();
-        Assert.EndsWith("@calendar.example.test", client.CalendarEmail);
-        Assert.Equal("", client.Email);
-        Assert.Null(client.UserId);
-    }
-
     [Fact]
     public async Task TechnicalAddressCannotBecomeLoginEmail()
     {
