@@ -59,6 +59,10 @@ public class PublicGroupPurchaseDto
 
 public class PublicGroupClassDto
 {
+    public string? EventRules { get; set; }
+    public StudioCRM.Application.DTOs.Sessions.BookingRulesDto BookingRules { get; set; } = new();
+    public bool IsGroupSession { get; set; }
+
     public int Id { get; set; }
 
     public string Title { get; set; } = string.Empty;

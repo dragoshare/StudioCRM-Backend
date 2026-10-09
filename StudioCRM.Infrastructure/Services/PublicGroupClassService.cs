@@ -346,8 +346,7 @@ public class PublicGroupClassService : IPublicGroupClassService
         if (session is null)
             throw new InvalidOperationException("Public group class does not exist.");
 
-        if (session.StartAt <= DateTime.UtcNow)
-            throw new InvalidOperationException("Past group class cannot be booked.");
+        GroupBookingPolicy.EnsureRegistrationOpen(session, DateTime.UtcNow);
 
         await EnsureEmailVerifiedAsync(client);
         await LegalConsentManager.EnsureAcceptedAsync(
@@ -472,6 +471,7 @@ public class PublicGroupClassService : IPublicGroupClassService
         if (participant.Session.Status != "Planned")
             throw new InvalidOperationException("Only planned group class booking can be cancelled.");
 
+        GroupBookingPolicy.EnsureCancellationOpen(participant.Session, DateTime.UtcNow);
         _context.SessionParticipants.Remove(participant);
         participant.Session.UpdatedAt = DateTime.UtcNow;
 
@@ -701,6 +701,9 @@ public class PublicGroupClassService : IPublicGroupClassService
             Id = session.Id,
             Title = session.Title,
             Note = session.Note,
+            EventRules = session.EventRules,
+            BookingRules = GroupBookingPolicy.Describe(session),
+            IsGroupSession = true,
             StartAt = ToStudioDisplayDateTime(session.StartAt),
             EndAt = ToStudioDisplayDateTime(session.EndAt),
             TrainerId = session.TrainerId,

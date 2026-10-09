@@ -12,7 +12,7 @@ internal sealed class ActivityLogCapture
     // Explicit allowlist: new properties, credentials and integration payloads are not logged implicitly.
     internal static readonly IReadOnlyDictionary<string, string[]> Fields = new Dictionary<string, string[]>
     {
-        [nameof(Session)] = Split("Title Note StartAt EndAt TrainerId LocationId StudioRoom Status IsPubliclyBookable PublicCapacity PlannedSessionType ActualSessionType ActualParticipantsCount CompletedAt IsDeleted IsRecurring RecurringGroupId"),
+        [nameof(Session)] = Split("Title Note StartAt EndAt TrainerId LocationId StudioRoom Status IsPubliclyBookable PublicCapacity EventRules RegistrationClosesBeforeMinutes CancellationClosesBeforeMinutes PlannedSessionType ActualSessionType ActualParticipantsCount CompletedAt IsDeleted IsRecurring RecurringGroupId"),
         [nameof(SessionParticipant)] = Split("SessionId ClientId ClientPackageId PackageId AttendanceStatus IsCountedFromPackage CountsAgainstPackage SessionsCharged PlannedBillingType ActualBillingType ExpectedUnitPrice ActualUnitPrice BalanceDifference Note"),
         [nameof(Client)] = Split("FirstName LastName Email CalendarEmail PhoneNumber LocationId TrainerId UserId Status IsDeleted PortalAccessBlocked ActivePackageId NextPackageId SubscriptionAutoRenewEnabled BillingStatus TrainingStartDate Goal Notes Source"),
         [nameof(Trainer)] = Split("UserId Bio Phone Status TeamJoinedDate OutlookCategoryName OutlookCategoryColor IsDeleted"),

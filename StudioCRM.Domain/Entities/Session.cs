@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Domain.Entities;
+namespace StudioCRM.Domain.Entities;
 
 public class Session
 {
@@ -7,6 +7,10 @@ public class Session
     public string Title { get; set; } = string.Empty;
 
     public string? Note { get; set; }
+
+    public string? EventRules { get; set; }
+    public int RegistrationClosesBeforeMinutes { get; set; }
+    public int CancellationClosesBeforeMinutes { get; set; }
 
     public DateTime StartAt { get; set; }
 

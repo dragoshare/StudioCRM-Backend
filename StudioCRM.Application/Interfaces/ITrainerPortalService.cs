@@ -11,6 +11,7 @@ public interface ITrainerPortalService
     Task<TrainerPortalMeDto?> GetMeAsync();
     Task<TrainerPortalMeDto?> UpdateMeAsync(UpdateTrainerPortalProfileRequest request);
     Task<List<TrainerPortalClientDto>> GetClientsAsync();
+    Task<TrainerParticipantProfileDto?> GetParticipantProfileAsync(int sessionId, int clientId);
     Task<ClientDto?> GetClientAsync(int clientId);
     Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId);
     Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request);

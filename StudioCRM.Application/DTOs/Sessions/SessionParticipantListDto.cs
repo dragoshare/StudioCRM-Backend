@@ -1,7 +1,9 @@
-﻿namespace StudioCRM.Application.DTOs.Sessions;
+namespace StudioCRM.Application.DTOs.Sessions;
 
 public class SessionParticipantListDto
 {
+    public string? TrainerProfileUrl { get; set; }
+
     public int Id { get; set; }
 
     public int ClientId { get; set; }

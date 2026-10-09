@@ -4,6 +4,13 @@ namespace StudioCRM.Application.DTOs.Sessions;
 
 public class SessionDto
 {
+    public string? EventRules { get; set; }
+    public StudioCRM.Application.DTOs.Sessions.BookingRulesDto BookingRules { get; set; } = new();
+    public bool IsGroupSession { get; set; }
+    public int? Capacity { get; set; }
+    public int BookedSeats { get; set; }
+    public int? AvailableSeats { get; set; }
+    public bool IsFullyBooked { get; set; }
     public int Id { get; set; }
 
     public string Title { get; set; } = string.Empty;
