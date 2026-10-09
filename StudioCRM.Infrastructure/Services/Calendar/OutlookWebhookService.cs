@@ -493,7 +493,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         var clients = await _context.Clients
             .Where(c =>
                 !c.IsDeleted &&
-                attendeeEmails.Contains(c.Email.ToLower()))
+                ((c.CalendarEmail != null && attendeeEmails.Contains(c.CalendarEmail.ToLower())) ||
+                 attendeeEmails.Contains(c.Email.ToLower())))
             .ToListAsync();
 
         var desiredClientIds = clients

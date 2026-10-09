@@ -1,10 +1,16 @@
-﻿namespace StudioCRM.Application.DTOs.Sessions;
+namespace StudioCRM.Application.DTOs.Sessions;
 
 public class UpdateSessionDto
 {
     public string Title { get; set; } = string.Empty;
 
     public string? Note { get; set; }
+
+    public string? EventRules { get; set; }
+    [System.ComponentModel.DataAnnotations.Range(0, 525600)]
+    public int? RegistrationClosesBeforeMinutes { get; set; }
+    [System.ComponentModel.DataAnnotations.Range(0, 525600)]
+    public int? CancellationClosesBeforeMinutes { get; set; }
 
     public DateTime StartAt { get; set; }
 

@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -292,7 +292,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var categoryColors = ResolveGraphEventCategoryColors(session, categories);
         var attendeesJson = JsonSerializer.Serialize(
             session.Participants
-                .Select(participant => participant.Client.Email.Trim().ToLowerInvariant())
+                .Select(participant => ClientCalendarAddress.Recipient(participant.Client, _settings))
                 .Where(email => !string.IsNullOrWhiteSpace(email))
                 .Distinct()
                 .ToList());
@@ -428,6 +428,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task<string> CreateEventAsync(Session session, string accessToken)
     {
+        await PrepareRecipientsAsync(session);
         var categories = ResolveGraphEventCategories(session);
         await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
         var payload = BuildGraphEventPayload(session, categories);
@@ -458,6 +459,29 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task<bool> UpdateEventAsync(Session session, string accessToken, string eventId)
     {
+        await PrepareRecipientsAsync(session);
+        if (_settings.UseCalendarEmails)
+        {
+            // Replacing real attendees can send cancellation emails to their old addresses.
+            // Require a separate, deliberate migration of legacy events instead.
+            using var read = new HttpRequestMessage(HttpMethod.Get,
+                $"https://graph.microsoft.com/v1.0/me/events/{eventId}?$select=attendees");
+            read.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+            using var existing = await _httpClient.SendAsync(read);
+            if (existing.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Gone)
+                return false;
+            existing.EnsureSuccessStatusCode();
+            using var document = JsonDocument.Parse(await existing.Content.ReadAsStringAsync());
+            var addresses = document.RootElement.GetProperty("attendees").EnumerateArray()
+                .Where(a => a.GetProperty("type").GetString() != "resource")
+                .Select(a => a.GetProperty("emailAddress").GetProperty("address").GetString()!.ToLowerInvariant())
+                .ToList();
+            var known = await _context.Clients.IgnoreQueryFilters()
+                .Where(c => c.CalendarEmail != null && addresses.Contains(c.CalendarEmail.ToLower()))
+                .Select(c => c.CalendarEmail!).ToListAsync();
+            if (addresses.Any(a => !known.Contains(a, StringComparer.OrdinalIgnoreCase)))
+                throw new InvalidOperationException("Legacy Outlook event has non-technical attendees. Migrate it explicitly before syncing; replacing attendees may notify real clients.");
+        }
         var categories = ResolveGraphEventCategories(session);
         await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
         var payload = BuildGraphEventPayload(session, categories);
@@ -492,6 +516,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         string accessToken)
     {
         var first = sessions[0];
+        foreach (var session in sessions) await PrepareRecipientsAsync(session);
         var categories = ResolveGraphEventCategories(first);
         await EnsureTrainerMasterCategoryAsync(first, accessToken, categories);
         var payload = BuildGraphEventPayload(first, categories);
@@ -699,17 +724,25 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         return TimeZoneInfo.Utc;
     }
 
-    private static List<object> BuildAttendees(Session session)
+    private async Task PrepareRecipientsAsync(Session session)
+    {
+        if (!_settings.UseCalendarEmails) return;
+        foreach (var participant in session.Participants)
+            ClientCalendarAddress.Ensure(participant.Client, _settings.CalendarEmailDomain);
+        await _context.SaveChangesAsync();
+    }
+
+    private List<object> BuildAttendees(Session session)
     {
         var attendees = session.Participants
-            .Where(p => !string.IsNullOrWhiteSpace(p.Client.Email))
+            .Where(p => !string.IsNullOrWhiteSpace(ClientCalendarAddress.Recipient(p.Client, _settings)))
             .OrderBy(p => p.Client.FirstName)
             .ThenBy(p => p.Client.LastName)
             .Select(p => new
             {
                 emailAddress = new
                 {
-                    address = p.Client.Email,
+                    address = ClientCalendarAddress.Recipient(p.Client, _settings),
                     name = $"{p.Client.FirstName} {p.Client.LastName}".Trim()
                 },
                 type = "required"
@@ -810,7 +843,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         externalEvent.LocationEmail = session.Location.CalendarEmail;
         externalEvent.AttendeesJson = JsonSerializer.Serialize(
             session.Participants
-                .Select(p => p.Client.Email.Trim().ToLowerInvariant())
+                .Select(p => ClientCalendarAddress.Recipient(p.Client, _settings))
                 .Where(e => !string.IsNullOrWhiteSpace(e))
                 .Distinct()
                 .ToList());

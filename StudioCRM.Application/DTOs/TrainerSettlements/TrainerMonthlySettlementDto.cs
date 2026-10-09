@@ -3,6 +3,7 @@
 public class TrainerMonthlySettlementDto
 {
     public int TrainerId { get; set; }
+    public int? LocationId { get; set; }
 
     public string TrainerFullName { get; set; } = string.Empty;
 

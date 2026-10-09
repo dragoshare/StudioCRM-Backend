@@ -105,6 +105,25 @@ public class TrainerPortalService : ITrainerPortalService
             .ToListAsync();
     }
 
+    public async Task<TrainerParticipantProfileDto?> GetParticipantProfileAsync(int sessionId, int clientId)
+    {
+        var trainerId = await GetCurrentTrainerIdAsync();
+        if (!_currentUser.IsOwner && (!trainerId.HasValue ||
+            !await TrainerCanViewSessionAsync(trainerId.Value, sessionId)))
+            return null;
+
+        return await _context.SessionParticipants
+            .Where(p => p.SessionId == sessionId && p.ClientId == clientId)
+            .Select(p => new TrainerParticipantProfileDto
+            {
+                ClientId = p.ClientId,
+                FullName = p.Client.FirstName + " " + p.Client.LastName,
+                AttendanceStatus = p.AttendanceStatus,
+                SessionId = p.SessionId,
+                LocationId = p.Session.LocationId
+            }).FirstOrDefaultAsync();
+    }
+
     public Task<ClientDto?> GetClientAsync(int clientId) => _clientService.GetByIdAsync(clientId);
 
     public Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId) => _clientService.GetWorkspaceAsync(clientId);
@@ -138,20 +157,7 @@ public class TrainerPortalService : ITrainerPortalService
             .ToListAsync();
 
         return sessions
-            .Select(s => new TrainerPortalSessionDto
-            {
-                SessionId = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = ToStudioDisplayDateTime(s.StartAt),
-                EndAt = ToStudioDisplayDateTime(s.EndAt),
-                TrainerId = s.TrainerId,
-                TrainerFullName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
-                CanEdit = _currentUser.IsOwner || s.TrainerId == trainerId.Value,
-                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
-                LocationName = s.Location.Name,
-                Status = s.Status
-            })
+            .Select(s => MapTrainerSession(s, s.Trainer.User.FirstName + " " + s.Trainer.User.LastName, _currentUser.IsOwner || s.TrainerId == trainerId.Value))
             .ToList();
     }
 
@@ -188,7 +194,7 @@ public class TrainerPortalService : ITrainerPortalService
         var trainerId = await GetCurrentTrainerIdAsync()
             ?? throw new InvalidOperationException("Trainer not found.");
 
-        await ValidateTrainerCanManageSessionAsync(trainerId, request.LocationId, request.Participants);
+        await ValidateTrainerCanManageSessionAsync(trainerId, request.LocationId, request.Participants, request.IsPubliclyBookable ? "Group" : request.PlannedSessionType);
 
         request.TrainerId = trainerId;
         return await _sessionService.CreateAsync(request);
@@ -206,7 +212,7 @@ public class TrainerPortalService : ITrainerPortalService
         if (!ownsSession)
             return null;
 
-        await ValidateTrainerCanManageSessionAsync(trainerId.Value, request.LocationId, request.Participants);
+        await ValidateTrainerCanManageSessionAsync(trainerId.Value, request.LocationId, request.Participants, request.IsPubliclyBookable ? "Group" : request.PlannedSessionType);
 
         request.TrainerId = trainerId.Value;
         return await _sessionService.UpdateAsync(sessionId, request);
@@ -247,20 +253,7 @@ public class TrainerPortalService : ITrainerPortalService
             .ToListAsync();
 
         var todaySessions = todaySessionsSource
-            .Select(s => new TrainerPortalSessionDto
-            {
-                SessionId = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = ToStudioDisplayDateTime(s.StartAt),
-                EndAt = ToStudioDisplayDateTime(s.EndAt),
-                TrainerId = s.TrainerId,
-                TrainerFullName = me.FullName,
-                CanEdit = true,
-                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
-                LocationName = s.Location.Name,
-                Status = s.Status
-            })
+            .Select(s => MapTrainerSession(s, me.FullName, true))
             .ToList();
 
         var upcomingSessionsSource = await sessionsQuery
@@ -270,20 +263,7 @@ public class TrainerPortalService : ITrainerPortalService
             .ToListAsync();
 
         var upcomingSessions = upcomingSessionsSource
-            .Select(s => new TrainerPortalSessionDto
-            {
-                SessionId = s.Id,
-                Title = s.Title,
-                Note = s.Note,
-                StartAt = ToStudioDisplayDateTime(s.StartAt),
-                EndAt = ToStudioDisplayDateTime(s.EndAt),
-                TrainerId = s.TrainerId,
-                TrainerFullName = me.FullName,
-                CanEdit = true,
-                ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
-                LocationName = s.Location.Name,
-                Status = s.Status
-            })
+            .Select(s => MapTrainerSession(s, me.FullName, true))
             .ToList();
 
         var recentClients = await clientsQuery
@@ -335,6 +315,42 @@ public class TrainerPortalService : ITrainerPortalService
         return await _settlementService.GetMonthlySettlementAsync(trainerId, year, month);
     }
 
+    private static TrainerPortalSessionDto MapTrainerSession(StudioCRM.Domain.Entities.Session s, string trainerFullName, bool canEdit)
+    {
+        return new TrainerPortalSessionDto
+        {
+            EventRules = s.EventRules,
+            BookingRules = GroupBookingPolicy.Describe(s),
+            IsGroupSession = GroupBookingPolicy.IsGroup(s),
+            Capacity = s.PublicCapacity,
+            BookedSeats = GroupBookingPolicy.BookedSeats(s),
+            AvailableSeats = GroupBookingPolicy.AvailableSeats(s),
+            IsFullyBooked = GroupBookingPolicy.IsFullyBooked(s),
+            LocationId = s.LocationId,
+            PlannedSessionType = s.PlannedSessionType,
+            ActualSessionType = s.ActualSessionType,
+            IsPubliclyBookable = s.IsPubliclyBookable,
+            Participants = s.Participants.Select(p => new TrainerSessionParticipantDto
+            {
+                ClientId = p.ClientId,
+                ClientFullName = p.Client.FirstName + " " + p.Client.LastName,
+                AttendanceStatus = p.AttendanceStatus,
+                ProfileUrl = $"/api/trainer-portal/sessions/{s.Id}/participants/{p.ClientId}/profile"
+            }).ToList(),
+            SessionId = s.Id,
+            Title = s.Title,
+            Note = s.Note,
+            StartAt = ToStudioDisplayDateTime(s.StartAt),
+            EndAt = ToStudioDisplayDateTime(s.EndAt),
+            TrainerId = s.TrainerId,
+            TrainerFullName = trainerFullName,
+            CanEdit = canEdit,
+            ClientFullName = string.Join(" + ", s.Participants.Select(p => p.Client.FirstName + " " + p.Client.LastName)),
+            LocationName = s.Location.Name,
+            Status = s.Status
+        };
+    }
+
     private IQueryable<StudioCRM.Domain.Entities.Trainer> GetCurrentTrainerQuery()
     {
         if (!_currentUser.UserId.HasValue)
@@ -361,7 +377,8 @@ public class TrainerPortalService : ITrainerPortalService
     private async Task ValidateTrainerCanManageSessionAsync(
         int trainerId,
         int locationId,
-        IReadOnlyCollection<CreateSessionParticipantDto>? participants)
+        IReadOnlyCollection<CreateSessionParticipantDto>? participants,
+        string? plannedSessionType)
     {
         var hasLocationAccess = await _context.TrainerLocations
             .AnyAsync(tl => tl.TrainerId == trainerId && tl.LocationId == locationId);
@@ -377,13 +394,16 @@ public class TrainerPortalService : ITrainerPortalService
             .Distinct()
             .ToList();
 
+        var isGroup = string.Equals(plannedSessionType, "Group", StringComparison.OrdinalIgnoreCase);
         var ownedClientIds = await _context.Clients
-            .Where(c => c.TrainerId == trainerId && clientIds.Contains(c.Id))
+            .Where(c => clientIds.Contains(c.Id) && (c.TrainerId == trainerId ||
+                (isGroup && _context.ClientLocationMemberships.Any(m =>
+                    m.ClientId == c.Id && m.LocationId == locationId && m.GroupAccessEnabled))))
             .Select(c => c.Id)
             .ToListAsync();
 
         if (ownedClientIds.Count != clientIds.Count)
-            throw new InvalidOperationException("Trainer can only add their own clients to sessions.");
+            throw new InvalidOperationException("Client must be assigned to the trainer or have group access in the session location.");
     }
 
     private async Task<bool> TrainerCanViewSessionAsync(int trainerId, int sessionId)

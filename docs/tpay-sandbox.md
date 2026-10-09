@@ -86,7 +86,11 @@ Refresh package and billing queries after confirmation.
 
 Anonymous form-urlencoded endpoint requiring the Tpay `X-JWS-Signature` header.
 The frontend never calls it. Verifies certificate chain, RS256 body signature, merchant ID,
-checksum, transaction title, sandbox flag, amount and currency before recording payment.
+checksum, transaction title, payment environment, amount and currency before recording payment.
+`test_mode` is a transaction-mode flag, not an API environment selector: sandbox notifications
+can contain `0` or `1`. Both are accepted only with sandbox backend configuration and a stored
+`sandbox:` payment. The JWS certificate URL must match the configured environment exactly
+(`secure.sandbox.tpay.com` for sandbox); production signatures cannot confirm sandbox payments.
 Successful notifications receive plain-text `TRUE` only after database commit.
 Repeated/concurrent notifications do not create duplicate credits.
 Requests requiring review return a failure so Tpay can retry; monitor backend warnings.

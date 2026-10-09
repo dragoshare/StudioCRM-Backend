@@ -110,6 +110,13 @@ public class TrainerPortalController : ControllerBase
         return Ok(await _trainerPortalService.GetClientsAsync());
     }
 
+    [HttpGet("sessions/{sessionId:int}/participants/{clientId:int}/profile")]
+    public async Task<ActionResult<TrainerParticipantProfileDto>> GetParticipantProfile(int sessionId, int clientId)
+    {
+        var result = await _trainerPortalService.GetParticipantProfileAsync(sessionId, clientId);
+        return result is null ? NotFound() : Ok(result);
+    }
+
     [HttpGet("clients/{clientId:int}")]
     public async Task<ActionResult<ClientDto>> GetClient(int clientId)
     {

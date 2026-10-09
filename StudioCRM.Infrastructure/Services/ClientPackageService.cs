@@ -1,4 +1,4 @@
-﻿using StudioCRM.Application.DTOs.ClientPackages;
+using StudioCRM.Application.DTOs.ClientPackages;
 using StudioCRM.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Enums;
@@ -7,7 +7,7 @@ using StudioCRM.Application.Interfaces;
 
 namespace StudioCRM.Application.ClientPackages.Services;
 
-public class ClientPackageService : IClientPackageService
+public partial class ClientPackageService : IClientPackageService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -24,6 +24,14 @@ public class ClientPackageService : IClientPackageService
     }
 
     public async Task<int> CreateAsync(CreateClientPackageRequest request)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
+        var id = await CreateCoreAsync(request, false);
+        await transaction.CommitAsync();
+        return id;
+    }
+
+    private async Task<int> CreateCoreAsync(CreateClientPackageRequest request, bool importing)
     {
         var client = await _context.Clients
             .FirstOrDefaultAsync(c => c.Id == request.ClientId && !c.IsDeleted);
@@ -46,15 +54,19 @@ public class ClientPackageService : IClientPackageService
         if (package is null)
             throw new InvalidOperationException("Package does not exist.");
 
-        if (package.LocationId.HasValue && package.LocationId.Value != client.LocationId)
-            throw new InvalidOperationException("Package does not belong to the client's location.");
+        var isGroupPackage = (request.ExpectedBillingType ?? package.BillingType) == SessionBillingType.Group;
+        if (package.LocationId.HasValue && package.LocationId.Value != client.LocationId &&
+            (!isGroupPackage || !await _context.ClientLocationMemberships.AnyAsync(x =>
+                x.ClientId == client.Id && x.LocationId == package.LocationId.Value && x.GroupAccessEnabled)))
+            throw new InvalidOperationException("Package does not belong to an enabled client location.");
 
         var totalSessions = request.TotalSessions ?? package.SessionsLimit;
         if (totalSessions <= 0)
             throw new InvalidOperationException("Total sessions must be greater than zero.");
 
         var originalPrice = request.TotalPrice ?? package.Price;
-        var carryOverBalance = await GetCarryOverBalanceAsync(client.Id);
+        if (originalPrice < 0) throw new InvalidOperationException("Package price cannot be negative.");
+        var carryOverBalance = importing ? 0 : await GetCarryOverBalanceAsync(client.Id);
         var balanceApplied = ResolveAppliedBalance(carryOverBalance, originalPrice);
         var totalPrice = Math.Max(0, originalPrice - balanceApplied);
         var expectedUnitPrice = originalPrice / totalSessions;
@@ -62,7 +74,6 @@ public class ClientPackageService : IClientPackageService
             ? package.SessionsPerWeek
             : InferSessionsPerWeek(totalSessions);
 
-        var isGroupPackage = (request.ExpectedBillingType ?? package.BillingType) == SessionBillingType.Group;
         var hasActivePackage = await _context.ClientPackages
             .AnyAsync(cp =>
                 cp.ClientId == request.ClientId &&
@@ -150,6 +161,8 @@ public class ClientPackageService : IClientPackageService
         if (clientPackage.ClosureDisposition != null)
             throw new InvalidOperationException("Closed package requires the dedicated retained-package resume action; refunded packages cannot be activated.");
         var isGroupPackage = clientPackage.ExpectedBillingType == SessionBillingType.Group;
+        if (clientPackage.UsedSessions >= clientPackage.TotalSessions || clientPackage.ValidUntil <= DateTime.UtcNow)
+            throw new InvalidOperationException("Exhausted or expired package cannot be activated. Correct its validity or entries first.");
         var activePackages = isGroupPackage
             ? new List<ClientPackage>()
             : await _context.ClientPackages
@@ -159,8 +172,8 @@ public class ClientPackageService : IClientPackageService
                     cp.ExpectedBillingType != SessionBillingType.Group)
                 .ToListAsync();
 
-        foreach (var activePackage in activePackages)
-            activePackage.IsActive = false;
+        if (activePackages.Any(p => p.Id != clientPackageId))
+            throw new InvalidOperationException("Close or replace the current package before activating another personal package.");
 
         clientPackage.IsActive = true;
         clientPackage.ActivatedAt = DateTime.UtcNow;
@@ -182,6 +195,7 @@ public class ClientPackageService : IClientPackageService
 
     public async Task<bool> DeleteAsync(int clientId, int clientPackageId)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         var clientPackage = await _context.ClientPackages
             .Include(cp => cp.Client)
             .FirstOrDefaultAsync(cp => cp.Id == clientPackageId && cp.ClientId == clientId);
@@ -193,6 +207,13 @@ public class ClientPackageService : IClientPackageService
 
         if (clientPackage.ClosureDisposition != null)
             throw new InvalidOperationException("Closed packages must remain in the client history.");
+        if (clientPackage.RenewalSource == "OpeningBalance")
+            throw new InvalidOperationException("Imported opening balances must remain in history. Close the package instead.");
+
+        if (await _context.SessionParticipants.AnyAsync(x => x.ClientPackageId == clientPackageId && !x.Session.IsDeleted && x.Session.Status != "Cancelled" && x.Session.Status != "Completed"))
+            throw new InvalidOperationException("Resolve unfinished sessions before deleting this package.");
+        if (await _context.ClientPackages.AnyAsync(x => x.PreviousClientPackageId == clientPackageId))
+            throw new InvalidOperationException("Package with renewal history cannot be deleted.");
 
         var hasPayments = await _context.ClientPayments
             .AnyAsync(p => p.ClientPackageId == clientPackageId);
@@ -238,6 +259,7 @@ public class ClientPackageService : IClientPackageService
 
         _context.ClientPackages.Remove(clientPackage);
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return true;
     }

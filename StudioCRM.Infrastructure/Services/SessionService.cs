@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
 using StudioCRM.Application.DTOs.Calendar;
@@ -204,6 +204,9 @@ public class SessionService : ISessionService
                 Status = requestedStatus,
                 IsPubliclyBookable = request.IsPubliclyBookable,
                 PublicSlug = NormalizePublicSlug(request.PublicSlug),
+                EventRules = request.EventRules?.Trim(),
+                RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes),
+                CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes),
                 PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity),
                 PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count),
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
@@ -362,6 +365,9 @@ public class SessionService : ISessionService
             session.Status = requestedStatus;
             session.IsPubliclyBookable = request.IsPubliclyBookable;
             session.PublicSlug = NormalizePublicSlug(request.PublicSlug);
+            session.EventRules = request.EventRules is null ? session.EventRules : request.EventRules.Trim();
+            session.RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes ?? session.RegistrationClosesBeforeMinutes);
+            session.CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes ?? session.CancellationClosesBeforeMinutes);
             session.PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity);
             session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count);
             session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
@@ -1646,6 +1652,13 @@ public class SessionService : ISessionService
             Status = s.Status,
             IsPubliclyBookable = s.IsPubliclyBookable,
             PublicSlug = s.PublicSlug,
+            EventRules = s.EventRules,
+            BookingRules = GroupBookingPolicy.Describe(s),
+            IsGroupSession = GroupBookingPolicy.IsGroup(s),
+            Capacity = s.PublicCapacity,
+            BookedSeats = GroupBookingPolicy.BookedSeats(s),
+            AvailableSeats = GroupBookingPolicy.AvailableSeats(s),
+            IsFullyBooked = GroupBookingPolicy.IsFullyBooked(s),
             PublicCapacity = s.PublicCapacity,
             PublicAvailableSpots = s.IsPubliclyBookable && s.PublicCapacity.HasValue
                 ? Math.Max(0, s.PublicCapacity.Value - participants.Count(p => p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"))
@@ -1664,6 +1677,7 @@ public class SessionService : ISessionService
                 Id = p.Id,
                 ClientId = p.ClientId,
                 ClientFullName = p.Client.FirstName + " " + p.Client.LastName,
+                TrainerProfileUrl = $"/api/trainer-portal/sessions/{s.Id}/participants/{p.ClientId}/profile",
                 PackageId = p.PackageId,
                 PackageName = p.Package != null ? p.Package.Name : null,
                 ClientPackageId = p.ClientPackageId,
@@ -1793,6 +1807,9 @@ public class SessionService : ISessionService
             Status = "Planned",
             IsPubliclyBookable = source.IsPubliclyBookable,
             PublicSlug = BuildSeriesPublicSlug(source.PublicSlug, startAt, occurrenceNumber),
+            EventRules = source.EventRules,
+            RegistrationClosesBeforeMinutes = source.RegistrationClosesBeforeMinutes,
+            CancellationClosesBeforeMinutes = source.CancellationClosesBeforeMinutes,
             PublicCapacity = source.PublicCapacity,
             PlannedSessionType = source.PlannedSessionType,
             OutlookCategories = source.OutlookCategories?.ToList() ?? new List<string>(),
@@ -2060,7 +2077,7 @@ public class SessionService : ISessionService
 
     private static int? NormalizePublicCapacity(bool isPubliclyBookable, int? capacity)
     {
-        if (!isPubliclyBookable)
+        if (!isPubliclyBookable && !capacity.HasValue)
             return null;
 
         if (!capacity.HasValue || capacity.Value < 1)

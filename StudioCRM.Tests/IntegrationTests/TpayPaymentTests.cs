@@ -60,7 +60,7 @@ public class TpayPaymentTests
         var invalidBody = Notification(checkout.Id, "99.00");
         await using (var invalidContext = database.Context())
             await Assert.ThrowsAsync<InvalidOperationException>(() => Service(invalidContext).HandleTpayNotificationAsync(invalidBody, "test", default));
-        var body = Notification(checkout.Id, "100.00");
+        var body = Notification(checkout.Id, "100.00", "0", "TRUE");
         await Task.WhenAll(Enumerable.Range(0, 3).Select(async _ =>
         {
             await using var db = database.Context();
@@ -106,7 +106,7 @@ public class TpayPaymentTests
         Assert.Equal(2, await verification.ClientPackages.CountAsync(x => x.IsActive));
     }
 
-    private static byte[] Notification(int id, string amount)
+    private static byte[] Notification(int id, string amount, string testMode = "1", string status = "true")
     {
         var reference = $"crm-payment-{id}";
         var md5 = Convert.ToHexString(MD5.HashData(Encoding.UTF8.GetBytes("123TR-test" + amount + reference)));
@@ -114,7 +114,7 @@ public class TpayPaymentTests
         {
             ["id"] = "123", ["tr_id"] = "TR-test", ["tr_crc"] = reference,
             ["tr_amount"] = amount, ["tr_paid"] = amount, ["tr_currency"] = "PLN",
-            ["tr_status"] = "true", ["tr_error"] = "none", ["test_mode"] = "1", ["md5sum"] = md5
+            ["tr_status"] = status, ["tr_error"] = "none", ["test_mode"] = testMode, ["md5sum"] = md5
         });
         return Encoding.UTF8.GetBytes(query.TrimStart('?'));
     }

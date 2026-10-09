@@ -7,7 +7,7 @@ public class TrainerRate
     public int TrainerId { get; set; }
 
     public string SessionType { get; set; } = string.Empty;
-    // Hourly
+    // Hourly (per billable hour) or Group (flat amount per session).
 
     public decimal Rate { get; set; }
 

@@ -1,12 +1,14 @@
 using System.Text.Json;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Logging;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Settings;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public partial class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings> options, IMemoryCache cache)
+public partial class TpayConnectionService(HttpClient httpClient, IOptions<TpaySettings> options, IMemoryCache cache,
+    ILogger<TpayConnectionService>? logger = null)
     : ITpayConnectionService
 {
     public async Task<bool> TestConnectionAsync(string accountKey, CancellationToken cancellationToken)

@@ -19,6 +19,7 @@ public class TrainerSessionProfitabilityDto
     public int ParticipantsCount { get; set; }
     public decimal BillableHours { get; set; }
     public decimal HourlyRate { get; set; }
+    public decimal? GroupSessionRate { get; set; }
 
     public bool IsCoveredByContract { get; set; }
     public int? ContractId { get; set; }

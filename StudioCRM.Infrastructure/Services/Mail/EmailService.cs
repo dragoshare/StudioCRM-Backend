@@ -2,6 +2,7 @@
 using Resend;
 using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Application.Settings;
+using StudioCRM.Infrastructure.Services.Calendar;
 
 namespace StudioCRM.Infrastructure.Services.Mail;
 
@@ -9,13 +10,16 @@ public class EmailService : IEmailService
 {
     private readonly IResend _resend;
     private readonly EmailSettings _emailSettings;
+    private readonly OutlookSettings _outlookSettings;
 
     public EmailService(
         IResend resend,
-        IOptions<EmailSettings> emailOptions)
+        IOptions<EmailSettings> emailOptions,
+        IOptions<OutlookSettings>? outlookOptions = null)
     {
         _resend = resend;
         _emailSettings = emailOptions.Value;
+        _outlookSettings = outlookOptions?.Value ?? new OutlookSettings();
     }
 
     public async Task SendInvitationEmailAsync(
@@ -140,6 +144,8 @@ public class EmailService : IEmailService
 
     private async Task SendEmailAsync(EmailMessage message)
     {
+        if (message.To.Any(address => ClientCalendarAddress.IsTechnical(address.Email, _outlookSettings.CalendarEmailDomain)))
+            throw new InvalidOperationException("Cannot send account or correspondence email to a technical calendar address.");
         var response = await _resend.EmailSendAsync(message);
 
         if (!response.Success)

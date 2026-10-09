@@ -253,6 +253,20 @@ public class OutlookController : ControllerBase
             return BadRequest(new { message = ex.Message });
         }
     }
+    [HttpPost("contacts/prepare-calendar-addresses")]
+    [Authorize(Roles = "Owner")]
+    public async Task<IActionResult> PrepareCalendarAddresses()
+    {
+        try
+        {
+            return Ok(new { prepared = await _outlookContactService.PrepareCalendarAddressesAsync() });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
     [HttpPost("contacts/sync-clients")]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> SyncClientsToOutlookContacts()

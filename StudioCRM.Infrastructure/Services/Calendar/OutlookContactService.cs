@@ -2,6 +2,8 @@
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
+using StudioCRM.Application.Settings;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
@@ -15,17 +17,31 @@ public class OutlookContactService : IOutlookContactService
     private readonly ICurrentUserService _currentUser;
     private readonly IOutlookTokenService _tokenService;
     private readonly HttpClient _httpClient;
+    private readonly OutlookSettings _settings;
 
     public OutlookContactService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         IOutlookTokenService tokenService,
-        HttpClient httpClient)
+        HttpClient httpClient,
+        IOptions<OutlookSettings> settings)
     {
         _context = context;
         _currentUser = currentUser;
         _tokenService = tokenService;
         _httpClient = httpClient;
+        _settings = settings.Value;
+    }
+
+    public async Task<int> PrepareCalendarAddressesAsync()
+    {
+        if (!_currentUser.IsOwner) throw new UnauthorizedAccessException("Only owner can prepare calendar addresses.");
+        var domain = ClientCalendarAddress.ValidateDomain(_settings.CalendarEmailDomain);
+        var clients = await _context.Clients.IgnoreQueryFilters()
+            .Where(c => c.CalendarEmail == null || c.CalendarEmail == "").ToListAsync();
+        foreach (var client in clients) ClientCalendarAddress.Ensure(client, domain);
+        await _context.SaveChangesAsync();
+        return clients.Count;
     }
 
     public async Task SyncClientsAsync()
@@ -54,8 +70,15 @@ public class OutlookContactService : IOutlookContactService
             .Where(c =>
                 !c.IsDeleted &&
                 c.TrainerId == trainer.Id &&
-                !string.IsNullOrWhiteSpace(c.Email))
+                (_settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(c.Email)))
             .ToListAsync();
+
+        if (_settings.UseCalendarEmails)
+        {
+            foreach (var client in clients)
+                ClientCalendarAddress.Ensure(client, _settings.CalendarEmailDomain);
+            await _context.SaveChangesAsync();
+        }
 
         foreach (var client in clients)
         {
@@ -65,9 +88,15 @@ public class OutlookContactService : IOutlookContactService
 
     private async Task UpsertOutlookContactAsync(string accessToken, Client client)
     {
-        var email = client.Email.Trim().ToLowerInvariant();
+        var email = ClientCalendarAddress.Recipient(client, _settings);
 
         var existingContactId = await FindContactIdByEmailAsync(accessToken, email);
+        if (existingContactId == null && _settings.UseCalendarEmails && !string.IsNullOrWhiteSpace(client.Email))
+        {
+            var sharedEmail = await _context.Clients.AnyAsync(c => c.Id != client.Id && c.Email.ToLower() == client.Email.ToLower());
+            if (!sharedEmail)
+                existingContactId = await FindContactIdByEmailAsync(accessToken, client.Email.Trim().ToLowerInvariant());
+        }
 
         if (existingContactId == null)
         {
@@ -84,7 +113,7 @@ public class OutlookContactService : IOutlookContactService
         var url =
             "https://graph.microsoft.com/v1.0/me/contacts" +
             "?$select=id,emailAddresses" +
-            $"&$filter=emailAddresses/any(a:a/address eq '{email}')";
+            "&$filter=" + Uri.EscapeDataString($"emailAddresses/any(a:a/address eq '{email.Replace("'", "''")}')");
 
         using var request = new HttpRequestMessage(HttpMethod.Get, url);
 
@@ -95,13 +124,15 @@ public class OutlookContactService : IOutlookContactService
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
-            return null;
+            throw new InvalidOperationException($"Microsoft contact lookup failed ({(int)response.StatusCode}). No contact was created.");
 
         using var doc = JsonDocument.Parse(body);
 
         if (!doc.RootElement.TryGetProperty("value", out var value))
-            return null;
+            throw new InvalidOperationException("Microsoft contact lookup returned an invalid response. No contact was created.");
 
+        if (value.GetArrayLength() > 1)
+            throw new InvalidOperationException("Multiple Outlook contacts have this email. Resolve duplicates before synchronizing.");
         var first = value.EnumerateArray().FirstOrDefault();
 
         if (first.ValueKind == JsonValueKind.Undefined)

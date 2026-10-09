@@ -28,7 +28,7 @@ public partial class ClientPaymentService
             var package = await _context.ClientPackages.Include(x => x.Location).ThenInclude(x => x!.LegalEntity)
                 .SingleOrDefaultAsync(x => x.Id == clientPackageId && x.ClientId == client.Id, ct)
                 ?? throw new InvalidOperationException("Client package not found.");
-            if (package.ClosureDisposition != null) throw new InvalidOperationException("Package is closed.");
+            if (package.ClosureDisposition != null && package.ClosureDisposition != "ClosedWithDebt") throw new InvalidOperationException("Package is closed.");
             var location = package.Location;
             if (location is null || !location.IsActive || location.LegalEntity is null || !location.LegalEntity.IsActive)
                 throw new InvalidOperationException("Package location must have an active legal entity.");
@@ -164,9 +164,8 @@ public partial class ClientPaymentService
             account is null || account.LegalEntityId != payment.LegalEntityId)
             throw new InvalidOperationException("Payment provider mismatch.");
         var credentials = RequireTpayAccount(account.AccountKey ?? string.Empty);
-        if (Field("id") != credentials.MerchantId || Field("test_mode") != "1" ||
-            payment.ProviderStatus?.StartsWith("sandbox:", StringComparison.Ordinal) != true)
-            throw new InvalidOperationException("Merchant or payment environment mismatch.");
+        EnsureTpayNotificationContext(payment.Id, Field("id"), credentials.MerchantId,
+            Field("test_mode"), payment.ProviderStatus, _tpaySettings.UseSandbox);
         var title = Field("tr_id");
         if (string.IsNullOrWhiteSpace(title) || payment.ExternalPaymentId is not null && payment.ExternalPaymentId != title)
             throw new InvalidOperationException("Transaction title mismatch.");
@@ -181,8 +180,7 @@ public partial class ClientPaymentService
             amount != payment.Amount || paid != payment.Amount || payment.Currency != "PLN" ||
             form.ContainsKey("tr_currency") && Field("tr_currency") != payment.Currency || Field("tr_error") != "none")
             throw new InvalidOperationException("Payment amount or currency mismatch. Manual review required.");
-        if (Field("tr_status") != "true")
-            throw new InvalidOperationException("Notification is not a successful payment. Refunds require manual review.");
+        EnsureSuccessfulTpayNotification(Field("tr_status"));
         if (payment.Status is ClientPaymentStatus.Confirmed or ClientPaymentStatus.Reversed)
         {
             await transaction.CommitAsync(ct);
@@ -204,6 +202,38 @@ public partial class ClientPaymentService
         await transaction.CommitAsync(ct);
     }
 
+    internal static void EnsureSuccessfulTpayNotification(string status)
+    {
+        // Tpay documentation uses "true", while its integrations also handle "TRUE".
+        // Do not treat refunds, pending states or arbitrary truthy values as payment success.
+        if (string.Equals(status, "true", StringComparison.OrdinalIgnoreCase))
+            return;
+        var loggedStatus = System.Text.Json.JsonSerializer.Serialize(
+            status.Length <= 32 ? status : status[..32] + "[truncated]");
+        throw new InvalidOperationException(
+            $"Notification is not a successful payment. NotificationStatus={loggedStatus}; " +
+            $"NotificationStatusLength={status.Length}. Refunds require manual review.");
+    }
+
+    internal static void EnsureTpayNotificationContext(int paymentId, string merchantId, string configuredMerchantId,
+        string notificationTestMode, string? providerStatus, bool useSandbox)
+    {
+        var merchantIdMatches = merchantId == configuredMerchantId;
+        // test_mode describes transaction mode, not the API environment. Sandbox can send "0".
+        // The JWS verifier separately restricts the certificate host to the configured environment.
+        var testModeIsValid = notificationTestMode is "0" or "1";
+        var paymentIsSandbox = providerStatus?.StartsWith("sandbox:", StringComparison.Ordinal) == true;
+        if (!merchantIdMatches || !testModeIsValid || !paymentIsSandbox || !useSandbox)
+        {
+            var loggedTestMode = System.Text.Json.JsonSerializer.Serialize(
+                notificationTestMode.Length <= 32 ? notificationTestMode : notificationTestMode[..32] + "[truncated]");
+            throw new InvalidOperationException(
+                $"Tpay notification context mismatch. PaymentId={paymentId}; MerchantIdMatches={merchantIdMatches}; " +
+                $"ConfiguredSandbox={useSandbox}; PaymentIsSandbox={paymentIsSandbox}; TestModeIsValid={testModeIsValid}; " +
+                $"NotificationTestMode={loggedTestMode}; NotificationTestModeLength={notificationTestMode.Length}.");
+        }
+    }
+
     private StudioCRM.Application.Settings.TpayAccountSettings RequireTpayAccount(string key)
     {
         if (!_tpaySettings.Accounts.TryGetValue(key, out var account) ||
@@ -222,7 +252,7 @@ public partial class ClientPaymentService
             return;
         await LockTpayPackageAsync(package.Id, default);
         await _context.Entry(package).ReloadAsync();
-        if (package.ClosureDisposition != null) throw new InvalidOperationException("Package is closed. Existing payments cannot be changed after closure.");
+        if (package.ClosureDisposition != null && package.ClosureDisposition != "ClosedWithDebt") throw new InvalidOperationException("Package is closed. Existing payments cannot be changed after closure.");
         if (await _context.ClientPayments.AnyAsync(x => x.ClientPackageId == package.Id &&
             x.Source == ClientPaymentSource.PaymentGateway && x.Status == ClientPaymentStatus.PendingConfirmation))
             throw new InvalidOperationException("A gateway payment is pending for this package. Reconcile it before entering another payment.");

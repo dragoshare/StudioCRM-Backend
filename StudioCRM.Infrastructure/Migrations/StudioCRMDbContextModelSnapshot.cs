@@ -22,6 +22,74 @@ namespace StudioCRM.Infrastructure.Migrations
 
             NpgsqlModelBuilderExtensions.UseIdentityByDefaultColumns(modelBuilder);
 
+            modelBuilder.Entity("StudioCRM.Domain.Entities.ActivityLogEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("ActorName")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int?>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AfterJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("BeforeJson")
+                        .HasColumnType("text");
+
+                    b.Property<Guid>("ChangeSetId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("ChangedFieldsJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EntityId")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("EntityLabel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<string>("Operation")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
+
+                    b.Property<string>("Source")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ChangeSetId");
+
+                    b.HasIndex("ActorUserId", "CreatedAt");
+
+                    b.HasIndex("CreatedAt", "Id");
+
+                    b.HasIndex("EntityType", "EntityId", "CreatedAt");
+
+                    b.ToTable("ActivityLogEntries");
+                });
+
             modelBuilder.Entity("StudioCRM.Domain.Entities.CalendarEventLink", b =>
                 {
                     b.Property<int>("Id")
@@ -165,6 +233,10 @@ namespace StudioCRM.Infrastructure.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<string>("CalendarEmail")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -269,6 +341,9 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ActivePackageId");
+
+                    b.HasIndex("CalendarEmail")
+                        .IsUnique();
 
                     b.HasIndex("LocationId");
 
@@ -1844,6 +1919,9 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("ActualSessionType")
                         .HasColumnType("text");
 
+                    b.Property<int>("CancellationClosesBeforeMinutes")
+                        .HasColumnType("integer");
+
                     b.Property<int?>("ClientId")
                         .HasColumnType("integer");
 
@@ -1858,6 +1936,9 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     b.Property<DateTime>("EndAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("EventRules")
+                        .HasColumnType("text");
 
                     b.Property<bool>("IsDeleted")
                         .HasColumnType("boolean");
@@ -1902,6 +1983,9 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("RecurringGroupId")
                         .HasMaxLength(64)
                         .HasColumnType("character varying(64)");
+
+                    b.Property<int>("RegistrationClosesBeforeMinutes")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime>("StartAt")
                         .HasColumnType("timestamp with time zone");

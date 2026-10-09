@@ -25,7 +25,8 @@ public class TrainerSettlementService : ITrainerSettlementService
     public async Task<TrainerMonthlySettlementDto?> GetMonthlySettlementAsync(
         int trainerId,
         int year,
-        int month)
+        int month,
+        int? locationId = null)
     {
         ValidateMonth(year, month);
 
@@ -55,6 +56,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             .Where(s =>
                 s.TrainerId == trainerId &&
                 s.Status == "Completed" &&
+                (!locationId.HasValue || s.LocationId == locationId.Value) &&
                 s.StartAt >= from &&
                 s.StartAt < to)
             .OrderBy(s => s.StartAt)
@@ -77,6 +79,7 @@ public class TrainerSettlementService : ITrainerSettlementService
         return new TrainerMonthlySettlementDto
         {
             TrainerId = trainer.Id,
+            LocationId = locationId,
             TrainerFullName = $"{trainer.User.FirstName} {trainer.User.LastName}",
             Year = year,
             Month = month,
@@ -183,7 +186,8 @@ public class TrainerSettlementService : ITrainerSettlementService
     public async Task<TrainerWorkHoursDocumentDto?> GenerateWorkHoursDocumentAsync(
         int trainerId,
         int year,
-        int month)
+        int month,
+        int? locationId = null)
     {
         ValidateMonth(year, month);
 
@@ -207,6 +211,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             .Where(s =>
                 s.TrainerId == trainerId &&
                 s.Status == "Completed" &&
+                (!locationId.HasValue || s.LocationId == locationId.Value) &&
                 s.StartAt >= from &&
                 s.StartAt < to)
             .OrderBy(s => s.StartAt)
@@ -217,6 +222,8 @@ public class TrainerSettlementService : ITrainerSettlementService
             .ToListAsync();
 
         var contracts = await GetContractsForPeriodAsync(trainerId, from, to);
+        if (locationId.HasValue)
+            contracts = contracts.Where(c => c.ContractLocations.Any(l => l.LocationId == locationId.Value)).ToList();
         var contractCoverage = BuildContractLocationCoverage(contracts);
         var contractedSessions = sessions
             .Where(s => contractCoverage.ContainsKey(s.LocationId))
@@ -242,7 +249,8 @@ public class TrainerSettlementService : ITrainerSettlementService
 
         return new TrainerWorkHoursDocumentDto
         {
-            FileName = BuildWorkHoursFileName(trainer.User.FirstName, trainer.User.LastName, year, month),
+            FileName = BuildWorkHoursFileName(trainer.User.FirstName, trainer.User.LastName, year, month)
+                .Replace(".docx", locationId.HasValue ? $"-lokalizacja-{locationId.Value}.docx" : ".docx"),
             Content = WorkHoursDocumentBuilder.Build(model)
         };
     }
@@ -330,7 +338,7 @@ public class TrainerSettlementService : ITrainerSettlementService
         return result;
     }
 
-    private static List<TrainerSettlementItemDto> BuildSettlementItems(
+    internal static List<TrainerSettlementItemDto> BuildSettlementItems(
         List<Session> sessions,
         List<TrainerRate> rates,
         Dictionary<int, TrainerContract> contractCoverage)
@@ -341,8 +349,9 @@ public class TrainerSettlementService : ITrainerSettlementService
         {
             var sessionType = ResolveSettlementSessionType(session);
             var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
-            var rate = ResolveHourlyRate(rates, session.StartAt);
-            var amount = hours * rate;
+            var groupRate = TrainerGroupRate.Resolve(session, sessionType, rates);
+            var rate = groupRate ?? ResolveHourlyRate(rates, session.StartAt);
+            var amount = groupRate ?? hours * rate;
             var isCovered = contractCoverage.TryGetValue(session.LocationId, out var contract);
 
             items.Add(new TrainerSettlementItemDto
@@ -359,6 +368,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 ContractNumber = contract?.ContractNumber,
                 Hours = hours,
                 Rate = rate,
+                RateType = groupRate.HasValue ? "PerSession" : "Hourly",
                 Amount = amount,
                 ParticipantsCount = session.ActualParticipantsCount ?? session.Participants.Count
             });

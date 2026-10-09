@@ -199,9 +199,10 @@ public class TrainersController : ControllerBase
     public async Task<ActionResult<TrainerMonthlySettlementDto>> GetMonthlySettlement(
         int id,
         [FromQuery] int year,
-        [FromQuery] int month)
+        [FromQuery] int month,
+        [FromQuery] int? locationId = null)
     {
-        var result = await _trainerSettlementService.GetMonthlySettlementAsync(id, year, month);
+        var result = await _trainerSettlementService.GetMonthlySettlementAsync(id, year, month, locationId);
         return result is null ? NotFound() : Ok(result);
     }
 
@@ -209,13 +210,14 @@ public class TrainersController : ControllerBase
     public async Task<IActionResult> GetWorkHoursDocument(
         int id,
         [FromQuery] int year,
-        [FromQuery] int month)
+        [FromQuery] int month,
+        [FromQuery] int? locationId = null)
     {
         TrainerWorkHoursDocumentDto? result;
 
         try
         {
-            result = await _trainerSettlementService.GenerateWorkHoursDocumentAsync(id, year, month);
+            result = await _trainerSettlementService.GenerateWorkHoursDocumentAsync(id, year, month, locationId);
         }
         catch (InvalidOperationException ex)
         {

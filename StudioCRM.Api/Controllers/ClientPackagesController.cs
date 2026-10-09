@@ -2,6 +2,8 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.ClientPackages;
 using StudioCRM.Application.Interfaces;
+using Microsoft.EntityFrameworkCore;
+using Npgsql;
 
 namespace StudioCRM.Api.Controllers;
 
@@ -82,5 +84,26 @@ public class ClientPackagesController : ControllerBase
                 message = ex.Message
             });
         }
+        catch (Exception ex) when (ex is PostgresException { SqlState: "40001" or "40P01" } ||
+            ex is DbUpdateException { InnerException: PostgresException { SqlState: "40001" or "40P01" } })
+        {
+            return Conflict(new { message = "Concurrent change detected. Refresh the package preview before retrying." });
+        }
     }
+
+    [HttpGet("clients/{clientId:int}/packages/{clientPackageId:int}/management-preview")]
+    public Task<ActionResult<PackageManagementPreviewDto>> Preview(int clientId, int clientPackageId)
+        => HandleAsync<PackageManagementPreviewDto>(async () => Ok(await _clientPackageService.GetManagementPreviewAsync(clientId, clientPackageId)));
+
+    [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/correct")]
+    public Task<ActionResult<object>> Correct(int clientId, int clientPackageId, PackageChangeRequest request)
+        => HandleAsync<object>(async () => { await _clientPackageService.CorrectAsync(clientId, clientPackageId, request); return Ok(new { corrected = true }); });
+
+    [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/close")]
+    public Task<ActionResult<object>> Close(int clientId, int clientPackageId, ClosePackageRequest request)
+        => HandleAsync<object>(async () => Ok(new { replacementClientPackageId = await _clientPackageService.CloseAsync(clientId, clientPackageId, request) }));
+
+    [HttpPost("import")]
+    public Task<ActionResult<object>> Import(ImportClientPackageRequest request)
+        => HandleAsync<object>(async () => Ok(new { id = await _clientPackageService.ImportAsync(request) }));
 }

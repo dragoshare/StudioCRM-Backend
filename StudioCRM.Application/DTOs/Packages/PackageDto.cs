@@ -14,6 +14,7 @@ public class PackageDto
     public int SessionsPerWeek { get; set; }
     public int DurationDays { get; set; }
     public SessionBillingType BillingType { get; set; }
+    public string PackageType => StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(BillingType);
     public int ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }

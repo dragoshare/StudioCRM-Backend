@@ -411,6 +411,7 @@ public partial class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                CalendarEmail = c.CalendarEmail,
                 EmailContactUrl = c.Email == "" ? "" : "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
                 PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
@@ -594,6 +595,7 @@ public partial class ClientService : IClientService
                 LastName = c.LastName,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
+                CalendarEmail = c.CalendarEmail,
                 EmailContactUrl = c.Email == "" ? "" : "mailto:" + c.Email,
                 PhoneNumber = c.PhoneNumber,
                 PhoneContactUrl = c.PhoneNumber != null ? "tel:" + c.PhoneNumber : null,
@@ -638,8 +640,8 @@ public partial class ClientService : IClientService
         var clientIds = clients.Select(c => c.Id).ToList();
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive)
-            .OrderByDescending(cp => cp.PurchaseDate)
+            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .ThenByDescending(cp => cp.Id)
             .Select(cp => new
             {

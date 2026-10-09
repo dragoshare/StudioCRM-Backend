@@ -76,6 +76,7 @@ builder.Services.AddScoped<ISessionService, SessionService>();
 builder.Services.AddScoped<IDashboardService, DashboardService>();
 builder.Services.AddScoped<ILocationService, LocationService>();
 builder.Services.AddScoped<ICurrentUserService, CurrentUserService>();
+builder.Services.AddScoped<IActivityLogService, ActivityLogService>();
 builder.Services.AddScoped<IInvitationService, InvitationService>();
 builder.Services.AddScoped<IClientPortalService, ClientPortalService>();
 builder.Services.AddScoped<ITrainerPortalService, TrainerPortalService>();
@@ -188,8 +189,15 @@ builder.Services.AddOptions();
 
 builder.Services.AddHttpClient<ResendClient>();
 
-builder.Services.Configure<OutlookSettings>(
-builder.Configuration.GetSection("Outlook"));
+builder.Services.AddOptions<OutlookSettings>()
+    .Bind(builder.Configuration.GetSection("Outlook"))
+    .Validate(settings => !settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(settings.CalendarEmailDomain),
+        "Outlook:CalendarEmailDomain is required when UseCalendarEmails is enabled.")
+    .Validate(settings => string.IsNullOrWhiteSpace(settings.CalendarEmailDomain) ||
+        (settings.CalendarEmailDomain.Length <= 253 && settings.CalendarEmailDomain.Contains('.') &&
+         !settings.CalendarEmailDomain.EndsWith('.') && Uri.CheckHostName(settings.CalendarEmailDomain) == UriHostNameType.Dns),
+        "Outlook:CalendarEmailDomain must be a DNS domain, without a URL or email address.")
+    .ValidateOnStart();
 
 builder.Services.AddHttpClient<IOutlookCalendarAuthService, OutlookCalendarAuthService>();
 builder.Services.AddHttpClient<IOutlookCalendarSyncService, OutlookCalendarSyncService>();

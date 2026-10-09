@@ -47,31 +47,40 @@ public class TrainerRateService : ITrainerRateService
         var activeRates = await _context.TrainerRates
             .Where(r => r.TrainerId == trainerId && r.IsActive)
             .ToListAsync();
-        var hasAnyHourlyRate = await _context.TrainerRates
-            .AnyAsync(r => r.TrainerId == trainerId && r.SessionType == "Hourly");
-        var validFrom = hasAnyHourlyRate
-            ? now
-            : await ResolveInitialRateValidFromAsync(trainerId, now);
-
-        foreach (var oldRate in activeRates)
+        foreach (var (type, value) in new[] { ("Hourly", request.HourlyRate), ("Group", request.GroupSessionRate) })
         {
-            oldRate.IsActive = false;
-            oldRate.ValidTo = validFrom;
-            oldRate.UpdatedAt = now;
+            if (!value.HasValue)
+                continue;
+
+            var currentRates = activeRates.Where(r => r.SessionType == type).ToList();
+            if (currentRates.Count == 1 && currentRates[0].Rate == value.Value)
+                continue;
+
+            // Preserve initial hourly setup behavior. Group rates only apply prospectively.
+            var hasHistory = await _context.TrainerRates
+                .AnyAsync(r => r.TrainerId == trainerId && r.SessionType == type);
+            var validFrom = type == "Hourly" && !hasHistory
+                ? await ResolveInitialRateValidFromAsync(trainerId, now)
+                : now;
+
+            foreach (var oldRate in currentRates)
+            {
+                oldRate.IsActive = false;
+                oldRate.ValidTo = validFrom;
+                oldRate.UpdatedAt = now;
+            }
+
+            await _context.TrainerRates.AddAsync(new TrainerRate
+            {
+                TrainerId = trainerId,
+                SessionType = type,
+                Rate = value.Value,
+                ValidFrom = validFrom,
+                IsActive = true,
+                CreatedAt = now,
+                UpdatedAt = now
+            });
         }
-
-        var newRate = new TrainerRate
-        {
-            TrainerId = trainerId,
-            SessionType = "Hourly",
-            Rate = request.HourlyRate!.Value,
-            ValidFrom = validFrom,
-            IsActive = true,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        await _context.TrainerRates.AddAsync(newRate);
 
         await _context.SaveChangesAsync();
 
@@ -91,10 +100,12 @@ public class TrainerRateService : ITrainerRateService
 
     private static void ValidateRates(UpdateTrainerRatesDto request)
     {
-        if (!request.HourlyRate.HasValue)
-            throw new InvalidOperationException("Hourly rate is required.");
+        if (!request.HourlyRate.HasValue && !request.GroupSessionRate.HasValue)
+            throw new InvalidOperationException("At least one rate is required.");
 
         if (request.HourlyRate.HasValue && request.HourlyRate.Value < 0)
             throw new InvalidOperationException("Hourly rate cannot be negative.");
+        if (request.GroupSessionRate < 0)
+            throw new InvalidOperationException("Group session rate cannot be negative.");
     }
 }

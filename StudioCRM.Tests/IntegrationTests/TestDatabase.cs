@@ -9,10 +9,12 @@ internal sealed class TestDatabase : IAsyncDisposable
     private readonly string schema = "crm_test_" + Guid.NewGuid().ToString("N");
     private readonly string connectionString;
     private TestDatabase(string connectionString) => this.connectionString = connectionString;
-    public StudioCRMDbContext Context()
+    public StudioCRMDbContext Context(StudioCRM.Application.Interfaces.ICurrentUserService? currentUser = null,
+        StudioCRM.Application.Settings.OutlookSettings? outlookSettings = null)
     {
         var builder = new NpgsqlConnectionStringBuilder(connectionString) { SearchPath = schema, Pooling = false, IncludeErrorDetail = false };
-        return new(new DbContextOptionsBuilder<StudioCRMDbContext>().UseNpgsql(builder.ConnectionString).Options);
+        return new(new DbContextOptionsBuilder<StudioCRMDbContext>().UseNpgsql(builder.ConnectionString).Options,
+            outlookSettings == null ? null : Microsoft.Extensions.Options.Options.Create(outlookSettings), currentUser);
     }
     public static async Task<TestDatabase> CreateAsync()
     {

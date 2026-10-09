@@ -205,7 +205,7 @@ public class TrainerCostAnalysisService : ITrainerCostAnalysisService
         return rows;
     }
 
-    private static TrainerSessionProfitabilityDto BuildSessionRow(
+    internal static TrainerSessionProfitabilityDto BuildSessionRow(
         Session session,
         List<TrainerRate> trainerRates,
         List<TrainerContract> contracts)
@@ -214,7 +214,8 @@ public class TrainerCostAnalysisService : ITrainerCostAnalysisService
         var sessionType = ResolveSettlementSessionType(session);
         var billableHours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
         var hourlyRate = ResolveHourlyRate(trainerRates, session.StartAt);
-        var potentialTrainerCost = decimal.Round(billableHours * hourlyRate, 2);
+        var groupRate = TrainerGroupRate.Resolve(session, sessionType, trainerRates);
+        var potentialTrainerCost = decimal.Round(groupRate ?? billableHours * hourlyRate, 2);
         var trainerCost = contract is null ? 0 : potentialTrainerCost;
         var participants = BuildParticipantRows(session);
         AllocateTrainerCost(participants, trainerCost, potentialTrainerCost);
@@ -237,6 +238,7 @@ public class TrainerCostAnalysisService : ITrainerCostAnalysisService
             ParticipantsCount = session.ActualParticipantsCount ?? CountPresentParticipants(session.Participants),
             BillableHours = billableHours,
             HourlyRate = hourlyRate,
+            GroupSessionRate = groupRate,
             IsCoveredByContract = contract is not null,
             ContractId = contract?.Id,
             ContractNumber = contract?.ContractNumber,

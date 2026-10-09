@@ -35,6 +35,8 @@ public class ClientDto
 
     public string Email { get; set; } = string.Empty;
 
+    public string? CalendarEmail { get; set; }
+
     public string EmailContactUrl { get; set; } = string.Empty;
 
     public string? PhoneNumber { get; set; }

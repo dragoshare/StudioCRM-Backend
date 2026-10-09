@@ -16,6 +16,9 @@ public class Client
 
     public string Email { get; set; } = string.Empty;
 
+    // Technical Outlook recipient; never an account or correspondence address.
+    public string? CalendarEmail { get; set; }
+
     public string? PhoneNumber { get; set; }
 
     public string? GoogleDriveFolderId { get; set; }
