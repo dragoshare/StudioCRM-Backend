@@ -60,6 +60,7 @@ public partial class StudioCRMDbContext
         if (owned == null) transaction.CreateSavepoint(savepoint);
         try
         {
+            ActivityLogLabels.Resolve(this, pending);
             var actorId = ActivityActorId;
             var actorName = actorId.HasValue ? ActorNameQuery(actorId).FirstOrDefault() ?? $"User #{actorId}" : "System";
             var result = base.SaveChanges(false);
@@ -89,6 +90,7 @@ public partial class StudioCRMDbContext
         if (owned == null) await transaction.CreateSavepointAsync(savepoint, cancellationToken);
         try
         {
+            await ActivityLogLabels.ResolveAsync(this, pending, cancellationToken);
             var actorId = ActivityActorId;
             var actorName = actorId.HasValue ? await ActorNameQuery(actorId).FirstOrDefaultAsync(cancellationToken) ?? $"User #{actorId}" : "System";
             var result = await base.SaveChangesAsync(false, cancellationToken);
