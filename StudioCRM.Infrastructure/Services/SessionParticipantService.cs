@@ -161,7 +161,16 @@ public class SessionParticipantService : ISessionParticipantService
         }
         catch
         {
-            await transaction.RollbackAsync();
+            try
+            {
+                await transaction.RollbackAsync();
+            }
+            finally
+            {
+                // A database rollback does not undo tracked mutations. The auto-completion
+                // batch reuses this context, so discard failed work before another session saves.
+                _context.ChangeTracker.Clear();
+            }
             throw;
         }
     }

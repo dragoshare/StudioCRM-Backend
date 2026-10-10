@@ -40,6 +40,11 @@ internal sealed class ActivityLogCapture
     private readonly Dictionary<string, object?> before;
     private readonly string[] fields;
     private readonly string[] changed;
+    internal string EntityType => entry.Metadata.ClrType.Name;
+    internal string? EntityLabel { get; set; }
+    internal object? Value(string name) => entry.Metadata.FindProperty(name) == null ? null :
+        state == EntityState.Deleted ? before.GetValueOrDefault(name) : entry.Property(name).CurrentValue;
+    internal int? ReferenceId(string name) => Value(name) is int id ? id : null;
 
     private ActivityLogCapture(EntityEntry entry, string[] fields, string[] changed)
     {
@@ -77,7 +82,7 @@ internal sealed class ActivityLogCapture
         var keys = entry.Metadata.FindPrimaryKey()!.Properties;
         var id = keys.Count == 1 ? Convert.ToString(values[keys[0].Name], CultureInfo.InvariantCulture)!
             : string.Join(";", keys.Select(k => $"{k.Name}={Convert.ToString(values[k.Name], CultureInfo.InvariantCulture)}"));
-        var label = values.GetValueOrDefault("Name")?.ToString() ?? values.GetValueOrDefault("Title")?.ToString()
+        var label = EntityLabel ?? values.GetValueOrDefault("Name")?.ToString() ?? values.GetValueOrDefault("Title")?.ToString()
             ?? $"{values.GetValueOrDefault("FirstName")} {values.GetValueOrDefault("LastName")}".Trim();
         var operation = state switch { EntityState.Added => "Created", EntityState.Deleted => "Deleted", _ => "Updated" };
         if (state == EntityState.Modified && changed.Contains("IsDeleted"))
@@ -87,7 +92,7 @@ internal sealed class ActivityLogCapture
             ChangeSetId = changeSetId, CreatedAt = at, ActorUserId = actorId, ActorName = actorName,
             Source = actorId.HasValue ? "User" : "System", Operation = operation,
             EntityType = entry.Metadata.ClrType.Name, EntityId = id,
-            EntityLabel = string.IsNullOrWhiteSpace(label) ? $"{entry.Metadata.ClrType.Name} #{id}" : label,
+            EntityLabel = string.IsNullOrWhiteSpace(label) ? $"{ActivityLogLabels.TypeLabels[EntityType]} #{id}" : label,
             BeforeJson = state == EntityState.Added ? null : JsonSerializer.Serialize(before, JsonOptions),
             AfterJson = after == null ? null : JsonSerializer.Serialize(after, JsonOptions),
             ChangedFieldsJson = JsonSerializer.Serialize(changed.Select(JsonNamingPolicy.CamelCase.ConvertName))

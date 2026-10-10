@@ -80,7 +80,48 @@ Przykład fragmentu wpisu po zmianie ceny:
 
 Snapshoty mogą zawierać także pozostałe dozwolone pola danego obiektu.
 `entityId` dla relacji z kluczem złożonym ma format np. `TrainerId=2;LocationId=3`.
-`entityLabel` używa nazwy/tytułu/imienia i nazwiska, a przy braku etykiety: `Typ #ID`.
+`entityLabel` jest gotową etykietą zapisaną w momencie operacji, a nie nazwą
+obliczaną podczas pobierania historii. Późniejsze zmiany nazwisk, nazw i usunięcia
+obiektów nie zmieniają wcześniejszych etykiet. Front wyświetla ją bez tłumaczenia;
+sam tłumaczy `operation`, `entityType` i formatuje wartości zmian.
+
+| Encja | Przykład nowej etykiety |
+| --- | --- |
+| `Session` | Trening poranny (tytuł sesji) |
+| `SessionParticipant` | Uczestnictwo w treningu — Jan Kowalski |
+| `Client` | Jan Kowalski |
+| `Trainer` | Trener — Anna Nowak |
+| `User` | Anna Nowak (przy braku nazwiska/imienia: e-mail) |
+| `TrainerLocation` | Lokalizacja trenera — Anna Nowak — Niepołomice |
+| `ClientLocationMembership` | Dostęp klienta do lokalizacji — Jan Kowalski — Niepołomice |
+| `Package` | Pakiet 8 treningów (nazwa oferty) |
+| `ClientPackage` | Pakiet klienta — Jan Kowalski — Pakiet 8 treningów |
+| `ClientPayment` | Płatność — Jan Kowalski |
+| `ClientBalanceTransaction` | Zmiana salda — Jan Kowalski |
+| `TrainerRate` | Stawka trenera — Anna Nowak |
+| `TrainerContract` | Umowa trenera — Anna Nowak — UM/2026 |
+| `TrainerContractLocation` | Lokalizacja umowy trenera — Anna Nowak — UM/2026 — Niepołomice |
+| `TrainerMonthlySettlement` | Rozliczenie trenera — Anna Nowak — 2026-10 |
+
+Przy brakujących nazwach stosowana jest polska nazwa rodzaju obiektu z ID, np.
+`Płatność — klient #123`. Wpisy historyczne zapisane przed tą poprawką zachowują
+stare etykiety; nie uzupełniamy ich obecnymi danymi. Zmiana nie wymaga nowej
+migracji, nie zmienia kontraktu API ani nie dodaje zapytań przy odczycie historii.
+
+### Filtr „Kto wykonał zmianę”
+
+Filtr już istnieje: `GET /api/activity-log?actorUserId=123`.
+Należy przekazywać ID **użytkownika**, nie ID trenera lub klienta. Etykietą opcji
+może być nazwisko, ale wartością musi być ID — dwie osoby mogą mieć tę samą nazwę.
+Zmiana nazwiska nie wpływa na filtrowanie, a `actorName` we wpisie zachowuje nazwę
+z chwili operacji. Przykład łączenia filtrów:
+`GET /api/activity-log?actorUserId=123&entityType=ClientPayment&operation=Updated`.
+
+Dla automatycznych operacji użyj `source=System` i pomiń `actorUserId`.
+`search` wyszukuje zarówno nazwę wykonawcy, jak i obiektu, więc nie zastępuje
+dokładnego filtra użytkownika. Metadata zwraca słowniki typów/operacji/źródeł,
+nie pełną listę użytkowników; lista autorów z pojedynczej strony logu również
+nie jest kompletną listą dostępnych wykonawców.
 
 ## Zakres
 
