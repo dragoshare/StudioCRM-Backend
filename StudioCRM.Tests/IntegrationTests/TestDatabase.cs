@@ -26,7 +26,11 @@ internal sealed class TestDatabase : IAsyncDisposable
         try
         {
             await using var context = database.Context();
-            await context.Database.ExecuteSqlRawAsync(context.Database.GenerateCreateScript());
+            await context.Database.OpenConnectionAsync();
+            await using var create = context.Database.GetDbConnection().CreateCommand();
+            // Execute generated DDL literally: JSON defaults can contain braces.
+            create.CommandText = context.Database.GenerateCreateScript();
+            await create.ExecuteNonQueryAsync();
             return database;
         }
         catch { await database.DisposeAsync(); throw; }
