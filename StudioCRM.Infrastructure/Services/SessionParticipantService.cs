@@ -83,16 +83,17 @@ public class SessionParticipantService : ISessionParticipantService
             p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate") >= session.PublicCapacity.Value)
             throw new InvalidOperationException("Session capacity has been reached.");
 
+        if (GroupBookingPolicy.IsGroup(session))
+            GroupBookingPolicy.EnsureRegistrationOpen(session, DateTime.UtcNow);
         var alreadyExists = await _context.SessionParticipants
             .AnyAsync(sp => sp.SessionId == sessionId && sp.ClientId == request.ClientId);
 
         if (alreadyExists)
             throw new InvalidOperationException("Client is already assigned to this session.");
 
-        var activeClientPackage = await ResolveActiveClientPackageAsync(
-            client.Id,
-            session.PlannedSessionType,
-            session.LocationId);
+        var activeClientPackage = await PackageBookingEligibility.ResolveAsync(_context, client.Id, session, NormalizeSessionsCharged(request.SessionsCharged), request.ClientPackageId);
+        if (GroupBookingPolicy.IsGroup(session) && activeClientPackage == null)
+            throw new InvalidOperationException("A paid, valid group package with an available entry is required. Use the payment preparation flow.");
         var sessionsCharged = NormalizeSessionsCharged(request.SessionsCharged);
 
         var participant = new SessionParticipant
@@ -102,7 +103,7 @@ public class SessionParticipantService : ISessionParticipantService
             PackageId = activeClientPackage?.PackageId,
             ClientPackageId = activeClientPackage?.Id,
             AttendanceStatus = "Planned",
-            CountsAgainstPackage = request.CountsAgainstPackage,
+            CountsAgainstPackage = GroupBookingPolicy.IsGroup(session) || request.CountsAgainstPackage,
             SessionsCharged = sessionsCharged,
             PlannedBillingType = activeClientPackage?.ExpectedBillingType,
             ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
@@ -237,6 +238,10 @@ public class SessionParticipantService : ISessionParticipantService
         if (!Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))
             throw new InvalidOperationException("Invalid actual session type.");
 
+        if (!Enum.IsDefined(actualBillingType) ||
+            GroupBookingPolicy.IsGroup(session) != (actualBillingType == SessionBillingType.Group))
+            throw new InvalidOperationException("Group and personal sessions must be accounted separately.");
+
         var updatesCompletedSession =
             session.Status == "Completed" ||
             session.Participants.Any(p => p.IsCountedFromPackage);
@@ -298,12 +303,15 @@ public class SessionParticipantService : ISessionParticipantService
                 var activeClientPackage = await _context.ClientPackages
                     .Where(cp =>
                         cp.ClientId == client.Id &&
-                        cp.IsActive &&
+                        cp.IsActive && cp.ClosureDisposition == null &&
+                        (cp.ValidUntil == null || cp.ValidUntil >= session.StartAt) &&
+                        (actualBillingType != SessionBillingType.Group || cp.PaymentStatus == PaymentStatus.Paid) &&
                         (actualBillingType == SessionBillingType.Group
                             ? cp.ExpectedBillingType == SessionBillingType.Group
                             : cp.ExpectedBillingType != SessionBillingType.Group) &&
                         (cp.LocationId == null || cp.LocationId == session.LocationId))
-                    .OrderByDescending(cp => cp.PurchaseDate)
+                    .OrderByDescending(cp => cp.Id == participant.ClientPackageId)
+                    .ThenByDescending(cp => cp.PurchaseDate)
                     .FirstOrDefaultAsync();
 
                 if (activeClientPackage is not null)

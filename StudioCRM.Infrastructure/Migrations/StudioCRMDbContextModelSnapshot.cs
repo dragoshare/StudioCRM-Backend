@@ -1179,6 +1179,41 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.ToTable("ExternalCalendarEvents");
                 });
 
+            modelBuilder.Entity("StudioCRM.Domain.Entities.GroupEnrollmentRequest", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientPackageId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("CreatedByUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("ClientPackageId");
+
+                    b.HasIndex("SessionId", "ClientId")
+                        .IsUnique();
+
+                    b.ToTable("GroupEnrollmentRequests");
+                });
+
             modelBuilder.Entity("StudioCRM.Domain.Entities.Invitation", b =>
                 {
                     b.Property<int>("Id")
@@ -2864,6 +2899,33 @@ namespace StudioCRM.Infrastructure.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("CalendarIntegration");
+
+                    b.Navigation("Session");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.GroupEnrollmentRequest", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.ClientPackage", "ClientPackage")
+                        .WithMany()
+                        .HasForeignKey("ClientPackageId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.Session", "Session")
+                        .WithMany()
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ClientPackage");
 
                     b.Navigation("Session");
                 });

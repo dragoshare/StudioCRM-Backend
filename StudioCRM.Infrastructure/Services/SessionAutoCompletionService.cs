@@ -97,7 +97,8 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
         if (billableParticipants.Count == 0)
             return null;
 
-        var actualSessionType = ResolveActualSessionType(billableParticipants.Count);
+        var actualSessionType = GroupBookingPolicy.IsGroup(session)
+            ? SessionBillingType.Group : ResolveActualSessionType(billableParticipants.Count);
 
         if (actualSessionType is null)
         {
@@ -147,7 +148,7 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
             2 => SessionBillingType.TwoToOne,
             3 => SessionBillingType.ThreeToOne,
             4 => SessionBillingType.FourToOne,
-            _ => SessionBillingType.Group
+            _ => null
         };
     }
 }

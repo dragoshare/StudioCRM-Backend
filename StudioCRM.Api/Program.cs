@@ -97,6 +97,7 @@ builder.Services.AddScoped<IOperationalAlertService, OperationalAlertService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddScoped<IStudioSettingsService, StudioSettingsService>();
 builder.Services.AddScoped<IOutlookContactService, OutlookContactService>();
+builder.Services.AddScoped<GroupEnrollmentService>();
 builder.Services.AddScoped<ISessionAutoCompletionService, SessionAutoCompletionService>();
 builder.Services.AddScoped<IAvatarService, AvatarService>();
 builder.Services.AddScoped<IPublicGroupClassService, PublicGroupClassService>();

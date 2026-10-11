@@ -366,7 +366,7 @@ public class PublicGroupClassService : IPublicGroupClassService
         if (bookedSeats >= capacity)
             throw new InvalidOperationException("Group class is fully booked.");
 
-        var clientPackage = await ResolveBookableGroupPackageAsync(client.Id, session.LocationId);
+        var clientPackage = await ResolveBookableGroupPackageAsync(client.Id, session.LocationId, session.StartAt);
 
         if (clientPackage is null)
             throw new InvalidOperationException("Client needs a paid group package with remaining entries before booking.");
@@ -635,16 +635,16 @@ public class PublicGroupClassService : IPublicGroupClassService
         membership.UpdatedAt = DateTime.UtcNow;
     }
 
-    private async Task<ClientPackage?> ResolveBookableGroupPackageAsync(int clientId, int sessionLocationId)
+    private async Task<ClientPackage?> ResolveBookableGroupPackageAsync(int clientId, int sessionLocationId, DateTime sessionStartAt)
     {
         var packages = await _context.ClientPackages
             .Include(cp => cp.Package)
             .Where(cp =>
                 cp.ClientId == clientId &&
-                cp.IsActive &&
+                cp.IsActive && cp.ClosureDisposition == null &&
                 cp.ExpectedBillingType == SessionBillingType.Group &&
                 cp.PaymentStatus == PaymentStatus.Paid &&
-                (cp.ValidUntil == null || cp.ValidUntil >= DateTime.UtcNow) &&
+                (cp.ValidUntil == null || cp.ValidUntil >= sessionStartAt) &&
                 (cp.LocationId == null || cp.LocationId == sessionLocationId))
             .OrderBy(cp => cp.ValidUntil ?? DateTime.MaxValue)
             .ThenBy(cp => cp.PurchaseDate)

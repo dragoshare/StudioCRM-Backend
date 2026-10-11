@@ -54,6 +54,10 @@ public partial class ClientPackageService : IClientPackageService
         if (package is null)
             throw new InvalidOperationException("Package does not exist.");
 
+        if (request.ExpectedBillingType.HasValue &&
+            (!Enum.IsDefined(request.ExpectedBillingType.Value) ||
+             (request.ExpectedBillingType == SessionBillingType.Group) != (package.BillingType == SessionBillingType.Group)))
+            throw new InvalidOperationException("Group and personal package types cannot be interchanged.");
         var isGroupPackage = (request.ExpectedBillingType ?? package.BillingType) == SessionBillingType.Group;
         if (package.LocationId.HasValue && package.LocationId.Value != client.LocationId &&
             (!isGroupPackage || !await _context.ClientLocationMemberships.AnyAsync(x =>

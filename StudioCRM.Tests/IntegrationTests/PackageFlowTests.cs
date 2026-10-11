@@ -1,0 +1,139 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging.Abstractions;
+using StudioCRM.Application.ClientPackages.Services;
+using StudioCRM.Application.DTOs.Settings;
+using StudioCRM.Application.Interfaces;
+using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
+using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Infrastructure.Services;
+
+namespace StudioCRM.Tests.IntegrationTests;
+public class PackageFlowTests
+{
+    private sealed class Settings : IStudioSettingsService
+    {
+        public Task<OwnerSettingsDto> GetOwnerSettingsAsync() => Task.FromResult(new OwnerSettingsDto { DefaultPackageValidityDays = 90, DefaultPaymentDueDays = 7 });
+        public Task<OwnerSettingsDto> UpdateOwnerSettingsAsync(UpdateOwnerSettingsDto r) => throw new NotSupportedException();
+    }
+    private static async Task<(Client client, Session session, Package catalog, PortalSecurityTests.Actor owner)> Seed(StudioCRMDbContext db)
+    {
+        var trainer = new Trainer { User = new User { Email = "owner-flow@test.invalid" } };
+        var location = new Location { Name = "Flow" };
+        var client = new Client { Location = location, Trainer = trainer, FirstName = "Test" };
+        var session = new Session { Trainer = trainer, Location = location, PlannedSessionType = "Group", PublicCapacity = 2,
+            StartAt = DateTime.UtcNow.AddDays(2), EndAt = DateTime.UtcNow.AddDays(2).AddHours(1) };
+        var catalog = new Package { Name = "Group", Location = location, BillingType = SessionBillingType.Group, SessionsLimit = 4, DurationDays = 30, Price = 100, IsActive = true };
+        db.AddRange(session, catalog, new ClientLocationMembership { Client = client, Location = location, GroupAccessEnabled = true });
+        await db.SaveChangesAsync(); return (client, session, catalog, new(trainer.UserId, "Owner"));
+    }
+    private static SessionParticipantService Participants(StudioCRMDbContext db, PortalSecurityTests.Actor owner) =>
+        new(db, owner, null!, new PortalSecurityTests.NoSync(), NullLogger<SessionParticipantService>.Instance);
+
+    [PostgresFact]
+    public async Task WorkerKeepsSingleParticipantGroupSeparateFromPersonalPackage()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.StartAt = DateTime.UtcNow.AddHours(-2); session.EndAt = DateTime.UtcNow.AddHours(-1);
+        var group = new ClientPackage { Client = client, Package = catalog, ExpectedBillingType = SessionBillingType.Group,
+            PaymentStatus = PaymentStatus.Paid, TotalSessions = 4, ExpectedUnitPrice = 25, LocationId = session.LocationId };
+        var personal = new ClientPackage { Client = client, Package = new Package { Name = "Personal", BillingType = SessionBillingType.FourToOne },
+            ExpectedBillingType = SessionBillingType.FourToOne, TotalSessions = 8, ExpectedUnitPrice = 100 };
+        db.AddRange(group, personal, new SessionParticipant { Session = session, Client = client }); await db.SaveChangesAsync();
+        var worker = new SessionAutoCompletionService(db, Participants(db, owner), NullLogger<SessionAutoCompletionService>.Instance);
+        var result = await worker.CompleteFinishedSessionsAsync();
+        Assert.Equal(1, result.CompletedCount); Assert.Equal(0, result.FailedCount);
+        Assert.Equal("Group", (await db.Sessions.SingleAsync()).ActualSessionType);
+        Assert.Equal(1, group.UsedSessions); Assert.Equal(0, personal.UsedSessions);
+        Assert.Equal(group.Id, (await db.SessionParticipants.SingleAsync()).ClientPackageId);
+    }
+
+    [PostgresFact]
+    public async Task ManualAndCompletionPathsRejectGroupPersonalMixWithoutCharging()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        var pass = new ClientPackage { Client = client, Package = catalog, ExpectedBillingType = SessionBillingType.OneToOne, TotalSessions = 4 };
+        var participant = new SessionParticipant { Client = client, Session = session };
+        db.AddRange(pass, participant); await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => PortalSecurityTests.Sessions(db, owner).CountSessionFromPackageAsync(new()
+            { SessionParticipantId = participant.Id, ClientPackageId = pass.Id, ActualBillingType = SessionBillingType.Group }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Participants(db, owner).CompleteSessionAsync(session.Id, new()
+            { ActualSessionType = "OneToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true }] }));
+        Assert.Equal(0, await db.ClientPackages.Select(p => p.UsedSessions).SingleAsync());
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [PostgresFact]
+    public async Task WaitingForPaymentDoesNotReserveAndConfirmedPaymentAllowsBooking()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        var service = new GroupEnrollmentService(db, owner, Participants(db, owner));
+        var request = new StudioCRM.Application.DTOs.SessionParticipants.PrepareGroupEnrollmentRequest { ClientId = client.Id, PackageId = catalog.Id };
+        var waiting = await service.PrepareAsync(session.Id, request);
+        Assert.Equal("AwaitingPayment", waiting.Status); Assert.False(waiting.ReservesSeat);
+        Assert.Equal(waiting.Id, (await service.PrepareAsync(session.Id, request)).Id);
+        Assert.Single(await db.ClientPackages.ToListAsync()); Assert.Empty(await db.SessionParticipants.ToListAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ConfirmAsync(waiting.Id));
+        await PortalSecurityTests.Payments(db, owner).CreatePaymentAsStaffAsync(new() { ClientId = client.Id, ClientPackageId = waiting.ClientPackageId, Amount = 100, Method = PaymentMethod.Cash });
+        Assert.Empty(await db.SessionParticipants.ToListAsync());
+        var booked = await service.ConfirmAsync(waiting.Id);
+        Assert.Equal("Booked", booked.Status); Assert.True(booked.ReservesSeat);
+        Assert.Equal(booked, await service.ConfirmAsync(waiting.Id));
+        Assert.Single(await db.SessionParticipants.ToListAsync());
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => new GroupEnrollmentService(db, new PortalSecurityTests.Actor(999, "Client"), Participants(db, owner)).GetAsync(waiting.Id));
+    }
+
+    [PostgresFact]
+    public async Task PaymentDoesNotGuaranteeSeatWhenClassBecomesFull()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        var service = new GroupEnrollmentService(db, owner, Participants(db, owner));
+        var waiting = await service.PrepareAsync(session.Id, new() { ClientId = client.Id, PackageId = catalog.Id });
+        await PortalSecurityTests.Payments(db, owner).CreatePaymentAsStaffAsync(new() { ClientId = client.Id, ClientPackageId = waiting.ClientPackageId, Amount = 100, Method = PaymentMethod.Cash });
+        session.PublicCapacity = 0; await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ConfirmAsync(waiting.Id));
+        Assert.Empty(await db.SessionParticipants.ToListAsync());
+        Assert.Equal(PaymentStatus.Paid, (await db.ClientPackages.SingleAsync()).PaymentStatus);
+    }
+
+    [PostgresFact]
+    public async Task ExpiredPackageBlocksSessionUntilOwnerExtendsIt()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId, ExpectedBillingType = SessionBillingType.Group,
+            TotalSessions = 4, PaymentStatus = PaymentStatus.Paid, ValidUntil = DateTime.UtcNow.AddDays(-1), IsActive = true };
+        db.Add(pass); await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Participants(db, owner).AddParticipantAsync(session.Id, new() { ClientId = client.Id }));
+        var management = new ClientPackageService(db, owner, new Settings());
+        var preview = await management.GetManagementPreviewAsync(client.Id, pass.Id);
+        await management.DecideExpiredAsync(client.Id, pass.Id, new() { Action = "Extend", ValidUntil = DateTime.UtcNow.AddDays(10), ExpectedVersion = preview.Version, Reason = "Owner approved" });
+        await Participants(db, owner).AddParticipantAsync(session.Id, new() { ClientId = client.Id });
+        Assert.Single(await db.SessionParticipants.ToListAsync());
+        Assert.Contains(await db.ClientAuditEntries.ToListAsync(), x => x.Action == "ExpiredPackageExtended");
+    }
+
+    [Theory]
+    [InlineData(true)] [InlineData(false)]
+    public async Task OwnerEndsExpiredCycleAndRenewalHonorsClientSetting(bool autoRenew)
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("TPAY_TEST_DB"))) return;
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        catalog.BillingType = SessionBillingType.OneToOne; client.SubscriptionAutoRenewEnabled = autoRenew;
+        var pass = new ClientPackage { Client = client, Package = catalog, ExpectedBillingType = SessionBillingType.OneToOne,
+            TotalSessions = 4, UsedSessions = 1, TotalPrice = 100, AmountPaid = 40, ValidUntil = DateTime.UtcNow.AddDays(-1), IsActive = true };
+        db.Add(pass); await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, owner, new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+        var next = await service.DecideExpiredAsync(client.Id, pass.Id, new() { Action = "End", ExpectedVersion = preview.Version, Reason = "End expired cycle" });
+        Assert.Equal(autoRenew, next.HasValue); Assert.False(pass.IsActive); Assert.Equal(1, pass.UsedSessions); Assert.Equal(40, pass.AmountPaid);
+        Assert.Equal("ClosedWithDebt", pass.ClosureDisposition);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.DecideExpiredAsync(client.Id, pass.Id, new() { Action = "End", ExpectedVersion = preview.Version, Reason = "Retry" }));
+        Assert.Equal(autoRenew ? 2 : 1, await db.ClientPackages.CountAsync());
+    }
+}

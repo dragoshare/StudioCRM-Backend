@@ -295,7 +295,7 @@ public class PortalSecurityTests
         var location = new Location { Name = "A", City = "Test" };
         var client = new Client { Trainer = trainer, Location = location };
         var package = new Package { Name = "Group", BillingType = SessionBillingType.Group, Location = location, Price = 160, SessionsLimit = 4 };
-        var cycle = new ClientPackage { Client = client, Package = package, Location = location, IsActive = true, ExpectedBillingType = SessionBillingType.Group, ExpectedUnitPrice = 40, TotalSessions = 4, TotalPrice = 160 };
+        var cycle = new ClientPackage { Client = client, Package = package, Location = location, IsActive = true, ExpectedBillingType = SessionBillingType.Group, ExpectedUnitPrice = 40, TotalSessions = 4, TotalPrice = 160, PaymentStatus = PaymentStatus.Paid };
         var session = new Session { Trainer = trainer, Location = location, PlannedSessionType = "Group", StartAt = DateTime.UtcNow.AddDays(-1), EndAt = DateTime.UtcNow.AddDays(-1).AddHours(1) };
         seed.AddRange(cycle, new SessionParticipant { Session = session, Client = client, ClientPackage = cycle }); await seed.SaveChangesAsync();
         async Task Complete()
@@ -321,6 +321,8 @@ public class PortalSecurityTests
         var session = new Session { Trainer = trainer, Location = location, PlannedSessionType = "Group", PublicCapacity = 1,
             StartAt = DateTime.UtcNow.AddDays(3), EndAt = DateTime.UtcNow.AddDays(3).AddHours(1) };
         var clients = new[] { new Client { Location = location, FirstName = "A" }, new Client { Location = location, FirstName = "B" } };
+        var catalog = new Package { Name = "Group", BillingType = SessionBillingType.Group };
+        foreach (var c in clients) seed.Add(new ClientPackage { Client = c, Package = catalog, ExpectedBillingType = SessionBillingType.Group, TotalSessions = 4, PaymentStatus = PaymentStatus.Paid });
         seed.AddRange(session, clients[0], clients[1]); await seed.SaveChangesAsync();
         async Task<bool> Add(int clientId)
         {
@@ -331,5 +333,6 @@ public class PortalSecurityTests
         }
         Assert.Single((await Task.WhenAll(Add(clients[0].Id), Add(clients[1].Id))).Where(x => x));
         Assert.Equal(1, await seed.SessionParticipants.CountAsync());
+        Assert.True((await seed.SessionParticipants.SingleAsync()).CountsAgainstPackage);
     }
 }
