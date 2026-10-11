@@ -1,4 +1,8 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
+using System.Security.Cryptography;
+using System.Text;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.WebUtilities;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
@@ -17,25 +21,39 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
     private readonly ICurrentUserService _currentUser;
     private readonly OutlookSettings _settings;
     private readonly HttpClient _httpClient;
+    private readonly IHttpContextAccessor _http;
 
     public OutlookCalendarAuthService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         IOptions<OutlookSettings> options,
-        HttpClient httpClient)
+        HttpClient httpClient, IHttpContextAccessor http)
     {
         _context = context;
         _currentUser = currentUser;
         _settings = options.Value;
         _httpClient = httpClient;
+        _http = http;
     }
 
-    public Task<CalendarConnectUrlDto> GetConnectUrlAsync()
+    public async Task<CalendarConnectUrlDto> GetConnectUrlAsync()
     {
         if (!_currentUser.UserId.HasValue)
             throw new InvalidOperationException("User is not authenticated.");
 
-        var state = _currentUser.UserId.Value.ToString();
+        var browser = _http.HttpContext ?? throw new InvalidOperationException("Browser context required.");
+        var state = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var verifier = WebEncoders.Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
+        var hash = Hash(state);
+        await _context.OutlookOAuthChallenges.Where(c => c.ExpiresAt < DateTime.UtcNow).ExecuteDeleteAsync();
+        _context.OutlookOAuthChallenges.Add(new OutlookOAuthChallenge
+        {
+            Id = hash, UserId = _currentUser.UserId.Value, CodeVerifier = verifier, ExpiresAt = DateTime.UtcNow.AddMinutes(10)
+        });
+        await _context.SaveChangesAsync();
+        browser.Response.Cookies.Append(CookieName(state), state, new CookieOptions
+        { HttpOnly = true, Secure = true, SameSite = SameSiteMode.Lax, Path = "/", MaxAge = TimeSpan.FromMinutes(10), IsEssential = true });
+        var challenge = WebEncoders.Base64UrlEncode(SHA256.HashData(Encoding.ASCII.GetBytes(verifier)));
 
         var url =
             $"https://login.microsoftonline.com/{_settings.TenantId}/oauth2/v2.0/authorize" +
@@ -45,17 +63,28 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
             $"&response_mode=query" +
             $"&scope={Uri.EscapeDataString(_settings.Scopes)}" +
             $"&prompt=consent" +
-            $"&state={Uri.EscapeDataString(state)}";
+            $"&state={Uri.EscapeDataString(state)}&code_challenge={challenge}&code_challenge_method=S256";
 
-        return Task.FromResult(new CalendarConnectUrlDto { Url = url });
+        return new CalendarConnectUrlDto { Url = url };
     }
 
     public async Task ConnectCallbackAsync(string code, string? state)
     {
-        if (string.IsNullOrWhiteSpace(state) || !int.TryParse(state, out var userId))
-            throw new InvalidOperationException("Invalid state.");
-
-        var token = await ExchangeCodeForTokenAsync(code);
+        if (string.IsNullOrWhiteSpace(state) || state.Length != 43 || string.IsNullOrWhiteSpace(code))
+            throw new InvalidOperationException("Invalid or expired OAuth state.");
+        var browser = _http.HttpContext ?? throw new InvalidOperationException("Browser context required.");
+        var cookie = browser.Request.Cookies[CookieName(state)];
+        if (cookie is null || !CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(cookie), Encoding.UTF8.GetBytes(state)))
+            throw new InvalidOperationException("OAuth browser correlation failed. Start connection again.");
+        var hash = Hash(state);
+        var challenge = await _context.OutlookOAuthChallenges.AsNoTracking().SingleOrDefaultAsync(c => c.Id == hash && c.ExpiresAt > DateTime.UtcNow);
+        if (challenge is null || await _context.OutlookOAuthChallenges.Where(c => c.Id == hash && c.ExpiresAt > DateTime.UtcNow).ExecuteDeleteAsync() != 1)
+            throw new InvalidOperationException("Invalid or expired OAuth state.");
+        browser.Response.Cookies.Delete(CookieName(state), new CookieOptions { Secure = true, Path = "/" });
+        var userId = challenge.UserId;
+        if (!await _context.Users.AnyAsync(u => u.Id == userId && u.IsActive && u.UserRoles.Any(r => r.Role.Name == "Owner" || r.Role.Name == "Trainer")))
+            throw new InvalidOperationException("Account cannot connect Outlook.");
+        var token = await ExchangeCodeForTokenAsync(code, challenge.CodeVerifier);
 
         if (string.IsNullOrWhiteSpace(token.AccessToken))
             throw new InvalidOperationException("Access token is empty!");
@@ -131,7 +160,7 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
     }
 
     // 🔥 KLUCZOWA METODA (NAPRAWIONA)
-    private async Task<OutlookTokenResponse> ExchangeCodeForTokenAsync(string code)
+    private async Task<OutlookTokenResponse> ExchangeCodeForTokenAsync(string code, string verifier)
     {
         var tokenUrl = $"https://login.microsoftonline.com/{_settings.TenantId}/oauth2/v2.0/token";
 
@@ -140,6 +169,7 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
             ["client_id"] = _settings.ClientId,
             ["client_secret"] = _settings.ClientSecret,
             ["code"] = code,
+            ["code_verifier"] = verifier,
             ["redirect_uri"] = _settings.RedirectUri,
             ["grant_type"] = "authorization_code",
             ["scope"] = _settings.Scopes
@@ -149,7 +179,7 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Microsoft token error: {body}");
+            throw new InvalidOperationException("Microsoft token exchange failed. Start connection again.");
 
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
@@ -175,7 +205,7 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
         var body = await response.Content.ReadAsStringAsync();
 
         if (!response.IsSuccessStatusCode)
-            throw new InvalidOperationException($"Microsoft profile error: {body}");
+            throw new InvalidOperationException("Microsoft profile request failed.");
 
         using var doc = JsonDocument.Parse(body);
         var root = doc.RootElement;
@@ -188,6 +218,9 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
                 : root.GetProperty("userPrincipalName").GetString() ?? ""
         };
     }
+
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+    private static string CookieName(string state) => "__Host-atlas-outlook-" + Hash(state)[..16];
 
     private class OutlookTokenResponse
     {

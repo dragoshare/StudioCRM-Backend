@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Packages;
 using StudioCRM.Application.Interfaces;
@@ -18,6 +18,25 @@ public class PackageService : IPackageService
     {
         _context = context;
         _currentUser = currentUser;
+    }
+
+    public async Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<PackageOptionDto>> GetOptionsAsync(StudioCRM.Application.DTOs.TrainerPortal.PortalPageFilter filter, bool? isActive = true)
+    {
+        filter.Validate();
+        var query = VisiblePackages();
+        if (filter.LocationId.HasValue) query = query.Where(p => p.LocationId == null || p.LocationId == filter.LocationId);
+        if (isActive.HasValue) query = query.Where(p => p.IsActive == isActive);
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            query = query.Where(p => p.Name.ToLower().Contains(term));
+        }
+        var total = await query.CountAsync();
+        var items = await query.OrderBy(p => p.Name).ThenBy(p => p.Id).Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
+            .Select(p => new PackageOptionDto { Id = p.Id, Name = p.Name, LocationId = p.LocationId,
+                Price = p.Price, Currency = p.Currency, PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(p.BillingType),
+                BillingType = p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive }).ToListAsync();
+        return new() { Items = items, TotalCount = total, Page = filter.Page, PageSize = filter.PageSize, TotalPages = (int)Math.Ceiling(total / (double)filter.PageSize) };
     }
 
     public async Task<PackageDto> CreateAsync(CreatePackageDto request)
@@ -55,9 +74,9 @@ public class PackageService : IPackageService
         return MapToDto(package);
     }
 
-    public async Task<List<PackageDto>> GetAllAsync(int? locationId = null)
+    public async Task<List<PackageDto>> GetAllAsync(int? locationId = null, bool? isActive = null)
     {
-        var query = _context.Packages
+        var query = VisiblePackages()
             .Include(p => p.Location)
             .AsQueryable();
 
@@ -66,6 +85,7 @@ public class PackageService : IPackageService
             query = query.Where(p => p.LocationId == locationId.Value);
         }
 
+        if (isActive.HasValue) query = query.Where(p => p.IsActive == isActive);
         return await query
             .OrderByDescending(p => p.CreatedAt)
             .Select(p => MapToDto(p))
@@ -74,7 +94,7 @@ public class PackageService : IPackageService
 
     public async Task<PackageDto?> GetByIdAsync(int id)
     {
-        return await _context.Packages
+        return await VisiblePackages()
             .Include(p => p.Location)
             .Where(p => p.Id == id)
             .Select(p => MapToDto(p))
@@ -184,7 +204,7 @@ public class PackageService : IPackageService
 
     public async Task<List<ClientDto>?> GetClientsAsync(int id)
     {
-        var packageExists = await _context.Packages.AnyAsync(p => p.Id == id);
+        var packageExists = await VisiblePackages().AnyAsync(p => p.Id == id);
         if (!packageExists)
         {
             return null;
@@ -249,6 +269,15 @@ public class PackageService : IPackageService
                     : null
             })
             .ToListAsync();
+    }
+
+    private IQueryable<Package> VisiblePackages()
+    {
+        var query = _context.Packages.AsNoTracking();
+        if (_currentUser.IsOwner) return query;
+        if (!_currentUser.IsTrainer || !_currentUser.UserId.HasValue) return query.Where(p => false);
+        return query.Where(p => p.LocationId == null || _context.TrainerLocations.Any(t =>
+            t.Trainer.UserId == _currentUser.UserId.Value && t.LocationId == p.LocationId));
     }
 
     private static PackageDto MapToDto(Package package)

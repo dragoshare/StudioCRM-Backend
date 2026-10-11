@@ -9,7 +9,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class TrainerPortalService : ITrainerPortalService
+public partial class TrainerPortalService : ITrainerPortalService
 {
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
@@ -132,27 +132,29 @@ public class TrainerPortalService : ITrainerPortalService
 
     public Task<bool> DeactivateClientAsync(int clientId) => _clientService.DeleteAsync(clientId);
 
-    public async Task<List<TrainerPortalSessionDto>> GetSessionsAsync()
+    public async Task<List<TrainerPortalSessionDto>> GetSessionsAsync(DateTime? from = null, DateTime? to = null)
     {
         var trainerId = await GetCurrentTrainerIdAsync();
         if (trainerId is null)
             return new List<TrainerPortalSessionDto>();
 
-        var locationIds = await _context.TrainerLocations
-            .Where(tl => tl.TrainerId == trainerId.Value)
-            .Select(tl => tl.LocationId)
-            .ToListAsync();
+        if (from.HasValue != to.HasValue)
+            throw new InvalidOperationException("Both from and to are required.");
+        from = NormalizeNullableDateTime(from);
+        to = NormalizeNullableDateTime(to);
+        if (from.HasValue && (to <= from || to!.Value - from.Value > TimeSpan.FromDays(93)))
+            throw new InvalidOperationException("Date range must be positive and at most 93 days.");
 
-        if (locationIds.Count == 0)
-            return new List<TrainerPortalSessionDto>();
-
-        var sessions = await _context.Sessions
+        var rangeStart = from ?? DateTime.SpecifyKind(DateTime.MinValue, DateTimeKind.Utc);
+        var rangeEnd = to ?? DateTime.SpecifyKind(DateTime.MaxValue, DateTimeKind.Utc);
+        var sessions = await _context.Sessions.AsNoTracking()
+            .Where(s => s.StartAt < rangeEnd && s.EndAt > rangeStart)
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
             .Include(s => s.Participants)
             .ThenInclude(p => p.Client)
             .Include(s => s.Location)
-            .Where(s => locationIds.Contains(s.LocationId))
+            .Where(s => s.Location.TrainerLocations.Any(tl => tl.TrainerId == trainerId.Value))
             .OrderBy(s => s.StartAt)
             .ToListAsync();
 
@@ -339,7 +341,7 @@ public class TrainerPortalService : ITrainerPortalService
             }).ToList(),
             SessionId = s.Id,
             Title = s.Title,
-            Note = s.Note,
+            Note = canEdit ? s.Note : null,
             StartAt = ToStudioDisplayDateTime(s.StartAt),
             EndAt = ToStudioDisplayDateTime(s.EndAt),
             TrainerId = s.TrainerId,

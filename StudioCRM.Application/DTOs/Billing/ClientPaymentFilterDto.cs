@@ -4,6 +4,8 @@ namespace StudioCRM.Application.DTOs.Billing;
 
 public class ClientPaymentFilterDto
 {
+    [System.ComponentModel.DataAnnotations.StringLength(100)]
+    public string? Search { get; set; }
     public int? ClientId { get; set; }
     public int? LocationId { get; set; }
     public int? LegalEntityId { get; set; }

@@ -20,7 +20,9 @@ public class CalendarAddressMappingTests
         var registered = new Client { FirstName = "Jan", LastName = "Test", Email = "real@example.test", Location = location, Trainer = trainer };
         ClientCalendarAddress.Ensure(offline, "calendar.example.test");
         ClientCalendarAddress.Ensure(registered, "calendar.example.test");
-        db.AddRange(location, trainer, integration, offline, registered);
+        db.AddRange(location, trainer, integration, offline, registered,
+            new TrainerLocation { Trainer = trainer, Location = location },
+            new UserRole { User = trainer.User, Role = new Role { Name = "Trainer" } });
         await db.SaveChangesAsync();
         var evt = new ExternalCalendarEvent
         {

@@ -4,6 +4,7 @@ namespace StudioCRM.Application.DTOs.Billing;
 
 public class CreateClientPaymentRequest
 {
+    public Guid? IdempotencyKey { get; set; }
     public int? ClientId { get; set; }
     public int? ClientPackageId { get; set; }
 

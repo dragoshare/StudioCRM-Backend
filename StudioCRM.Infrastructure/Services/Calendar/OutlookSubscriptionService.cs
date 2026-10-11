@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -65,6 +65,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
         await DeleteActiveMicrosoftSubscriptionsForIntegrationAsync(integration);
 
         var expiresAt = DateTime.UtcNow.AddHours(48);
+        var clientState = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
 
         var payload = new
         {
@@ -72,7 +73,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             notificationUrl = webhookUrl,
             resource = "me/events",
             expirationDateTime = expiresAt.ToString("o"),
-            clientState = "StudioCRM-Outlook-Webhook"
+            clientState
         };
 
         var response = await SendCreateSubscriptionRequestAsync(integration.AccessToken, payload);
@@ -115,6 +116,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
             await _context.CalendarSubscriptions.AddAsync(existing);
         }
 
+        existing.ClientState = clientState;
         existing.SubscriptionId = subscriptionId;
         existing.Resource = "me/events";
         existing.ExpiresAt = expirationDateTime;
@@ -179,7 +181,7 @@ public class OutlookSubscriptionService : IOutlookSubscriptionService
 
         var now = DateTime.UtcNow;
 
-        if (subscription is null || !subscription.IsActive || subscription.ExpiresAt <= now)
+        if (subscription is null || string.IsNullOrEmpty(subscription.ClientState) || !subscription.IsActive || subscription.ExpiresAt <= now)
         {
             await CreateSubscriptionForIntegrationAsync(integration);
             return;

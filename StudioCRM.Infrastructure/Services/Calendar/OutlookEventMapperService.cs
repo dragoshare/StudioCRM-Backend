@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
@@ -18,6 +18,19 @@ public class OutlookEventMapperService
     }
 
     public async Task<(Session? Session, List<string> Warnings)> MapToSessionAsync(ExternalCalendarEvent evt)
+    {
+        await using var transaction = _context.Database.CurrentTransaction == null ? await _context.Database.BeginTransactionAsync() : null;
+        try
+        {
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74204, {evt.CalendarIntegrationId})");
+            var result = await MapCoreAsync(evt);
+            if (transaction != null) await transaction.CommitAsync();
+            return result;
+        }
+        catch { if (transaction != null) { await transaction.RollbackAsync(); _context.ChangeTracker.Clear(); } throw; }
+    }
+
+    private async Task<(Session? Session, List<string> Warnings)> MapCoreAsync(ExternalCalendarEvent evt)
     {
         var warnings = new List<string>();
 
@@ -70,6 +83,13 @@ public class OutlookEventMapperService
             return (null, warnings);
         }
         trainer = categoryTrainer.Trainer ?? trainer;
+        if (!await OutlookImportAccess.CanManageAsync(_context, calendarIntegration.UserId, trainer.Id, location.Id))
+        {
+            warnings.Add("Calendar account cannot manage this trainer or location.");
+            await SaveWarningsAsync(evt, warnings);
+            return (null, warnings);
+        }
+        var ownerCalendar = await OutlookImportAccess.IsOwnerAsync(_context, calendarIntegration.UserId);
 
         var attendeeEmails = ReadAttendeeEmails(evt.AttendeesJson)
             .Select(NormalizeEmail)
@@ -88,7 +108,7 @@ public class OutlookEventMapperService
             var client = await _context.Clients
                 .FirstOrDefaultAsync(c =>
                     ((c.CalendarEmail != null && c.CalendarEmail.ToLower() == email) || c.Email.ToLower() == email) &&
-                    !c.IsDeleted);
+                    !c.IsDeleted && (ownerCalendar || c.TrainerId == trainer.Id));
 
             if (client == null)
             {
@@ -102,7 +122,7 @@ public class OutlookEventMapperService
         var existingLink = await _context.CalendarEventLinks
             .Include(x => x.Session)
             .FirstOrDefaultAsync(x =>
-                x.Provider == evt.Provider &&
+                x.CalendarIntegrationId == evt.CalendarIntegrationId && x.Provider == evt.Provider &&
                 x.ExternalEventId == evt.ExternalEventId);
 
         if (existingLink != null || evt.IsConvertedToSession)
@@ -117,6 +137,14 @@ public class OutlookEventMapperService
 
         if (matchingSession is not null)
         {
+            await SessionWriteLock.AcquireAsync(_context, matchingSession.Id, clients.Select(c => c.Id));
+            await _context.Entry(matchingSession).ReloadAsync();
+            if (matchingSession.IsPubliclyBookable || matchingSession.Status == "Completed" || matchingSession.Status == "Cancelled")
+            {
+                warnings.Add("Public bookings and completed sessions must be managed in CRM.");
+                await SaveWarningsAsync(evt, warnings);
+                return (null, warnings);
+            }
             await AddMissingClientsToSessionAsync(matchingSession, clients, warnings);
             if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(
                 matchingSession.IsPubliclyBookable,
@@ -344,9 +372,8 @@ public class OutlookEventMapperService
         List<Client> clients,
         List<string> warnings)
     {
-        var existingClientIds = session.Participants
-            .Select(p => p.ClientId)
-            .ToHashSet();
+        var existingClientIds = (await _context.SessionParticipants.Where(p => p.SessionId == session.Id)
+            .Select(p => p.ClientId).ToListAsync()).ToHashSet();
 
         var missingClients = clients
             .DistinctBy(c => c.Id)
@@ -356,7 +383,7 @@ public class OutlookEventMapperService
         if (missingClients.Count == 0)
             return;
 
-        if (session.Participants.Count + missingClients.Count > 4)
+        if (existingClientIds.Count + missingClients.Count > Math.Min(4, session.PublicCapacity ?? 4))
         {
             warnings.Add(
                 $"Nie dopisano klientów do sesji CRM #{session.Id}, bo trener może prowadzić maksymalnie 4 osoby w jednej sesji.");

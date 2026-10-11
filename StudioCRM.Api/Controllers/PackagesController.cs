@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Clients;
@@ -21,10 +21,16 @@ public class PackagesController : ControllerBase
 
     [HttpGet]
     [Authorize(Roles = "Owner,Trainer")]
-    public async Task<ActionResult<List<PackageDto>>> GetAll([FromQuery] int? locationId)
+    public async Task<ActionResult<List<PackageDto>>> GetAll([FromQuery] int? locationId, [FromQuery] bool? isActive)
     {
-        return Ok(await _packageService.GetAllAsync(locationId));
+        return Ok(await _packageService.GetAllAsync(locationId, isActive));
     }
+
+    [HttpGet("options")]
+    [ProducesResponseType(typeof(StudioCRM.Application.DTOs.Billing.PagedResultDto<PackageOptionDto>), StatusCodes.Status200OK)]
+    [Authorize(Roles = "Owner,Trainer")]
+    public async Task<IActionResult> GetOptions([FromQuery] StudioCRM.Application.DTOs.TrainerPortal.PortalPageFilter filter, bool? isActive = true)
+        => Ok(await _packageService.GetOptionsAsync(filter, isActive));
 
     [HttpGet("{id:int}")]
     [Authorize(Roles = "Owner,Trainer")]

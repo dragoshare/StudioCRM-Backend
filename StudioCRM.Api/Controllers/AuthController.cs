@@ -1,4 +1,4 @@
-﻿using System.Security.Claims;
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Auth;
@@ -55,8 +55,8 @@ public class AuthController : ControllerBase
     [HttpPost("refresh")]
     public async Task<IActionResult> Refresh([FromBody] RefreshTokenRequestDto request)
     {
-        var result = await _authService.RefreshAsync(request);
-        return Ok(result);
+        try { return Ok(await _authService.RefreshAsync(request)); }
+        catch (InvalidOperationException) { return Unauthorized(new { message = "Invalid refresh token." }); }
     }
 
     [AllowAnonymous]
@@ -100,8 +100,10 @@ public class AuthController : ControllerBase
 
     [Authorize]
     [HttpPost("logout")]
-    public IActionResult Logout()
+    public async Task<IActionResult> Logout()
     {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        await _authService.LogoutAsync(userId);
         return Ok(new { message = "Logged out successfully." });
     }
 

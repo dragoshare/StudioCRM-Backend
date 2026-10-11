@@ -1,0 +1,146 @@
+{
+  "environment": "Local Kestrel HTTP \u002B real MVC/JWT/account validation \u002B isolated PostgreSQL; no proxy/TLS/provider calls; EF pooling disabled by test fixture",
+  "samplesPerRoute": 20,
+  "clients": 500,
+  "sessions": 365,
+  "payments": 100,
+  "packageCycles": 20,
+  "results": [
+    {
+      "route": "/api/trainer-portal/sessions",
+      "medianMs": 152.98,
+      "p95Ms": 360.26,
+      "bytes": 308785,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/sessions?from=2026-10-10T00:00:00Z\u0026to=2026-10-17T00:00:00Z",
+      "medianMs": 116.76,
+      "p95Ms": 223.16,
+      "bytes": 5881,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/sessions/filter?from=2026-10-10T00:00:00Z\u0026to=2026-10-17T00:00:00Z",
+      "medianMs": 191.52,
+      "p95Ms": 295.09,
+      "bytes": 11342,
+      "sqlMin": 5,
+      "sqlMax": 5
+    },
+    {
+      "route": "/api/trainer-portal/clients",
+      "medianMs": 113.04,
+      "p95Ms": 221.77,
+      "bytes": 190096,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/clients/page?pageSize=25",
+      "medianMs": 118.89,
+      "p95Ms": 223.38,
+      "bytes": 9484,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/clients/1/sessions/recent",
+      "medianMs": 167.84,
+      "p95Ms": 276.72,
+      "bytes": 898,
+      "sqlMin": 4,
+      "sqlMax": 4
+    },
+    {
+      "route": "/api/trainer-portal/clients/1/billing",
+      "medianMs": 408.7,
+      "p95Ms": 510.03,
+      "bytes": 127386,
+      "sqlMin": 8,
+      "sqlMax": 8
+    },
+    {
+      "route": "/api/trainer-portal/clients/1/billing/summary",
+      "medianMs": 207.42,
+      "p95Ms": 261.7,
+      "bytes": 290,
+      "sqlMin": 4,
+      "sqlMax": 4
+    },
+    {
+      "route": "/api/trainer-portal/payments/pending",
+      "medianMs": 122.57,
+      "p95Ms": 236.78,
+      "bytes": 55987,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/payments/pending/page?pageSize=25",
+      "medianMs": 138.2,
+      "p95Ms": 237.4,
+      "bytes": 28053,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/Packages/options",
+      "medianMs": 107.87,
+      "p95Ms": 213.5,
+      "bytes": 245,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/dashboard",
+      "medianMs": 417.06,
+      "p95Ms": 537.2,
+      "bytes": 11005,
+      "sqlMin": 9,
+      "sqlMax": 9
+    },
+    {
+      "route": "/api/trainer-portal/dashboard/summary",
+      "medianMs": 110.61,
+      "p95Ms": 314.51,
+      "bytes": 1593,
+      "sqlMin": 3,
+      "sqlMax": 3
+    },
+    {
+      "route": "/api/trainer-portal/settlement?year=2026\u0026month=10",
+      "medianMs": 360.89,
+      "p95Ms": 470.17,
+      "bytes": 3082,
+      "sqlMin": 8,
+      "sqlMax": 8
+    },
+    {
+      "route": "/api/trainer-portal/settlement/summary?year=2026\u0026month=10",
+      "medianMs": 362.01,
+      "p95Ms": 474.47,
+      "bytes": 294,
+      "sqlMin": 8,
+      "sqlMax": 8
+    },
+    {
+      "route": "/api/Notifications/page?pageSize=25",
+      "medianMs": 763.47,
+      "p95Ms": 969.31,
+      "bytes": 8354,
+      "sqlMin": 16,
+      "sqlMax": 16
+    },
+    {
+      "route": "/api/Notifications/unread-count",
+      "medianMs": 730.28,
+      "p95Ms": 1027.64,
+      "bytes": 157,
+      "sqlMin": 15,
+      "sqlMax": 15
+    }
+  ]
+}

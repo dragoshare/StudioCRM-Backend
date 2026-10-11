@@ -1,7 +1,9 @@
-﻿namespace StudioCRM.Domain.Entities;
+namespace StudioCRM.Domain.Entities;
 
 public class User
 {
+    public int AuthVersion { get; set; }
+
     public int Id { get; set; }
 
     public string Email { get; set; } = string.Empty;

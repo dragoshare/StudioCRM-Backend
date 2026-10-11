@@ -8,6 +8,9 @@ namespace StudioCRM.Application.Interfaces;
 
 public interface ITrainerPortalService
 {
+    Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<TrainerPortalClientDto>> GetClientsPageAsync(PortalPageFilter filter);
+    Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<GroupClientOptionDto>> GetGroupClientsAsync(PortalPageFilter filter);
+    Task<TrainerDashboardSummaryDto?> GetDashboardSummaryAsync();
     Task<TrainerPortalMeDto?> GetMeAsync();
     Task<TrainerPortalMeDto?> UpdateMeAsync(UpdateTrainerPortalProfileRequest request);
     Task<List<TrainerPortalClientDto>> GetClientsAsync();
@@ -16,7 +19,7 @@ public interface ITrainerPortalService
     Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId);
     Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request);
     Task<bool> DeactivateClientAsync(int clientId);
-    Task<List<TrainerPortalSessionDto>> GetSessionsAsync();
+    Task<List<TrainerPortalSessionDto>> GetSessionsAsync(DateTime? from = null, DateTime? to = null);
     Task<SessionDto?> GetSessionAsync(int sessionId);
     Task<SessionWorkspaceDto?> GetSessionWorkspaceAsync(int sessionId);
     Task<SessionDto> CreateSessionAsync(CreateSessionDto request);

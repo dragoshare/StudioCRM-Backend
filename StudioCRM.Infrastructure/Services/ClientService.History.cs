@@ -56,10 +56,11 @@ public partial class ClientService
         query = request.Scope switch
         {
             "Upcoming" => query.Where(x => x.Session.StartAt >= now && x.Session.Status != "Cancelled"),
+            "Completed" => query.Where(x => x.Session.Status == "Completed" && x.AttendanceStatus != "CancelledInTime" && x.AttendanceStatus != "CancelledLate"),
             "Past" => query.Where(x => x.Session.StartAt < now && x.Session.Status != "Cancelled"),
             "Cancelled" => query.Where(x => x.Session.Status == "Cancelled"),
             "All" => query,
-            _ => throw new InvalidOperationException("Scope must be All, Upcoming, Past or Cancelled.")
+            _ => throw new InvalidOperationException("Scope must be All, Upcoming, Past, Completed or Cancelled.")
         };
         var total = await query.CountAsync();
         var ordered = request.Scope == "Upcoming" ? query.OrderBy(x => x.Session.StartAt).ThenBy(x => x.Id)

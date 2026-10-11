@@ -361,6 +361,10 @@ public class AuthService : IAuthService
             return null;
         }
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {user.Id})");
+        await _context.Entry(user).ReloadAsync();
+        if (!user.IsActive || await ClientAccountAccess.IsBlockedAsync(_context, user.Id)) return null;
         var verificationResult = _passwordHasher.VerifyHashedPassword(
             user,
             user.PasswordHash,
@@ -386,6 +390,7 @@ public class AuthService : IAuthService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return BuildAuthResponse(user, refreshToken);
     }
 
@@ -446,6 +451,8 @@ public class AuthService : IAuthService
 
     public async Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+
         var refreshToken = await _context.RefreshTokens
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
@@ -458,6 +465,11 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("Invalid refresh token.");
         }
 
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {refreshToken.UserId})");
+        await _context.Entry(refreshToken).ReloadAsync();
+        await _context.Entry(refreshToken.User).ReloadAsync();
+        if (!refreshToken.IsActive || !refreshToken.User.IsActive)
+            throw new InvalidOperationException("Invalid refresh token.");
         refreshToken.RevokedAt = DateTime.UtcNow;
 
         var newRefreshToken = GenerateRefreshToken();
@@ -474,7 +486,19 @@ public class AuthService : IAuthService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         return BuildAuthResponse(refreshToken.User, newRefreshToken);
+    }
+
+    public async Task LogoutAsync(int userId)
+    {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {userId})");
+        await _context.Users.Where(u => u.Id == userId)
+            .ExecuteUpdateAsync(s => s.SetProperty(u => u.AuthVersion, u => u.AuthVersion + 1));
+        await _context.RefreshTokens.Where(t => t.UserId == userId && t.RevokedAt == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAt, DateTime.UtcNow));
+        await transaction.CommitAsync();
     }
 
     public async Task ForgotPasswordAsync(ForgotPasswordDto request)
@@ -535,13 +559,22 @@ public class AuthService : IAuthService
             throw new InvalidOperationException("Invalid or expired token.");
         }
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {resetToken.UserId})");
+        await _context.Entry(resetToken).ReloadAsync();
+        await _context.Entry(resetToken.User).ReloadAsync();
+        if (resetToken.IsUsed || resetToken.ExpiresAt <= DateTime.UtcNow || !resetToken.User.IsActive)
+            throw new InvalidOperationException("Invalid or expired token.");
         resetToken.User.PasswordHash =
             _passwordHasher.HashPassword(resetToken.User, request.NewPassword);
 
         resetToken.User.UpdatedAt = DateTime.UtcNow;
         resetToken.IsUsed = true;
+        resetToken.User.AuthVersion++;
+        await RevokeRefreshTokensAsync(resetToken.UserId);
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     public async Task ChangePasswordAsync(int userId, ChangePasswordDto request)
@@ -552,6 +585,8 @@ public class AuthService : IAuthService
         if (string.IsNullOrWhiteSpace(request.NewPassword))
             throw new InvalidOperationException("New password is required.");
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {userId})");
         var user = await _context.Users.FirstOrDefaultAsync(u => u.Id == userId && u.IsActive);
         if (user is null)
             throw new InvalidOperationException("User does not exist.");
@@ -564,10 +599,13 @@ public class AuthService : IAuthService
         if (verificationResult == PasswordVerificationResult.Failed)
             throw new InvalidOperationException("Current password is incorrect.");
 
+        user.AuthVersion++;
+        await RevokeRefreshTokensAsync(user.Id);
         user.PasswordHash = _passwordHasher.HashPassword(user, request.NewPassword);
         user.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
     }
 
     public async Task VerifyEmailAsync(VerifyEmailRequest request)
@@ -647,6 +685,7 @@ public class AuthService : IAuthService
     {
         var claims = new List<Claim>
         {
+            new Claim("auth_version", user.AuthVersion.ToString(System.Globalization.CultureInfo.InvariantCulture)),
             new Claim(JwtRegisteredClaimNames.Sub, user.Id.ToString()),
             new Claim(JwtRegisteredClaimNames.Email, user.Email),
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
@@ -669,6 +708,12 @@ public class AuthService : IAuthService
             signingCredentials: creds);
 
         return new JwtSecurityTokenHandler().WriteToken(token);
+    }
+
+    private async Task RevokeRefreshTokensAsync(int userId)
+    {
+        var tokens = await _context.RefreshTokens.Where(t => t.UserId == userId && t.RevokedAt == null).ToListAsync();
+        foreach (var token in tokens) token.RevokedAt = DateTime.UtcNow;
     }
 
     private static string GenerateRefreshToken()

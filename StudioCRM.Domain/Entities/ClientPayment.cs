@@ -4,6 +4,8 @@ namespace StudioCRM.Domain.Entities;
 
 public class ClientPayment
 {
+    public Guid? IdempotencyKey { get; set; }
+    public string? RequestFingerprint { get; set; }
     public int Id { get; set; }
 
     public int ClientId { get; set; }

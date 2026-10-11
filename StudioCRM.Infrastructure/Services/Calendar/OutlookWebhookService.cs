@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -177,7 +177,11 @@ public class OutlookWebhookService : IOutlookWebhookService
                     x.SubscriptionId == subscriptionId &&
                     x.IsActive);
 
-            if (subscription is null)
+            if (subscription is null || !subscription.CalendarIntegration.IsActive || subscription.ExpiresAt <= DateTime.UtcNow ||
+                string.IsNullOrEmpty(subscription.ClientState) ||
+                !notification.TryGetProperty("clientState", out var clientState) || clientState.ValueKind != JsonValueKind.String ||
+                !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(subscription.ClientState), Encoding.UTF8.GetBytes(clientState.GetString() ?? "")))
                 continue;
 
             var integration = subscription.CalendarIntegration;
@@ -410,11 +414,15 @@ public class OutlookWebhookService : IOutlookWebhookService
         string externalEventId,
         string currentOutlookTitle)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        if (!evt.SessionId.HasValue) return;
+        await SessionWriteLock.AcquireAsync(_context, evt.SessionId.Value);
         var session = await _context.Sessions
             .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
 
-        if (session == null)
+        if (session == null || session.Status == "Completed" || session.Status == "Cancelled" ||
+            !await OutlookImportAccess.CanManageAsync(_context, integration.UserId, session.TrainerId, session.LocationId))
             return;
 
         session.StartAt = evt.StartAt;
@@ -424,6 +432,8 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         if (location != null)
         {
+            if (!await OutlookImportAccess.CanManageAsync(_context, integration.UserId, session.TrainerId, location.Id))
+                throw new InvalidOperationException("Calendar account cannot manage this location.");
             session.LocationId = location.Id;
         }
 
@@ -433,6 +443,8 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
             _context, evt.CategoriesJson, session.LocationId);
+        if (categoryTrainer.Trainer != null && !await OutlookImportAccess.CanManageAsync(_context, integration.UserId, categoryTrainer.Trainer.Id, session.LocationId))
+            throw new InvalidOperationException("Calendar account cannot reassign this trainer.");
         var categoryWarning = OutlookTrainerCategoryResolver.ApplyToSession(
             session, categoryTrainer.Trainer, categoryTrainer.Warning);
         var warnings = JsonSerializer.Deserialize<List<string>>(evt.MappingWarningsJson ?? "[]") ?? new();
@@ -440,7 +452,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (categoryWarning != null) warnings.Add(categoryWarning);
         evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
 
-        await SyncSessionParticipantsFromOutlookAsync(session, evt);
+        // Public reservations are managed by the booking API, not the Outlook attendee list.
+        if (!session.IsPubliclyBookable) await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
         var newTitle = session.Title;
         if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(
@@ -454,6 +467,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         var outlookTitle = SessionTitleBuilder.ShouldDeriveFromParticipants(
             session.IsPubliclyBookable,
             session.PlannedSessionType)
@@ -490,13 +504,18 @@ public class OutlookWebhookService : IOutlookWebhookService
                 !locationEmails.Contains(email))
             .ToList();
 
+        var integrationUserId = await _context.CalendarIntegrations.Where(i => i.Id == evt.CalendarIntegrationId).Select(i => i.UserId).SingleAsync();
+        var ownerCalendar = await OutlookImportAccess.IsOwnerAsync(_context, integrationUserId);
+        var group = session.PlannedSessionType == "Group";
         var clients = await _context.Clients
             .Where(c =>
-                !c.IsDeleted &&
+                !c.IsDeleted && (ownerCalendar || c.TrainerId == session.TrainerId || group && c.LocationMemberships.Any(m => m.LocationId == session.LocationId && m.GroupAccessEnabled)) &&
                 ((c.CalendarEmail != null && attendeeEmails.Contains(c.CalendarEmail.ToLower())) ||
                  attendeeEmails.Contains(c.Email.ToLower())))
             .ToListAsync();
 
+        if (session.PublicCapacity.HasValue && clients.Count > session.PublicCapacity.Value)
+            throw new InvalidOperationException("Outlook attendees exceed session capacity.");
         var desiredClientIds = clients
             .Select(c => c.Id)
             .ToHashSet();

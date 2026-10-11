@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.Calendar;
@@ -174,7 +174,8 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         var normalizedEmail = email.Trim().ToLowerInvariant();
 
         var client = await _context.Clients
-            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted);
+            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted &&
+                (_currentUser.IsOwner || c.Trainer != null && c.Trainer.UserId == _currentUser.UserId));
 
         if (client is null)
             throw new InvalidOperationException("Client not found.");
@@ -196,6 +197,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
 
         var events = await _context.ExternalCalendarEvents
             .Where(e =>
+                e.CalendarIntegration.UserId == _currentUser.UserId &&
                 e.AttendeesJson != null &&
                 e.AttendeesJson.ToLower().Contains(normalizedEmail))
             .ToListAsync();
@@ -209,7 +211,11 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
                 .Include(s => s.Participants)
                 .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
 
-            if (session == null)
+            if (session == null || session.Status == "Completed" || session.Status == "Cancelled")
+                continue;
+            if (!_currentUser.IsOwner && !await _context.Trainers.AnyAsync(t => t.Id == session.TrainerId && t.UserId == _currentUser.UserId))
+                continue;
+            if (session.PublicCapacity.HasValue && session.Participants.Count(p => p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate") >= session.PublicCapacity.Value)
                 continue;
 
             var alreadyExists = session.Participants.Any(p => p.ClientId == clientId);
@@ -268,7 +274,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
     public async Task IgnoreIssueAsync(int externalEventId, string message)
     {
         var evt = await _context.ExternalCalendarEvents
-            .FirstOrDefaultAsync(x => x.Id == externalEventId);
+            .FirstOrDefaultAsync(x => x.Id == externalEventId && x.CalendarIntegration.UserId == _currentUser.UserId);
 
         if (evt == null)
             throw new InvalidOperationException("Event not found.");

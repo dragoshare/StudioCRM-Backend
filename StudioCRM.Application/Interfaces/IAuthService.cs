@@ -1,4 +1,4 @@
-﻿using StudioCRM.Application.DTOs.Auth;
+using StudioCRM.Application.DTOs.Auth;
 
 using StudioCRM.Application.DTOs.Public;
 
@@ -11,6 +11,7 @@ public interface IAuthService
     Task<AuthResponseDto?> LoginAsync(LoginRequestDto request);
     Task<AuthMeDto?> GetMeAsync(int userId);
     Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request);
+    Task LogoutAsync(int userId);
     Task ForgotPasswordAsync(ForgotPasswordDto request);
     Task ResetPasswordAsync(ResetPasswordDto request);
     Task ChangePasswordAsync(int userId, ChangePasswordDto request);
