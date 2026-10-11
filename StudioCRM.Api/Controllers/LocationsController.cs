@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using StudioCRM.Application.DTOs.Locations;
 using StudioCRM.Application.Interfaces;
@@ -26,8 +26,11 @@ public class LocationsController : ControllerBase
 
     [HttpGet("{id:int}")]
     [Authorize(Roles = "Owner,Trainer")]
-    public async Task<ActionResult<LocationDto>> GetById(int id)
+    public async Task<ActionResult<LocationDto>> GetById(int id, [FromServices] StudioCRM.Infrastructure.Persistence.StudioCRMDbContext db,
+        [FromServices] ICurrentUserService currentUser)
     {
+        if (!currentUser.IsOwner && !await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.AnyAsync(db.TrainerLocations,
+            t => t.LocationId == id && t.Trainer.UserId == currentUser.UserId)) return NotFound();
         var result = await _locationService.GetByIdAsync(id);
         if (result is null) return NotFound();
         return Ok(result);

@@ -105,34 +105,7 @@ builder.Services.AddAuthentication(options =>
 })
 .AddJwtBearer(options =>
 {
-    options.Events = new JwtBearerEvents
-    {
-        OnTokenValidated = async context =>
-        {
-            var rawId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier)
-                ?? context.Principal?.FindFirstValue("sub");
-            var db = context.HttpContext.RequestServices.GetRequiredService<StudioCRMDbContext>();
-            var tokenEmail = context.Principal?.FindFirstValue(ClaimTypes.Email)
-                ?? context.Principal?.FindFirstValue("email");
-            if (!int.TryParse(rawId, out var userId) ||
-                !await db.Users.AnyAsync(u => u.Id == userId && u.IsActive && u.Email == tokenEmail &&
-                    !db.Clients.IgnoreQueryFilters().Any(c => c.UserId == u.Id && (c.IsDeleted || c.PortalAccessBlocked))))
-                context.Fail("Account is inactive or client portal access is blocked.");
-        }
-    };
-    options.TokenValidationParameters = new TokenValidationParameters
-    {
-        ValidateIssuer = true,
-        ValidateAudience = true,
-        ValidateLifetime = true,
-        ValidateIssuerSigningKey = true,
-        ValidIssuer = jwtSettings.Issuer,
-        ValidAudience = jwtSettings.Audience,
-        IssuerSigningKey = new SymmetricSecurityKey(
-            Encoding.UTF8.GetBytes(jwtSettings.Key)),
-        RoleClaimType = ClaimTypes.Role,
-        NameClaimType = ClaimTypes.Name
-    };
+    StudioCRM.Api.Security.AtlasJwt.Configure(options, jwtSettings);
 });
 
 // Controllers + Swagger
@@ -227,6 +200,8 @@ app.UseExceptionHandler(errorApp =>
             InvalidOperationException invalidOperationException => (
                 StatusCodes.Status400BadRequest,
                 invalidOperationException.Message),
+            System.ComponentModel.DataAnnotations.ValidationException validationException => (
+                StatusCodes.Status400BadRequest, validationException.Message),
             ArgumentException argumentException => (
                 StatusCodes.Status400BadRequest,
                 argumentException.Message),
@@ -295,8 +270,12 @@ app.MapMethods(
     new[] { "GET", "HEAD" },
     async (
         ISessionAutoCompletionService sessionAutoCompletionService,
+        HttpContext context, IConfiguration configuration,
         CancellationToken cancellationToken) =>
     {
+        if (!StudioCRM.Api.Security.WorkerRequestAccess.CanExecute(context, configuration))
+            return Results.Ok(new { message = "Service awake; completion is handled by the background worker.", executed = false,
+                completed = 0, skipped = 0, failed = 0, utcNow = DateTime.UtcNow });
         var result = await sessionAutoCompletionService.CompleteFinishedSessionsAsync(cancellationToken);
         var response = new
         {

@@ -4,6 +4,8 @@ namespace StudioCRM.Application.Interfaces;
 
 public interface IClientPaymentService
 {
+    Task<ClientBillingTotalsDto> GetClientTotalsAsync(int clientId);
+    Task<PagedResultDto<ClientPaymentDto>> GetPendingPageAsync(ClientPaymentFilterDto filter);
     Task<ClientBillingSummaryDto> GetCurrentClientSummaryAsync();
     Task<ClientBillingSummaryDto> GetClientSummaryAsync(int clientId);
     Task<PagedResultDto<ClientPaymentDto>> GetPaymentsAsync(ClientPaymentFilterDto filter);

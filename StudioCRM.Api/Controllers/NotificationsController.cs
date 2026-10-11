@@ -28,6 +28,19 @@ public class NotificationsController : ControllerBase
         catch (ArgumentException ex) { return BadRequest(new { message = ex.Message }); }
     }
 
+    [HttpGet("{id:int}")]
+    [ProducesResponseType(typeof(NotificationDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetById(int id)
+    {
+        var result = await _notificationService.GetByIdAsync(id);
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    [HttpGet("page")]
+    [ProducesResponseType(typeof(StudioCRM.Application.DTOs.Billing.PagedResultDto<NotificationDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPage(int page = 1, int pageSize = 25, string? category = null, bool? isRead = null)
+        => Ok(await _notificationService.GetPageAsync(page, pageSize, category, isRead));
+
     [HttpGet("categories")]
     public ActionResult<IReadOnlyList<NotificationCategoryDto>> GetCategories() => Ok(NotificationCategories.All);
 

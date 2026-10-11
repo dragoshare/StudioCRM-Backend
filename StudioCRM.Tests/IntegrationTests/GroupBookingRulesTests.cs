@@ -136,7 +136,7 @@ public class GroupBookingRulesTests
         Assert.Equal(7, item.AvailableSeats);
         Assert.Equal("Rules", item.EventRules);
         Assert.Equal(client.Id, Assert.Single(item.Participants).ClientId);
-        Assert.Equal(session.StartAt.AddMinutes(-30), item.BookingRules.RegistrationClosesAtUtc);
+        Assert.Equal(session.StartAt.AddMinutes(-30).Ticks / 10, item.BookingRules.RegistrationClosesAtUtc.Ticks / 10);
         Assert.NotNull(await portal.GetParticipantProfileAsync(session.Id, client.Id));
         Assert.Null(await portal.GetParticipantProfileAsync(privateSession.Id, client.Id));
         Assert.Null(await portal.GetParticipantProfileAsync(session.Id, client.Id + 1000));

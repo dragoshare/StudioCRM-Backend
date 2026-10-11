@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.TrainerSettlements;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
@@ -51,8 +51,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 s.Month == month);
 
         var sessions = await _context.Sessions
-            .Include(s => s.Location)
-            .Include(s => s.Participants)
+            .AsNoTracking()
             .Where(s =>
                 s.TrainerId == trainerId &&
                 s.Status == "Completed" &&
@@ -60,6 +59,12 @@ public class TrainerSettlementService : ITrainerSettlementService
                 s.StartAt >= from &&
                 s.StartAt < to)
             .OrderBy(s => s.StartAt)
+            .Select(s => new Session { Id = s.Id, Title = s.Title, TrainerId = s.TrainerId,
+                StartAt = s.StartAt, EndAt = s.EndAt, LocationId = s.LocationId,
+                Location = new Location { Id = s.LocationId, Name = s.Location.Name },
+                ActualSessionType = s.ActualSessionType, PlannedSessionType = s.PlannedSessionType,
+                ActualParticipantsCount = s.ActualParticipantsCount ?? s.Participants.Count,
+                IsPubliclyBookable = s.IsPubliclyBookable })
             .ToListAsync();
 
         var rates = await _context.TrainerRates

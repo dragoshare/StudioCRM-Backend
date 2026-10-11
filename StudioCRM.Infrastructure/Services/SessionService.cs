@@ -128,8 +128,8 @@ public class SessionService : ISessionService
             },
             QuickActions = new SessionWorkspaceQuickActionsDto
             {
-                CanEditParticipants = !isLockedByPaidSettlement,
-                CanComplete = !isLockedByPaidSettlement && session.Status != "Cancelled"
+                CanEditParticipants = session.CanEdit && !isLockedByPaidSettlement,
+                CanComplete = session.CanEdit && !isLockedByPaidSettlement && session.Status != "Cancelled"
             }
         };
     }
@@ -268,6 +268,23 @@ public class SessionService : ISessionService
 
     public async Task<SessionDto?> UpdateAsync(int id, UpdateSessionDto request)
     {
+        await using var transaction = _context.Database.CurrentTransaction == null ? await _context.Database.BeginTransactionAsync() : null;
+        try
+        {
+            await SessionWriteLock.AcquireAsync(_context, id, request.Participants?.Select(p => p.ClientId));
+            var result = await UpdateCoreAsync(id, request);
+            if (transaction != null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction != null) { await transaction.RollbackAsync(); _context.ChangeTracker.Clear(); }
+            throw;
+        }
+    }
+
+    private async Task<SessionDto?> UpdateCoreAsync(int id, UpdateSessionDto request)
+    {
         var normalizedStartAt = NormalizeStudioDateTime(request.StartAt);
         var normalizedEndAt = NormalizeStudioDateTime(request.EndAt);
 
@@ -338,7 +355,7 @@ public class SessionService : ISessionService
             outlookCategories,
             request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
 
-        var transaction = locksCurrentSettlement || locksTargetSettlement
+        var transaction = _context.Database.CurrentTransaction == null && (locksCurrentSettlement || locksTargetSettlement)
             ? await _context.Database.BeginTransactionAsync()
             : null;
         var transactionCommitted = false;
@@ -513,6 +530,23 @@ public class SessionService : ISessionService
 
     public async Task<bool> DeleteAsync(int id)
     {
+        await using var transaction = _context.Database.CurrentTransaction == null ? await _context.Database.BeginTransactionAsync() : null;
+        try
+        {
+            await SessionWriteLock.AcquireAsync(_context, id);
+            var result = await DeleteCoreAsync(id);
+            if (transaction != null) await transaction.CommitAsync();
+            return result;
+        }
+        catch
+        {
+            if (transaction != null) { await transaction.RollbackAsync(); _context.ChangeTracker.Clear(); }
+            throw;
+        }
+    }
+
+    private async Task<bool> DeleteCoreAsync(int id)
+    {
         var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == id);
 
         if (session is null)
@@ -524,7 +558,7 @@ public class SessionService : ISessionService
                 p.SessionId == session.Id &&
                 p.IsCountedFromPackage);
 
-        await using var transaction = touchesCompletedSession
+        await using var transaction = _context.Database.CurrentTransaction == null && touchesCompletedSession
             ? await _context.Database.BeginTransactionAsync()
             : null;
 
@@ -911,6 +945,20 @@ public class SessionService : ISessionService
     }
 
     public async Task CountSessionFromPackageAsync(CountSessionFromPackageRequest request)
+    {
+        var sessionId = await _context.SessionParticipants.Where(p => p.Id == request.SessionParticipantId).Select(p => (int?)p.SessionId).SingleOrDefaultAsync();
+        if (!sessionId.HasValue) throw new InvalidOperationException("Session participant not found.");
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        try
+        {
+            await SessionWriteLock.AcquireAsync(_context, sessionId.Value);
+            await CountSessionFromPackageCoreAsync(request);
+            await transaction.CommitAsync();
+        }
+        catch { await transaction.RollbackAsync(); _context.ChangeTracker.Clear(); throw; }
+    }
+
+    private async Task CountSessionFromPackageCoreAsync(CountSessionFromPackageRequest request)
     {
         var participant = await _context.SessionParticipants
             .Include(p => p.Session)
@@ -1606,17 +1654,34 @@ public class SessionService : ISessionService
     private async Task<List<SessionDto>> MapSessionDtosAsync(List<Session> sessions)
     {
         var result = new List<SessionDto>();
-
+        var ids = sessions.Select(s => s.Id).ToArray();
+        var counts = await _context.Sessions.AsNoTracking().Where(s => ids.Contains(s.Id))
+            .Select(s => new { s.Id,
+                Count = _context.SessionParticipants.Count(p => !p.Session.IsDeleted && p.Session.Status != "Cancelled" &&
+                    p.Session.LocationId == s.LocationId && p.Session.StartAt < s.EndAt && p.Session.EndAt > s.StartAt)
+                    + _context.Sessions.Where(o => o.Status != "Cancelled" && o.LocationId == s.LocationId &&
+                        o.StartAt < s.EndAt && o.EndAt > s.StartAt).Select(o => o.TrainerId).Distinct().Count()
+            }).ToDictionaryAsync(s => s.Id, s => s.Count);
+        var readableClients = await ReadableFinancialClientIdsAsync(sessions.SelectMany(s => s.Participants).Select(p => p.ClientId));
         foreach (var session in sessions)
         {
-            result.Add(await MapSessionDtoAsync(session));
+            result.Add(await MapSessionDtoAsync(session, counts.GetValueOrDefault(session.Id), readableClients));
         }
 
         return result;
     }
 
-    private async Task<SessionDto> MapSessionDtoAsync(Session s)
+    private async Task<HashSet<int>> ReadableFinancialClientIdsAsync(IEnumerable<int> ids)
     {
+        if (_currentUser.IsOwner) return ids.ToHashSet();
+        var clientIds = ids.Distinct().ToArray();
+        return (await _context.Clients.AsNoTracking().Where(c => clientIds.Contains(c.Id) &&
+            c.Trainer != null && c.Trainer.UserId == _currentUser.UserId).Select(c => c.Id).ToListAsync()).ToHashSet();
+    }
+
+    private async Task<SessionDto> MapSessionDtoAsync(Session s, int? occupancy = null, HashSet<int>? readableClients = null)
+    {
+        readableClients ??= await ReadableFinancialClientIdsAsync(s.Participants.Select(p => p.ClientId));
         var participants = s.Participants
             .OrderBy(p => p.Client.FirstName)
             .ThenBy(p => p.Client.LastName)
@@ -1629,7 +1694,7 @@ public class SessionService : ISessionService
             s.Trainer.OutlookCategoryColor);
         var primaryOutlookCategory = s.PrimaryOutlookCategory ?? outlookCategories.FirstOrDefault();
 
-        var locationParticipantsCount = await CountPeopleInLocationForTimeRangeAsync(
+        var locationParticipantsCount = occupancy ?? await CountPeopleInLocationForTimeRangeAsync(
             s.LocationId,
             s.StartAt,
             s.EndAt);
@@ -1641,7 +1706,7 @@ public class SessionService : ISessionService
         {
             Id = s.Id,
             Title = s.Title,
-            Note = s.Note,
+            Note = canEdit ? s.Note : null,
             StartAt = ToStudioDisplayDateTime(s.StartAt),
             EndAt = ToStudioDisplayDateTime(s.EndAt),
             TrainerId = s.TrainerId,
@@ -1678,19 +1743,19 @@ public class SessionService : ISessionService
                 ClientId = p.ClientId,
                 ClientFullName = p.Client.FirstName + " " + p.Client.LastName,
                 TrainerProfileUrl = $"/api/trainer-portal/sessions/{s.Id}/participants/{p.ClientId}/profile",
-                PackageId = p.PackageId,
-                PackageName = p.Package != null ? p.Package.Name : null,
-                ClientPackageId = p.ClientPackageId,
+                PackageId = readableClients.Contains(p.ClientId) ? p.PackageId : null,
+                PackageName = readableClients.Contains(p.ClientId) && p.Package != null ? p.Package.Name : null,
+                ClientPackageId = readableClients.Contains(p.ClientId) ? p.ClientPackageId : null,
                 AttendanceStatus = p.AttendanceStatus,
                 CountsAgainstPackage = p.CountsAgainstPackage,
                 IsCountedFromPackage = p.IsCountedFromPackage,
                 SessionsCharged = p.SessionsCharged,
                 PlannedBillingType = p.PlannedBillingType != null ? p.PlannedBillingType.ToString()! : string.Empty,
                 ActualBillingType = p.ActualBillingType != null ? p.ActualBillingType.ToString()! : string.Empty,
-                ExpectedUnitPrice = p.ExpectedUnitPrice ?? 0,
-                ActualUnitPrice = p.ActualUnitPrice ?? 0,
-                BalanceDifference = p.BalanceDifference ?? 0,
-                Note = p.Note
+                ExpectedUnitPrice = readableClients.Contains(p.ClientId) ? p.ExpectedUnitPrice ?? 0 : 0,
+                ActualUnitPrice = readableClients.Contains(p.ClientId) ? p.ActualUnitPrice ?? 0 : 0,
+                BalanceDifference = readableClients.Contains(p.ClientId) ? p.BalanceDifference ?? 0 : 0,
+                Note = readableClients.Contains(p.ClientId) ? p.Note : null
             }).ToList(),
             CreatedAt = s.CreatedAt,
             UpdatedAt = s.UpdatedAt,

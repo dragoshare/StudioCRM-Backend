@@ -4,6 +4,7 @@ namespace StudioCRM.Application.DTOs.Billing;
 
 public class ClientPaymentDto
 {
+    public bool CanConfirm { get; set; }
     public int Id { get; set; }
     public int ClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;

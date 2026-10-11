@@ -1,4 +1,4 @@
-﻿namespace StudioCRM.Domain.Entities;
+namespace StudioCRM.Domain.Entities;
 
 public class CalendarSubscription
 {
@@ -9,6 +9,8 @@ public class CalendarSubscription
     public string Provider { get; set; } = "Outlook";
 
     public string SubscriptionId { get; set; } = string.Empty;
+
+    public string? ClientState { get; set; }
 
     public string Resource { get; set; } = string.Empty;
 

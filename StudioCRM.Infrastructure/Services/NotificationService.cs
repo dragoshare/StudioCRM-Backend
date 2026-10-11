@@ -104,6 +104,27 @@ public class NotificationService : INotificationService
         };
     }
 
+    public async Task<NotificationDto?> GetByIdAsync(int id)
+    {
+        var userId = GetRequiredUserId();
+        return await _context.Notifications.AsNoTracking().Where(n => n.Id == id && n.UserId == userId)
+            .Select(n => MapToDto(n)).SingleOrDefaultAsync();
+    }
+
+    public async Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<NotificationDto>> GetPageAsync(int page, int pageSize, string? category, bool? isRead)
+    {
+        if (page < 1 || page > 100000 || pageSize < 1 || pageSize > 100) throw new ArgumentException("page 1..100000; pageSize 1..100.");
+        var userId = GetRequiredUserId();
+        await SyncClientGroupClassRemindersAsync(userId);
+        await SyncOperationalNotificationsAsync(userId);
+        var query = FilterCategory(_context.Notifications.AsNoTracking().Where(n => n.UserId == userId), category);
+        if (isRead.HasValue) query = query.Where(n => n.IsRead == isRead);
+        var count = await query.CountAsync();
+        var items = await query.OrderBy(n => n.IsRead).ThenByDescending(n => n.CreatedAt).ThenByDescending(n => n.Id)
+            .Skip((page - 1) * pageSize).Take(pageSize).Select(n => MapToDto(n)).ToListAsync();
+        return new() { Items = items, TotalCount = count, Page = page, PageSize = pageSize, TotalPages = (int)Math.Ceiling(count / (double)pageSize) };
+    }
+
     private int GetRequiredUserId()
     {
         return _currentUser.UserId

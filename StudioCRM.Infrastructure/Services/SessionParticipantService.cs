@@ -1,4 +1,4 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.Interfaces;
@@ -33,6 +33,9 @@ public class SessionParticipantService : ISessionParticipantService
 
     public async Task<List<SessionParticipantDto>> GetBySessionIdAsync(int sessionId)
     {
+        var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId)
+            ?? throw new KeyNotFoundException("Session not found.");
+        await EnsureCurrentUserCanManageSessionAsync(session);
         return await _context.SessionParticipants
             .Include(sp => sp.Client)
             .Include(sp => sp.Package)
@@ -57,6 +60,8 @@ public class SessionParticipantService : ISessionParticipantService
 
     public async Task<SessionParticipantDto> AddParticipantAsync(int sessionId, AddSessionParticipantDto request)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await SessionWriteLock.AcquireAsync(_context, sessionId, [request.ClientId]);
         var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId);
 
         if (session is null)
@@ -71,6 +76,12 @@ public class SessionParticipantService : ISessionParticipantService
 
         if (client is null)
             throw new InvalidOperationException("Client does not exist.");
+
+        await EnsureClientAllowedAsync(session, client.Id);
+        if (session.Status == "Cancelled") throw new InvalidOperationException("Cannot add participant to cancelled session.");
+        if (session.PublicCapacity.HasValue && await _context.SessionParticipants.CountAsync(p => p.SessionId == sessionId &&
+            p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate") >= session.PublicCapacity.Value)
+            throw new InvalidOperationException("Session capacity has been reached.");
 
         var alreadyExists = await _context.SessionParticipants
             .AnyAsync(sp => sp.SessionId == sessionId && sp.ClientId == request.ClientId);
@@ -107,6 +118,7 @@ public class SessionParticipantService : ISessionParticipantService
 
         await _context.SaveChangesAsync();
 
+        await transaction.CommitAsync();
         await TrySyncSessionToOutlookAsync(sessionId);
 
         return await MapParticipantAsync(participant.Id);
@@ -114,6 +126,8 @@ public class SessionParticipantService : ISessionParticipantService
 
     public async Task<bool> RemoveParticipantAsync(int sessionId, int participantId)
     {
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await SessionWriteLock.AcquireAsync(_context, sessionId);
         var participant = await _context.SessionParticipants
             .Include(sp => sp.Session)
             .FirstOrDefaultAsync(sp => sp.Id == participantId && sp.SessionId == sessionId);
@@ -128,6 +142,7 @@ public class SessionParticipantService : ISessionParticipantService
 
         _context.SessionParticipants.Remove(participant);
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         await TrySyncSessionToOutlookAsync(sessionId);
 
@@ -155,6 +170,7 @@ public class SessionParticipantService : ISessionParticipantService
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
+            await SessionWriteLock.AcquireAsync(_context, sessionId, request.Participants.Select(p => p.ClientId));
             var result = await CompleteSessionCoreAsync(sessionId, request, skipUserAccessCheck);
             await transaction.CommitAsync();
             return result;
@@ -175,6 +191,16 @@ public class SessionParticipantService : ISessionParticipantService
         }
     }
 
+    private async Task EnsureClientAllowedAsync(Session session, int clientId)
+    {
+        if (_currentUser.IsOwner) return;
+        var group = session.IsPubliclyBookable || session.PlannedSessionType == "Group";
+        if (!await _context.Clients.AnyAsync(c => c.Id == clientId &&
+            (c.Trainer != null && c.Trainer.UserId == _currentUser.UserId || group && c.LocationMemberships.Any(m =>
+                m.LocationId == session.LocationId && m.GroupAccessEnabled))))
+            throw new InvalidOperationException("Client is not accessible for this session.");
+    }
+
     private async Task<bool> CompleteSessionCoreAsync(
         int sessionId,
         CompleteSessionDto request,
@@ -191,6 +217,14 @@ public class SessionParticipantService : ISessionParticipantService
         {
             await EnsureCurrentUserCanManageSessionAsync(session);
         }
+
+        // The automatic worker must not turn a concurrently completed session into a correction.
+        if (skipUserAccessCheck && session.Status == "Completed") return true;
+        if (request.Participants.Select(p => p.ClientId).Distinct().Count() != request.Participants.Count)
+            throw new InvalidOperationException("Duplicate participants are not allowed.");
+        if (!skipUserAccessCheck)
+            foreach (var id in request.Participants.Select(p => p.ClientId).Except(session.Participants.Select(p => p.ClientId)))
+                await EnsureClientAllowedAsync(session, id);
 
         await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
 

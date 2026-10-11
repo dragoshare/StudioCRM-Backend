@@ -1,5 +1,8 @@
-﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
+using StudioCRM.Infrastructure.Persistence;
 using StudioCRM.Application.DTOs.Calendar;
 using StudioCRM.Application.Interfaces.Calendar;
 
@@ -30,6 +33,12 @@ public class OutlookController : ControllerBase
         _webhookService = webhookService;
         _externalEventService = externalEventService;
         _outlookContactService = outlookContactService;
+    }
+
+    private Task<bool> CanManageSession(StudioCRMDbContext db, int id)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Task.FromResult(false);
+        return db.Sessions.AnyAsync(s => s.Id == id && (User.IsInRole("Owner") || s.Trainer.UserId == userId));
     }
 
     [HttpGet("connect-url")]
@@ -82,10 +91,11 @@ public class OutlookController : ControllerBase
 
     [HttpPost("sync-session/{sessionId:int}")]
     [Authorize(Roles = "Trainer,Owner")]
-    public async Task<IActionResult> SyncSession(int sessionId)
+    public async Task<IActionResult> SyncSession(int sessionId, [FromServices] StudioCRMDbContext db)
     {
         try
         {
+            if (!await CanManageSession(db, sessionId)) return NotFound();
             await _syncService.SyncSessionAsync(sessionId);
             return NoContent();
         }
@@ -97,10 +107,11 @@ public class OutlookController : ControllerBase
 
     [HttpDelete("sync-session/{sessionId:int}")]
     [Authorize(Roles = "Trainer,Owner")]
-    public async Task<IActionResult> DeleteSessionEvent(int sessionId)
+    public async Task<IActionResult> DeleteSessionEvent(int sessionId, [FromServices] StudioCRMDbContext db)
     {
         try
         {
+            if (!await CanManageSession(db, sessionId)) return NotFound();
             await _syncService.DeleteSessionEventAsync(sessionId);
             return NoContent();
         }
@@ -126,7 +137,7 @@ public class OutlookController : ControllerBase
     }
 
     [HttpPost("subscription/renew")]
-    [Authorize(Roles = "Trainer,Owner")]
+    [Authorize(Roles = "Owner")]
     public async Task<IActionResult> RenewSubscriptions()
     {
         await _subscriptionService.RenewExpiringSubscriptionsAsync();
@@ -284,8 +295,10 @@ public class OutlookController : ControllerBase
     [AllowAnonymous]
     [HttpGet("subscription/keepalive")]
     [HttpHead("subscription/keepalive")]
-    public async Task<IActionResult> KeepAlive()
+    public async Task<IActionResult> KeepAlive([FromServices] IConfiguration configuration)
     {
+        if (!StudioCRM.Api.Security.WorkerRequestAccess.CanExecute(HttpContext, configuration))
+            return Ok(new { message = "Service awake; subscriptions are handled by the background worker.", executed = false, utcNow = DateTime.UtcNow });
         await _subscriptionService.RenewExpiringSubscriptionsAsync();
 
         return Ok(new

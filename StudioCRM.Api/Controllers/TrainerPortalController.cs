@@ -59,6 +59,26 @@ public class TrainerPortalController : ControllerBase
     public async Task<IActionResult> GetClientPackages(int id, int page, int pageSize, [FromServices] IClientService clients)
         => Ok(await clients.GetPackageHistoryAsync(id, page == 0 ? 1 : page, pageSize == 0 ? 25 : pageSize));
 
+    [HttpGet("clients/page")]
+    [ProducesResponseType(typeof(PagedResultDto<TrainerPortalClientDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetClientsPage([FromQuery] PortalPageFilter filter)
+        => Ok(await _trainerPortalService.GetClientsPageAsync(filter));
+
+    [HttpGet("group-clients")]
+    [ProducesResponseType(typeof(PagedResultDto<GroupClientOptionDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetGroupClients([FromQuery] PortalPageFilter filter)
+        => Ok(await _trainerPortalService.GetGroupClientsAsync(filter));
+
+    [HttpGet("clients/{id:int}/sessions/recent")]
+    [ProducesResponseType(typeof(PagedResultDto<ClientSessionHistoryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetRecentSessions(int id, [FromServices] IClientService clients)
+        => Ok(await clients.GetSessionHistoryAsync(id, new ClientHistoryFilter { Scope = "Completed", Page = 1, PageSize = 3 }));
+
+    [HttpGet("clients/{id:int}/payments")]
+    [ProducesResponseType(typeof(PagedResultDto<ClientPaymentDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetClientPaymentsPage(int id, [FromQuery] ClientPaymentFilterDto filter)
+        => Ok(await _clientPaymentService.GetClientPaymentsAsync(id, filter));
+
     [HttpGet("me")]
     public async Task<ActionResult<TrainerPortalMeDto>> GetMe()
     {
@@ -353,6 +373,16 @@ public class TrainerPortalController : ControllerBase
         });
     }
 
+    [HttpGet("clients/{clientId:int}/billing/summary")]
+    [ProducesResponseType(typeof(ClientBillingTotalsDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetBillingTotals(int clientId)
+        => Ok(await _clientPaymentService.GetClientTotalsAsync(clientId));
+
+    [HttpGet("payments/pending/page")]
+    [ProducesResponseType(typeof(PagedResultDto<ClientPaymentDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPendingPage([FromQuery] ClientPaymentFilterDto filter)
+        => Ok(await _clientPaymentService.GetPendingPageAsync(filter));
+
     [HttpGet("payments/pending")]
     public async Task<ActionResult<List<ClientPaymentDto>>> GetPendingPayments()
     {
@@ -377,9 +407,10 @@ public class TrainerPortalController : ControllerBase
     }
 
     [HttpGet("sessions")]
-    public async Task<ActionResult<List<TrainerPortalSessionDto>>> GetSessions()
+    public async Task<ActionResult<List<TrainerPortalSessionDto>>> GetSessions([FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
     {
-        return Ok(await _trainerPortalService.GetSessionsAsync());
+        return await HandleAsync<List<TrainerPortalSessionDto>>(async () =>
+            Ok(await _trainerPortalService.GetSessionsAsync(from, to)));
     }
 
     [HttpGet("sessions/{sessionId:int}")]
@@ -449,6 +480,28 @@ public class TrainerPortalController : ControllerBase
         {
             return BadRequest(new { message = ex.Message });
         }
+    }
+
+    [HttpGet("dashboard/summary")]
+    [ProducesResponseType(typeof(TrainerDashboardSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDashboardSummary()
+    {
+        var result = await _trainerPortalService.GetDashboardSummaryAsync();
+        return result == null ? NotFound() : Ok(result);
+    }
+
+    [HttpGet("settlement/summary")]
+    [ProducesResponseType(typeof(TrainerSettlementSummaryDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetSettlementSummary(int year, int month)
+    {
+        var s = await _trainerPortalService.GetMyMonthlySettlementAsync(year, month);
+        if (s == null) return NotFound();
+        return Ok(new TrainerSettlementSummaryDto { TrainerId = s.TrainerId, LocationId = s.LocationId,
+            TrainerFullName = s.TrainerFullName, Year = s.Year, Month = s.Month, TotalHours = s.TotalHours,
+            TotalSessions = s.TotalSessions, TotalAmount = s.TotalAmount, ContractedTotalHours = s.ContractedTotalHours,
+            ContractedTotalSessions = s.ContractedTotalSessions, ContractedTotalAmount = s.ContractedTotalAmount,
+            NonContractedTotalHours = s.NonContractedTotalHours, NonContractedTotalSessions = s.NonContractedTotalSessions,
+            IsPaid = s.IsPaid, PaidAt = s.PaidAt });
     }
 
     [HttpGet("dashboard")]

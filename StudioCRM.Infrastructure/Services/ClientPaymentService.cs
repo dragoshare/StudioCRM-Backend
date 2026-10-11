@@ -41,7 +41,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     public async Task<PagedResultDto<ClientPaymentDto>> GetPaymentsAsync(ClientPaymentFilterDto filter)
     {
-        var query = BasePaymentQuery();
+        if (!_currentUser.IsOwner && !_currentUser.IsTrainer) throw new UnauthorizedAccessException();
+        var query = BasePaymentQuery().AsNoTracking();
 
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
@@ -360,8 +361,10 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (request.Method == PaymentMethod.PaymentGateway)
             throw new InvalidOperationException("Use the payment gateway checkout endpoint.");
         var client = await GetCurrentClientAsync();
-        var clientPackage = await ResolveClientPackageAsync(client.Id, request.ClientPackageId);
         await using var transaction = await _context.Database.BeginTransactionAsync();
+        var replay = await ReplayPaymentAsync(client.Id, request, ClientPaymentSource.ClientRequest);
+        if (replay != null) return replay;
+        var clientPackage = await ResolveClientPackageAsync(client.Id, request.ClientPackageId);
         await PrepareManualPackagePaymentAsync(clientPackage);
         var paymentContext = await ResolvePaymentContextAsync(
             client.Id,
@@ -370,6 +373,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         var payment = new ClientPayment
         {
+            IdempotencyKey = request.IdempotencyKey,
+            RequestFingerprint = request.IdempotencyKey.HasValue ? Fingerprint(request) : null,
             ClientId = client.Id,
             ClientPackageId = clientPackage?.Id,
             LocationId = paymentContext.LocationId,
@@ -406,8 +411,10 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             throw new InvalidOperationException("ClientId is required for staff payment entry.");
 
         await EnsureStaffAccessToClientAsync(request.ClientId.Value);
-        var clientPackage = await ResolveClientPackageAsync(request.ClientId.Value, request.ClientPackageId);
         await using var transaction = await _context.Database.BeginTransactionAsync();
+        var replay = await ReplayPaymentAsync(request.ClientId.Value, request, ClientPaymentSource.StaffEntry);
+        if (replay != null) return replay;
+        var clientPackage = await ResolveClientPackageAsync(request.ClientId.Value, request.ClientPackageId);
         await PrepareManualPackagePaymentAsync(clientPackage);
         var paymentContext = await ResolvePaymentContextAsync(
             request.ClientId.Value,
@@ -416,6 +423,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         var payment = new ClientPayment
         {
+            IdempotencyKey = request.IdempotencyKey,
+            RequestFingerprint = request.IdempotencyKey.HasValue ? Fingerprint(request) : null,
             ClientId = request.ClientId.Value,
             ClientPackageId = clientPackage?.Id,
             LocationId = paymentContext.LocationId,
@@ -464,6 +473,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         await using var transaction = await _context.Database.BeginTransactionAsync();
         await PrepareManualPackagePaymentAsync(payment.ClientPackage);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74202, {payment.Id})");
         await _context.Entry(payment).ReloadAsync();
 
         if (payment.Status != ClientPaymentStatus.PendingConfirmation)
@@ -551,6 +561,10 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (payment.Source == ClientPaymentSource.PaymentGateway)
             throw new InvalidOperationException("Gateway payments require reconciliation with the provider before cancellation.");
 
+        await using var transaction = await _context.Database.BeginTransactionAsync();
+        await PrepareManualPackagePaymentAsync(payment.ClientPackage);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74202, {payment.Id})");
+        await _context.Entry(payment).ReloadAsync();
         if (payment.Status != ClientPaymentStatus.PendingConfirmation)
             throw new InvalidOperationException("Only pending payments can be rejected.");
 
@@ -563,6 +577,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             await RefreshPackagePaymentStatusAsync(payment.ClientPackage);
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return await GetPaymentDtoAsync(payment.Id);
     }
@@ -632,6 +647,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         await PrepareManualPackagePaymentAsync(payment.ClientPackage);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74202, {payment.Id})");
         await _context.Entry(payment).ReloadAsync();
 
         if (payment.Status != ClientPaymentStatus.Confirmed)
@@ -969,7 +985,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .ToList();
 
         var paymentEntities = await _context.ClientPayments.IgnoreQueryFilters()
-            .Include(p => p.Client)
+            .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1029,7 +1045,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     private IQueryable<ClientPayment> BasePaymentQuery()
     {
         return _context.ClientPayments.IgnoreQueryFilters()
-            .Include(p => p.Client)
+            .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1041,6 +1057,12 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         IQueryable<ClientPayment> query,
         ClientPaymentFilterDto filter)
     {
+        if (filter.Search?.Length > 100) throw new InvalidOperationException("Search is limited to 100 characters.");
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            query = query.Where(p => (p.Client.FirstName + " " + p.Client.LastName).ToLower().Contains(term) || p.Client.Email.ToLower().Contains(term));
+        }
         if (filter.ClientId.HasValue)
             query = query.Where(p => p.ClientId == filter.ClientId.Value);
 
@@ -1093,7 +1115,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         return query;
     }
 
-    private static async Task<PagedResultDto<ClientPaymentDto>> ToPagedPaymentResultAsync(
+    private async Task<PagedResultDto<ClientPaymentDto>> ToPagedPaymentResultAsync(
         IQueryable<ClientPayment> query,
         ClientPaymentFilterDto filter)
     {
@@ -1153,10 +1175,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (!_currentUser.IsTrainer)
             throw new InvalidOperationException("Current user cannot manage client payments.");
 
-        var trainer = await GetCurrentTrainerAsync();
-
         var hasAccess = await _context.Clients
-            .AnyAsync(c => c.Id == clientId && c.TrainerId == trainer.Id && !c.IsDeleted);
+            .AnyAsync(c => c.Id == clientId && c.Trainer != null && c.Trainer.UserId == _currentUser.UserId && !c.IsDeleted);
 
         if (!hasAccess)
             throw new InvalidOperationException("Trainer does not have access to this client.");
@@ -1165,7 +1185,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     private async Task<ClientPaymentDto> GetPaymentDtoAsync(int paymentId)
     {
         var payment = await _context.ClientPayments.IgnoreQueryFilters()
-            .Include(p => p.Client)
+            .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1176,10 +1196,13 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         return MapPayment(payment);
     }
 
-    private static ClientPaymentDto MapPayment(ClientPayment payment)
+    private ClientPaymentDto MapPayment(ClientPayment payment)
     {
         return new ClientPaymentDto
         {
+            CanConfirm = (_currentUser.IsOwner || (_currentUser.IsTrainer && !payment.Client.IsDeleted && payment.Client.Trainer != null && payment.Client.Trainer.UserId == _currentUser.UserId)) &&
+                payment.Status == ClientPaymentStatus.PendingConfirmation && payment.Source != ClientPaymentSource.PaymentGateway &&
+                payment.ClientPackage?.ClosureDisposition == null,
             Id = payment.Id,
             ClientId = payment.ClientId,
             ClientName = $"{payment.Client.FirstName} {payment.Client.LastName}".Trim(),
@@ -1338,7 +1361,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private static int NormalizePage(int page)
     {
-        return Math.Max(1, page);
+        return Math.Clamp(page, 1, 100000);
     }
 
     private static int NormalizePageSize(int pageSize)

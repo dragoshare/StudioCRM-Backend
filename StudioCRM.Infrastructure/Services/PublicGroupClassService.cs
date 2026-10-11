@@ -336,9 +336,9 @@ public class PublicGroupClassService : IPublicGroupClassService
         var client = await GetCurrentClientAsync();
         await using var transaction = await _context.Database.BeginTransactionAsync();
         await _context.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
-        await _context.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock({74102}, {sessionId})");
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
 
         var session = await BasePublicClassQuery()
             .FirstOrDefaultAsync(s => s.Id == sessionId);
@@ -452,9 +452,9 @@ public class PublicGroupClassService : IPublicGroupClassService
         var client = await GetCurrentClientAsync();
         await using var transaction = await _context.Database.BeginTransactionAsync();
         await _context.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
-        await _context.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock({74102}, {sessionId})");
+        await _context.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock({74101}, {client.Id})");
 
         var participant = await _context.SessionParticipants
             .Include(p => p.Session)

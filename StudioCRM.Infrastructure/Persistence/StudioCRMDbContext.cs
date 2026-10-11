@@ -40,6 +40,7 @@ public partial class StudioCRMDbContext : DbContext
     public DbSet<SessionCorrection> SessionCorrections => Set<SessionCorrection>();
     public DbSet<ClientLocationMembership> ClientLocationMemberships => Set<ClientLocationMembership>();
 
+    public DbSet<OutlookOAuthChallenge> OutlookOAuthChallenges => Set<OutlookOAuthChallenge>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<PasswordResetToken> PasswordResetTokens => Set<PasswordResetToken>();
     public DbSet<EmailVerificationToken> EmailVerificationTokens => Set<EmailVerificationToken>();
@@ -851,6 +852,14 @@ public partial class StudioCRMDbContext : DbContext
         // =========================
         // SESSION PARTICIPANTS
         // =========================
+
+        modelBuilder.Entity<ClientPayment>().HasIndex(p => new { p.ClientId, p.CreatedByUserId, p.Source, p.IdempotencyKey })
+            .IsUnique().HasFilter("\"IdempotencyKey\" IS NOT NULL");
+        modelBuilder.Entity<OutlookOAuthChallenge>().HasIndex(c => c.ExpiresAt);
+        modelBuilder.Entity<Session>().HasIndex(s => new { s.LocationId, s.StartAt });
+        modelBuilder.Entity<Session>().HasIndex(s => new { s.TrainerId, s.StartAt });
+        modelBuilder.Entity<Client>().HasIndex(c => new { c.TrainerId, c.LastName, c.FirstName, c.Id });
+        modelBuilder.Entity<ClientPayment>().HasIndex(p => new { p.Status, p.PaymentDate, p.Id });
 
         modelBuilder.Entity<SessionParticipant>(entity =>
         {
