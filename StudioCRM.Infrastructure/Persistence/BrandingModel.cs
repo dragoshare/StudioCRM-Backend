@@ -6,6 +6,7 @@ internal static class BrandingModel
 {
     internal static void Configure(ModelBuilder model)
     {
+        OrganizationAdministrationModel.Configure(model);
         model.Entity<Organization>(e =>
         {
             e.Property(o => o.Name).HasMaxLength(100);
@@ -14,7 +15,7 @@ internal static class BrandingModel
             e.HasIndex(o => o.Slug).IsUnique();
             e.HasIndex(o => o.BrandingProfileId).IsUnique();
             e.HasOne<OrganizationBrandingProfile>().WithOne().HasForeignKey<Organization>(o => o.BrandingProfileId).OnDelete(DeleteBehavior.Restrict);
-            e.HasData(new Organization { Id = Guid.Parse("b5100000-0000-4000-8000-000000000002"), Name = "BSworkout", Slug = "bsworkout", UiVariant = "bsworkout", BrandingProfileId = Guid.Parse("b5100000-0000-4000-8000-000000000001") });
+            e.HasData(new Organization { Id = Guid.Parse("b5100000-0000-4000-8000-000000000002"), Status = "LegacyActive", Name = "BSworkout", Slug = "bsworkout", UiVariant = "bsworkout", BrandingProfileId = Guid.Parse("b5100000-0000-4000-8000-000000000001") });
         });
         model.Entity<OrganizationBrandingProfile>(e =>
         {

@@ -4,11 +4,11 @@ using StudioCRM.Application.Interfaces.Storage;
 using StudioCRM.Infrastructure.Persistence;
 using StudioCRM.Domain.Entities;
 namespace StudioCRM.Infrastructure.Services.Branding;
-public class PlatformOrganizationService(StudioCRMDbContext db, BrandingAccess access,
+public partial class PlatformOrganizationService(StudioCRMDbContext db, BrandingAccess access,
     IObjectStorageService storage, IBrandingProfileContext currentProfile) : IPlatformOrganizationService
 {
     private sealed class ProfileScope(Guid id) : IBrandingProfileContext { public Guid ProfileId => id; }
-    private static OrganizationSummaryDto Summary(Organization o) => new(o.Id, o.Name, o.Slug, o.UiVariant);
+    private static OrganizationSummaryDto Summary(Organization o) => new(o.Id, o.Name, o.Slug, o.UiVariant, o.Status, o.Revision, o.Status == "LegacyActive");
     private BrandingService For(Organization o) => new(db, new ProfileScope(o.BrandingProfileId), access, storage);
     public async Task<OrganizationPageDto> ListAsync(int page, int pageSize)
     {
@@ -32,7 +32,7 @@ public class PlatformOrganizationService(StudioCRMDbContext db, BrandingAccess a
     public async Task<PublicOrganizationDto> GetCurrentAsync()
     {
         // Server configuration chooses the deployment's studio. No client-controlled tenant switch.
-        var org = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.BrandingProfileId == currentProfile.ProfileId)
+        var org = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.BrandingProfileId == currentProfile.ProfileId && o.Status == "LegacyActive")
             ?? throw new KeyNotFoundException("Current organization is not configured.");
         return new(org.Id, org.Name, org.UiVariant, await For(org).GetPublishedAsync());
     }

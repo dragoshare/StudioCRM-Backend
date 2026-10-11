@@ -1575,10 +1575,19 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
 
+                    b.Property<long>("Revision")
+                        .IsConcurrencyToken()
+                        .HasColumnType("bigint");
+
                     b.Property<string>("Slug")
                         .IsRequired()
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
+
+                    b.Property<string>("Status")
+                        .IsRequired()
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)");
 
                     b.Property<string>("UiVariant")
                         .IsRequired()
@@ -1601,7 +1610,9 @@ namespace StudioCRM.Infrastructure.Migrations
                             Id = new Guid("b5100000-0000-4000-8000-000000000002"),
                             BrandingProfileId = new Guid("b5100000-0000-4000-8000-000000000001"),
                             Name = "BSworkout",
+                            Revision = 0L,
                             Slug = "bsworkout",
+                            Status = "LegacyActive",
                             UiVariant = "bsworkout"
                         });
                 });
@@ -1739,6 +1750,33 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasKey("ProfileId", "Version");
 
                     b.ToTable("OrganizationBrandingVersions");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.OrganizationMembership", b =>
+                {
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsOwner")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("IsTrainer")
+                        .HasColumnType("boolean");
+
+                    b.HasKey("OrganizationId", "UserId");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("OrganizationMemberships", null, t =>
+                        {
+                            t.HasCheckConstraint("CK_OrganizationMemberships_Role", "\"IsOwner\" OR \"IsTrainer\"");
+                        });
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.OutlookOAuthChallenge", b =>
@@ -1924,6 +1962,55 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasIndex("LocationId", "Provider", "IsActive");
 
                     b.ToTable("PaymentProviderAccounts");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.PlatformAuditEntry", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int>("ActorUserId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("AfterJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("BeforeJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("OrganizationId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Reason")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<int?>("SubjectUserId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ActorUserId");
+
+                    b.HasIndex("SubjectUserId");
+
+                    b.HasIndex("OrganizationId", "CreatedAt", "Id");
+
+                    b.ToTable("PlatformAuditEntry");
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.RefreshToken", b =>
@@ -3012,6 +3099,23 @@ namespace StudioCRM.Infrastructure.Migrations
                         .IsRequired();
                 });
 
+            modelBuilder.Entity("StudioCRM.Domain.Entities.OrganizationMembership", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.User", "User")
+                        .WithMany()
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("StudioCRM.Domain.Entities.Package", b =>
                 {
                     b.HasOne("StudioCRM.Domain.Entities.Location", "Location")
@@ -3049,6 +3153,26 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Navigation("LegalEntity");
 
                     b.Navigation("Location");
+                });
+
+            modelBuilder.Entity("StudioCRM.Domain.Entities.PlatformAuditEntry", b =>
+                {
+                    b.HasOne("StudioCRM.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("ActorUserId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.Organization", null)
+                        .WithMany()
+                        .HasForeignKey("OrganizationId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("StudioCRM.Domain.Entities.User", null)
+                        .WithMany()
+                        .HasForeignKey("SubjectUserId")
+                        .OnDelete(DeleteBehavior.Restrict);
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.RefreshToken", b =>

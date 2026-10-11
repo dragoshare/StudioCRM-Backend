@@ -6,5 +6,7 @@ public class Organization
     public string Name { get; set; } = "";
     public string Slug { get; set; } = "";
     public string UiVariant { get; set; } = "standard";
+    public string Status { get; set; } = "Draft";
+    public long Revision { get; set; }
     public Guid BrandingProfileId { get; set; }
 }
