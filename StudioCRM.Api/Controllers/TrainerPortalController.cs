@@ -390,6 +390,10 @@ public class TrainerPortalController : ControllerBase
             Ok(await _clientPaymentService.GetPendingConfirmationsAsync()));
     }
 
+    [HttpPatch("payments/{paymentId:int}/date")]
+    public async Task<ActionResult<ClientPaymentDto>> UpdatePaymentDate(int paymentId, UpdatePaymentDateRequest request)
+        => await HandleAsync<ClientPaymentDto>(async () => Ok(await _clientPaymentService.UpdatePaymentDateAsync(paymentId, request)));
+
     [HttpPost("payments/{paymentId:int}/confirm")]
     public async Task<ActionResult<ClientPaymentDto>> ConfirmPayment(int paymentId)
     {
