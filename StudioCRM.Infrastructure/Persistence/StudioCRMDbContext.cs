@@ -35,6 +35,7 @@ public partial class StudioCRMDbContext : DbContext
     public DbSet<CompanyExpense> CompanyExpenses => Set<CompanyExpense>();
     public DbSet<ClientEmailChangeRequest> ClientEmailChangeRequests => Set<ClientEmailChangeRequest>();
 
+    public DbSet<GroupEnrollmentRequest> GroupEnrollmentRequests => Set<GroupEnrollmentRequest>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionParticipant> SessionParticipants => Set<SessionParticipant>();
     public DbSet<SessionCorrection> SessionCorrections => Set<SessionCorrection>();
@@ -860,6 +861,14 @@ public partial class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Session>().HasIndex(s => new { s.TrainerId, s.StartAt });
         modelBuilder.Entity<Client>().HasIndex(c => new { c.TrainerId, c.LastName, c.FirstName, c.Id });
         modelBuilder.Entity<ClientPayment>().HasIndex(p => new { p.Status, p.PaymentDate, p.Id });
+
+        modelBuilder.Entity<GroupEnrollmentRequest>(entity =>
+        {
+            entity.HasIndex(x => new { x.SessionId, x.ClientId }).IsUnique();
+            entity.HasOne(x => x.Session).WithMany().HasForeignKey(x => x.SessionId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(x => x.ClientPackage).WithMany().HasForeignKey(x => x.ClientPackageId).OnDelete(DeleteBehavior.Restrict);
+        });
 
         modelBuilder.Entity<SessionParticipant>(entity =>
         {

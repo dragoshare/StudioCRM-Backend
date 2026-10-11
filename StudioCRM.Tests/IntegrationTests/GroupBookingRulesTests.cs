@@ -37,6 +37,9 @@ public class GroupBookingRulesTests
         await db.SaveChangesAsync();
         request.PlannedSessionType = "Individual";
         await Assert.ThrowsAsync<InvalidOperationException>(() => portal.CreateSessionAsync(request));
+        db.Add(new ClientPackage { Client = client, Package = new Package { Name = "Group", BillingType = SessionBillingType.Group },
+            ExpectedBillingType = SessionBillingType.Group, TotalSessions = 4, PaymentStatus = PaymentStatus.Paid });
+        await db.SaveChangesAsync();
         request.PlannedSessionType = "Group";
         var created = await portal.CreateSessionAsync(request);
         Assert.Equal(8, created.Capacity);

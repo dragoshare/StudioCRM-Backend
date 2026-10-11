@@ -1,8 +1,9 @@
-﻿namespace StudioCRM.Application.DTOs.SessionParticipants;
+namespace StudioCRM.Application.DTOs.SessionParticipants;
 
 public class AddSessionParticipantDto
 {
     public int ClientId { get; set; }
+    public int? ClientPackageId { get; set; }
 
     public bool CountsAgainstPackage { get; set; } = true;
 

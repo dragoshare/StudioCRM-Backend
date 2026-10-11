@@ -227,7 +227,7 @@ public class SessionService : ISessionService
                 session.Id,
                 participants,
                 clients,
-                session.PlannedSessionType,
+                GroupBookingPolicy.IsGroup(session) ? "Group" : session.PlannedSessionType,
                 session.LocationId);
 
             if (requestedStatus == "Completed")
@@ -440,7 +440,7 @@ public class SessionService : ISessionService
                     session.Id,
                     participants,
                     clients,
-                    session.PlannedSessionType,
+                    GroupBookingPolicy.IsGroup(session) ? "Group" : session.PlannedSessionType,
                     session.LocationId);
             }
             else if (requestedStatus != "Completed")
@@ -982,6 +982,20 @@ public class SessionService : ISessionService
         if (participant.ClientId != clientPackage.ClientId)
             throw new InvalidOperationException("This package does not belong to this client.");
 
+        var isGroup = GroupBookingPolicy.IsGroup(participant.Session);
+        if (!Enum.IsDefined(request.ActualBillingType) ||
+            isGroup != (request.ActualBillingType == SessionBillingType.Group) ||
+            isGroup != (clientPackage.ExpectedBillingType == SessionBillingType.Group))
+            throw new InvalidOperationException("Group and personal packages must be accounted separately.");
+        if (clientPackage.LocationId.HasValue && clientPackage.LocationId != participant.Session.LocationId)
+            throw new InvalidOperationException("Package is not valid at this session location.");
+        if (clientPackage.ClosureDisposition != null)
+            throw new InvalidOperationException("Closed package cannot be used.");
+
+        if (clientPackage.ValidUntil.HasValue && clientPackage.ValidUntil.Value < participant.Session.StartAt)
+            throw new InvalidOperationException("Package expired before this session. Owner must decide whether to extend or replace it.");
+        if (isGroup && clientPackage.PaymentStatus != PaymentStatus.Paid)
+            throw new InvalidOperationException("Group package must be paid before use.");
         if (!clientPackage.IsActive)
             throw new InvalidOperationException("Client package is not active.");
 
@@ -1411,13 +1425,14 @@ public class SessionService : ISessionService
         string? plannedSessionType,
         int sessionLocationId)
     {
+        var bookingSession = await _context.Sessions.SingleAsync(s => s.Id == sessionId);
+        await SessionWriteLock.AcquireAsync(_context, sessionId, clients.Select(c => c.Id).ToArray());
         foreach (var participantRequest in participants)
         {
             var client = clients.First(c => c.Id == participantRequest.ClientId);
-            var activeClientPackage = await ResolveActiveClientPackageAsync(
-                client.Id,
-                plannedSessionType,
-                sessionLocationId);
+            var activeClientPackage = await PackageBookingEligibility.ResolveAsync(_context, client.Id, bookingSession, NormalizeSessionsCharged(participantRequest.SessionsCharged));
+            if (GroupBookingPolicy.IsGroup(bookingSession) && activeClientPackage == null)
+                throw new InvalidOperationException("A paid, valid group package with an available entry is required. Use the payment preparation flow.");
             var sessionsCharged = NormalizeSessionsCharged(participantRequest.SessionsCharged);
 
             var participant = new SessionParticipant
@@ -1427,7 +1442,7 @@ public class SessionService : ISessionService
                 PackageId = activeClientPackage?.PackageId,
                 ClientPackageId = activeClientPackage?.Id,
                 AttendanceStatus = "Planned",
-                CountsAgainstPackage = participantRequest.CountsAgainstPackage,
+                CountsAgainstPackage = GroupBookingPolicy.IsGroup(bookingSession) || participantRequest.CountsAgainstPackage,
                 SessionsCharged = sessionsCharged,
                 PlannedBillingType = activeClientPackage?.ExpectedBillingType,
                 ExpectedUnitPrice = activeClientPackage?.ExpectedUnitPrice,
@@ -1494,6 +1509,7 @@ public class SessionService : ISessionService
 
     private static SessionBillingType ResolveActualSessionTypeForCompletion(CreateSessionDto request)
     {
+        if (request.IsPubliclyBookable) return SessionBillingType.Group;
         if (!string.IsNullOrWhiteSpace(request.PlannedSessionType) &&
             Enum.TryParse<SessionBillingType>(request.PlannedSessionType, out var plannedSessionType))
         {
@@ -1512,6 +1528,7 @@ public class SessionService : ISessionService
 
     private static SessionBillingType ResolveActualSessionTypeForCompletion(UpdateSessionDto request)
     {
+        if (request.IsPubliclyBookable) return SessionBillingType.Group;
         if (!string.IsNullOrWhiteSpace(request.PlannedSessionType) &&
             Enum.TryParse<SessionBillingType>(request.PlannedSessionType, out var plannedSessionType))
         {

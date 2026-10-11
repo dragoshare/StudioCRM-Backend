@@ -1,4 +1,4 @@
-﻿using StudioCRM.Application.DTOs.ClientPackages;
+using StudioCRM.Application.DTOs.ClientPackages;
 namespace StudioCRM.Application.Interfaces;
 
 public interface IClientPackageService
@@ -9,5 +9,6 @@ public interface IClientPackageService
     Task<PackageManagementPreviewDto> GetManagementPreviewAsync(int clientId, int clientPackageId);
     Task CorrectAsync(int clientId, int clientPackageId, PackageChangeRequest request);
     Task<int?> CloseAsync(int clientId, int clientPackageId, ClosePackageRequest request);
+    Task<int?> DecideExpiredAsync(int clientId, int clientPackageId, ExpiredPackageDecisionRequest request);
     Task<int> ImportAsync(ImportClientPackageRequest request);
 }

@@ -13,7 +13,8 @@ internal static class GroupBookingPolicy
     }
 
     public static bool IsGroup(Session session) => session.IsPubliclyBookable ||
-        string.Equals(session.ActualSessionType ?? session.PlannedSessionType, "Group", StringComparison.OrdinalIgnoreCase);
+        string.Equals(session.PlannedSessionType, "Group", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(session.ActualSessionType, "Group", StringComparison.OrdinalIgnoreCase);
 
     public static int BookedSeats(Session session) => session.Participants.Count(p =>
         p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate");

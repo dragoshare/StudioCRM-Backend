@@ -103,6 +103,10 @@ public class ClientPackagesController : ControllerBase
     public Task<ActionResult<object>> Close(int clientId, int clientPackageId, ClosePackageRequest request)
         => HandleAsync<object>(async () => Ok(new { replacementClientPackageId = await _clientPackageService.CloseAsync(clientId, clientPackageId, request) }));
 
+    [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/expiry-decision")]
+    public Task<ActionResult<object>> ExpiryDecision(int clientId, int clientPackageId, ExpiredPackageDecisionRequest request)
+        => HandleAsync<object>(async () => Ok(new { replacementClientPackageId = await _clientPackageService.DecideExpiredAsync(clientId, clientPackageId, request) }));
+
     [HttpPost("import")]
     public Task<ActionResult<object>> Import(ImportClientPackageRequest request)
         => HandleAsync<object>(async () => Ok(new { id = await _clientPackageService.ImportAsync(request) }));
