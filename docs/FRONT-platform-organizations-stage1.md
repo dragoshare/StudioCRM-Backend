@@ -1,3 +1,5 @@
+> Aktualna notatka przekazania: [FRONT-superadmin-handoff-2026-10-12.md](FRONT-superadmin-handoff-2026-10-12.md).
+
 # Organizacje — etap 1, 11.10.2026
 
 Implementacja: `codex/platform-organizations`, wyprowadzony z personalizacji i zawierający main. Ten dokument zastępuje wcześniejsze propozycje dotyczące NOWYCH endpointów. Nie oznacza wdrożenia na Render.
@@ -66,7 +68,7 @@ Każdy zapis organizacji lub przypisanie Ownera zapisuje rzeczywisty ActorUserId
 
 ## Organizacja po zalogowaniu i docelowa izolacja
 
-Na tym etapie `/api/auth/me` pozostaje bez organizationId, `/api/organization` wskazuje skonfigurowaną organizację LegacyActive. Nie podmieniać kontekstu nagłówkiem/parametrem z frontu. Draft nie może zostać bieżącą organizacją wdrożenia.
+Aktualizacja 12.10.2026: `/api/auth/me` zawiera organizationId (null dla SuperAdmina), `/api/organization` wskazuje skonfigurowaną organizację LegacyActive. Nie podmieniać kontekstu nagłówkiem/parametrem z frontu. Draft nie może zostać bieżącą organizacją wdrożenia.
 
 Następny etap: membership-scoped roles, organizationId w tokenie i `/api/auth/me`, wybór organizacji po walidacji członkostwa, owner/trainer/client profile per organizacja, OrganizationId na wszystkich danych operacyjnych, kontrola kluczy obcych przy zapisie. Izolacja musi objąć odczyty po ID, listy, webhooki Outlook/Tpay, zadania w tle, storage, cache, zaproszenia i ustawienia. Dopiero wtedy uruchomienie drugiego CRM i zarządzanie dostępami BSworkout.
 
@@ -84,4 +86,4 @@ Odpowiedź logowania/odświeżenia i GET /api/Auth/me zawierają teraz `organiza
 - Nie ma jeszcze endpointu przełączania organizacji. Atlas Demo/Draft nadal nie umożliwia pracy w CRM.
 - Starsze tokeny bez organization_id są akceptowane wyłącznie według dotychczasowego modelu jednego studia. Obce/błędne/powtórzone organization_id jest odrzucane.
 
-To etap zgodności kontraktu, nie zakończenie autoryzacji wielu organizacji. W dalszym etapie role muszą pochodzić z członkostwa organizacji, kontekst musi być zachowany przy refresh tokenie, a integracje i publiczne endpointy muszą rozwiązywać organizację niezależnie od sesji przeglądarki.
+To etap zgodności kontraktu, nie zakończenie autoryzacji wielu organizacji. Kontekst jest już zapisany w refresh tokenie, a wspólny resolver obsługuje role członkostw dla przyszłych organizacji Active. BSworkout nadal korzysta z trybu LegacyActive. Przełączanie organizacji, integracje i publiczne endpointy pozostają do dokończenia.
