@@ -73,7 +73,11 @@ public partial class ClientService
                 TrainerId = x.Session.TrainerId, TrainerName = x.Session.Trainer.User.FirstName + " " + x.Session.Trainer.User.LastName,
                 LocationId = x.Session.LocationId, LocationName = x.Session.Location.Name,
                 AttendanceStatus = x.AttendanceStatus, IsCountedFromPackage = x.IsCountedFromPackage,
-                ClientPackageId = x.ClientPackageId
+                ClientPackageId = x.ClientPackageId,
+                PlannedSessionType = x.Session.PlannedSessionType,
+                ActualSessionType = x.Session.ActualSessionType,
+                PlannedBillingType = x.PlannedBillingType != null ? x.PlannedBillingType.ToString()! : string.Empty,
+                ActualBillingType = x.ActualBillingType != null ? x.ActualBillingType.ToString()! : string.Empty
             }).ToListAsync();
         return Page(items, total, request.Page, request.PageSize);
     }

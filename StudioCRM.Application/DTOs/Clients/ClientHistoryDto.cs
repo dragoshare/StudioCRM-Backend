@@ -32,4 +32,8 @@ public class ClientSessionHistoryDto
     public string AttendanceStatus { get; set; } = "";
     public bool IsCountedFromPackage { get; set; }
     public int? ClientPackageId { get; set; }
+    public string? PlannedSessionType { get; set; }
+    public string? ActualSessionType { get; set; }
+    public string PlannedBillingType { get; set; } = "";
+    public string ActualBillingType { get; set; } = "";
 }
