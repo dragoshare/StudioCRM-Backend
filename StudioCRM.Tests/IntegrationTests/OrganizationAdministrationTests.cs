@@ -72,6 +72,22 @@ public class OrganizationAdministrationTests
         Assert.Empty((await service.SearchUsersAsync("admin", 1, 25)).Items);
         await Assert.ThrowsAsync<KeyNotFoundException>(() => service.UsersAsync(Guid.NewGuid(), null, 1, 25));
     }
+    [PostgresFact]
+    public async Task AccountCannotBeAssignedToTwoStudiosOrReusedFromLegacyCrm()
+    {
+        await using var test = await TestDatabase.CreateAsync(); await using var db = test.Context();
+        var ids = await Seed(db); var service = Service(db, ids.Admin);
+        var first = await service.CreateAsync(new() { Name = "First", Slug = "first", Reason = "Test", InitialOwnerUserId = ids.Owner });
+        var second = await service.CreateAsync(new() { Name = "Second", Slug = "second", Reason = "Test" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AssignOwnerAsync(second.OrganizationId, ids.Owner, new() { Reason = "Reject" }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateAsync(new() { Name = "Third", Slug = "third", Reason = "Reject", InitialOwnerUserId = ids.Owner }));
+        Assert.Single(await db.Set<OrganizationMembership>().Where(m => m.UserId == ids.Owner).ToListAsync());
+        Assert.False(await db.Organizations.AnyAsync(o => o.Slug == "third"));
+        var legacy = new User { Email = "legacy@atlas.test", EmailVerifiedAt = DateTime.UtcNow };
+        db.Add(new UserRole { User = legacy, Role = new Role { Name = "Trainer" } }); await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.AssignOwnerAsync(second.OrganizationId, legacy.Id, new() { Reason = "Reject" }));
+        Assert.Empty((await service.UsersAsync(second.OrganizationId, null, 1, 25)).Items);
+    }
     private sealed class Storage : IObjectStorageService
     {
         public Task<StoredObjectDto> UploadAsync(string key, byte[] content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();

@@ -1,3 +1,8 @@
+> Zmiana ustaleń: jedno konto i unikalny email należą do jednego studia. Nie planujemy przełączania organizacji ani wielu ról między studiami na jednym koncie. Ta zasada zastępuje wcześniejsze plany w dokumencie. SuperAdmin pozostaje kontem platformy.
+>
+> Przypisanie Ownera (PUT i initialOwnerUserId w POST organizacji) odrzuca konto powiązane z innym studiem odpowiedzią 400. Dotyczy również istniejących globalnych ról CRM BSworkout i profili klienta/trenera, także archiwalnych. Komunikat należy przedstawić jako konieczność użycia osobnego konta z innym adresem email. Nie jest to transfer konta. Istniejące przypisania nie są automatycznie przenoszone ani usuwane. Dotychczasowa blokada zarządzania Ownerami LegacyActive nadal zwraca 409.
+>
+> Jest to zabezpieczenie ścieżek panelu SuperAdmina; dalszy etap musi utrwalić jednokrotne przypisanie konta w modelu bazy, rozwiązać zastane konflikty i automatycznie ustalać organizację po logowaniu. Nie uruchomiono jeszcze CRM nowej organizacji.
 # Frontend: SuperAdmin i organizacje — stan na 12.10.2026
 
 Branch backendu: `codex/platform-organizations`. Dokument opisuje zaimplementowany zakres, nie pełną wieloorganizacyjność. Zastępuje sprzeczne wcześniejsze ustalenia. Backend ma 206 poprawnych testów; migracje sprawdzono na lokalnej kopii. Wdrożenie na Render i migracja zdalnej bazy wymagają osobnego wykonania.

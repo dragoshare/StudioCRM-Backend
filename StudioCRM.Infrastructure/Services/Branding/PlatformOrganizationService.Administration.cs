@@ -35,11 +35,33 @@ public partial class PlatformOrganizationService
             && !x.UserRoles.Any(r => r.Role.Name == "SuperAdmin"))
         ?? throw new InvalidOperationException("Owner must be an active verified account without the platform SuperAdmin role.");
 
+    private async Task RequireExclusiveAccountAsync(int userId, Guid? targetOrganization)
+    {
+        // Serialize the two registry assignment paths for the same account.
+        await db.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74201, {userId})");
+        var memberships = db.Set<OrganizationMembership>().Where(m => m.UserId == userId);
+        var conflict = await memberships.AnyAsync(m => !targetOrganization.HasValue || m.OrganizationId != targetOrganization.Value);
+        // Existing global CRM roles belong to BSworkout until its migration is complete.
+        if (targetOrganization != StudioCRM.Infrastructure.Persistence.StudioCRMDbContext.LegacyOrganizationId)
+            conflict |= await db.UserRoles.AnyAsync(r => r.UserId == userId &&
+                (r.Role.Name == "Owner" || r.Role.Name == "Trainer" || r.Role.Name == "Client"));
+        // Intentional cross-organization lookup, restricted to this account, to reject reuse.
+        conflict |= await db.Clients.IgnoreQueryFilters().AnyAsync(c => c.UserId == userId &&
+            (!targetOrganization.HasValue || EF.Property<Guid>(c, "OrganizationId") != targetOrganization.Value));
+        conflict |= await db.Trainers.IgnoreQueryFilters().AnyAsync(t => t.UserId == userId &&
+            (!targetOrganization.HasValue || EF.Property<Guid>(t, "OrganizationId") != targetOrganization.Value));
+        if (conflict) throw new InvalidOperationException("Account already belongs to another organization. Use a separate account with a different email.");
+    }
     public async Task<OrganizationSummaryDto> CreateAsync(CreateOrganizationRequest request)
     {
         var actor = await access.RequireAdminAsync(); Validate(request); ValidateNames(request.Name, request.Reason);
         if (await db.Organizations.AnyAsync(x => x.Slug == request.Slug)) throw new DbUpdateConcurrencyException("Slug already exists.");
-        if (request.InitialOwnerUserId is int uid) await EligibleOwner(uid);
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        if (request.InitialOwnerUserId is int uid)
+        {
+            await RequireExclusiveAccountAsync(uid, null);
+            await EligibleOwner(uid);
+        }
         var profile = new OrganizationBrandingProfile { Id = Guid.NewGuid(), Name = request.Name.Trim() };
         var org = new Organization { Id = Guid.NewGuid(), Name = request.Name.Trim(), Slug = request.Slug,
             UiVariant = request.UiVariant, BrandingProfileId = profile.Id, Status = "Draft" };
@@ -48,6 +70,7 @@ public partial class PlatformOrganizationService
             db.Add(new OrganizationMembership { OrganizationId = org.Id, UserId = owner, IsOwner = true, CreatedAt = DateTime.UtcNow });
         Audit(org, actor, "OrganizationCreated", request.Reason, new { }, new { Organization = Summary(org), request.InitialOwnerUserId });
         await db.SaveChangesAsync();
+        await transaction.CommitAsync();
         return Summary(org);
     }
 
@@ -66,11 +89,13 @@ public partial class PlatformOrganizationService
     public async Task<OrganizationSummaryDto> AssignOwnerAsync(Guid id, int userId, AssignOrganizationOwnerRequest request)
     {
         var actor = await access.RequireAdminAsync(); Validate(request); ValidateNames("Owner", request.Reason);
+        await using var transaction = await db.Database.BeginTransactionAsync();
         var org = await db.Organizations.SingleOrDefaultAsync(x => x.Id == id) ?? throw new KeyNotFoundException("Organization not found.");
         CheckRevision(org, request.ExpectedRevision);
         // Legacy global roles remain authoritative for the running single-studio CRM.
         // Do not pretend that editing a registry membership revokes/grants that live access.
         if (org.Status != "Draft") throw new DbUpdateConcurrencyException("Owner management for the legacy studio requires organization-scoped authorization. Only draft organizations are editable in this stage.");
+        await RequireExclusiveAccountAsync(userId, id);
         await EligibleOwner(userId);
         var membership = await db.Set<OrganizationMembership>().SingleOrDefaultAsync(x => x.OrganizationId == id && x.UserId == userId);
         if (membership?.IsOwner == true) return Summary(org);
@@ -81,7 +106,8 @@ public partial class PlatformOrganizationService
         }
         membership.IsOwner = true; org.Revision++;
         Audit(org, actor, "OwnerAssigned", request.Reason, new { IsOwner = false }, new { IsOwner = true }, userId);
-        await db.SaveChangesAsync(); return Summary(org);
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync(); return Summary(org);
     }
 
     public async Task<OrganizationUserPageDto> UsersAsync(Guid id, string? role, int page, int pageSize)
