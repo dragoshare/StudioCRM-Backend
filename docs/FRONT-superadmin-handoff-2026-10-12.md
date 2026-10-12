@@ -116,3 +116,7 @@ Dla dotychczasowej konfiguracji testowej: `Database__ConnectionName=TestConnecti
 Ostatnie migracje: AddOrganizationAdministration, AddOrganizationDataBoundaries, BindRefreshTokensToOrganization. EF zastosuje również brakujące wcześniejsze migracje brancha. Sprawdzić log poprawnego startu i migracji, następnie logowanie oraz powyższe testy. Front testowy powinien wskazywać testowy URL API. Atlas Demo tworzyć dopiero po udanym wdrożeniu w bazie testowej, przez POST powyżej.
 
 Izolacja danych i logowanie wielu studiów nie są jeszcze gotowe do produkcyjnego uruchomienia drugiego studia. Pozostają przełączanie organizacji, obsługa członkostw podczas dodawania kadry/zaproszeń, profile per organizacja oraz kontekst integracji, zadań w tle i publicznych endpointów.
+
+## Uzupełnienie: automatyczne członkostwa kadry
+
+Dotychczasowe tworzenie trenera, ręczna rejestracja trenera oraz przyjęcie zaproszenia zapisują teraz także członkostwo BSworkout. Dodanie profilu trenera Ownerowi zachowuje rolę Ownera. Formularze i kontrakty API pozostają bez zmian. Zapis konta, profilu i członkostwa jest transakcyjny. Nie wymaga to nowej migracji ponad już wymienione. Ścieżki te nadal są przeznaczone wyłącznie dla BSworkout w trybie LegacyActive; nie uruchamiają kadry Atlas Demo.

@@ -20,6 +20,16 @@ public class TrainerService : ITrainerService
 
     public async Task<TrainerDto> CreateAsync(CreateTrainerDto request)
     {
+        await using var ownedTransaction = _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync() : null;
+        var result = await CreateAsyncCore(request);
+        if (ownedTransaction != null) await ownedTransaction.CommitAsync();
+        return result;
+    }
+
+    private async Task<TrainerDto> CreateAsyncCore(CreateTrainerDto request)
+    {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         var existingUser = await _context.Users
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
@@ -69,6 +79,8 @@ public class TrainerService : ITrainerService
             UserId = user.Id,
             RoleId = trainerRole.Id
         });
+
+        await LegacyStaffMembership.TrackAsync(_context, user.Id, "Trainer");
 
         var trainer = new Trainer
         {
@@ -127,6 +139,7 @@ public class TrainerService : ITrainerService
             });
         }
 
+        await LegacyStaffMembership.TrackAsync(_context, user.Id, "Trainer");
         user.FirstName = request.FirstName;
         user.LastName = request.LastName;
         user.IsActive = true;

@@ -41,3 +41,8 @@ OrganizationAuthorization.RolesAsync jest wspólnym źródłem ról dla odpowied
 Wyjątek migracyjny jest ograniczony do stałego ID BSworkout i statusu LegacyActive: nadal korzysta z globalnych ról. Nie przełączamy tego studia automatycznie na Active, ponieważ dodawanie kadry i zaproszenia muszą jeszcze utrzymywać członkostwa zamiast globalnych uprawnień.
 
 Warstwa HTTP nadal odrzuca tokeny innego studia. Przełączanie organizacji i aktywowanie Atlas Demo wymagają dokończenia kontekstu żądania, profili użytkowników, publicznych ścieżek i integracji. Ten etap nie stanowi wdrożenia pełnej wieloorganizacyjności.
+## Tworzenie kadry i członkostwa
+
+Tworzenie trenera, ręczna rejestracja trenera i przyjęcie zaproszenia kadry zapisują teraz członkostwo BSworkout obok dotychczasowej roli. Dodanie profilu trenera istniejącemu Ownerowi zachowuje oba uprawnienia w jednym członkostwie. Tworzenie konta/profilu/członkostwa jest objęte transakcją; przyjęcie zaproszenia korzysta z istniejącej transakcji Serializable.
+
+Ścieżki nadal korzystające z globalnych ról są jawnie ograniczone do ID BSworkout ze statusem LegacyActive. Nie służą do tworzenia kadry w Atlas Demo. Nie dodano nowych endpointów ani nie aktywowano innych organizacji. Zarządzanie odebraniem członkostw i profilami per organizacja pozostaje osobnym etapem.

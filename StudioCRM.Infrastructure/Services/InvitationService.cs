@@ -252,6 +252,7 @@ public class InvitationService : IInvitationService
 
     public async Task<bool> AcceptAsync(AcceptInvitationDto request)
     {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
         if (string.IsNullOrWhiteSpace(request.FirstName))
             throw new InvalidOperationException("First name is required.");
@@ -322,6 +323,8 @@ public class InvitationService : IInvitationService
         });
 
         await _context.SaveChangesAsync();
+
+        await LegacyStaffMembership.TrackAsync(_context, user.Id, invitation.Role);
 
         if (invitation.Role == "Trainer")
             await CreateTrainerProfileAsync(user, invitation);

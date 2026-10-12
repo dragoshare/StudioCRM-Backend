@@ -43,6 +43,16 @@ public class AuthService : IAuthService
 
     public async Task<CreatedAccountDto> RegisterAsync(RegisterDto request)
     {
+        await using var ownedTransaction = _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync() : null;
+        var result = await RegisterAsyncCore(request);
+        if (ownedTransaction != null) await ownedTransaction.CommitAsync();
+        return result;
+    }
+
+    private async Task<CreatedAccountDto> RegisterAsyncCore(RegisterDto request)
+    {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         var email = request.Email.Trim();
         var roleName = NormalizeManualRegistrationRole(request.Role);
 
@@ -129,6 +139,8 @@ public class AuthService : IAuthService
             UserId = user.Id,
             RoleId = role.Id
         });
+
+        await LegacyStaffMembership.TrackAsync(_context, user.Id, roleName);
 
         int? clientId = null;
         int? trainerId = null;
