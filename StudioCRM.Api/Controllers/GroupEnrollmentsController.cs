@@ -8,6 +8,11 @@ namespace StudioCRM.Api.Controllers;
 [Route("api/group-enrollments")]
 public class GroupEnrollmentsController(GroupEnrollmentService service) : ControllerBase
 {
+    [HttpGet("sessions/{sessionId:int}/package-options")]
+    [Authorize(Roles = "Owner")]
+    public async Task<ActionResult<GroupPackageOptionsDto>> PackageOptions(int sessionId, [FromQuery] int clientId) =>
+        Ok(await service.GetPackageOptionsAsync(sessionId, clientId));
+
     [HttpPost("sessions/{sessionId:int}")]
     [Authorize(Roles = "Owner")]
     public async Task<ActionResult<GroupEnrollmentDto>> Prepare(int sessionId, PrepareGroupEnrollmentRequest request) => Ok(await service.PrepareAsync(sessionId, request));

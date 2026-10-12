@@ -441,7 +441,14 @@ public partial class ClientService : IClientService
         if (filter.TrainerId.HasValue)
             query = query.Where(c => c.TrainerId == filter.TrainerId.Value);
 
-        if (filter.LocationId.HasValue)
+        if (filter.GroupAccessEnabled.HasValue)
+        {
+            if (!filter.LocationId.HasValue || filter.LocationId <= 0)
+                throw new InvalidOperationException("LocationId is required for GroupAccessEnabled.");
+            query = query.Where(c => _context.ClientLocationMemberships.Any(m => m.ClientId == c.Id &&
+                m.LocationId == filter.LocationId.Value && m.GroupAccessEnabled == filter.GroupAccessEnabled.Value));
+        }
+        else if (filter.LocationId.HasValue)
             query = query.Where(c => c.LocationId == filter.LocationId.Value);
 
         if (!string.IsNullOrWhiteSpace(filter.Status))

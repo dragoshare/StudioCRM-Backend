@@ -6,7 +6,7 @@ using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Services;
 
-public class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserService current, ISessionParticipantService participants)
+public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserService current, ISessionParticipantService participants)
 {
     public async Task<GroupEnrollmentDto> PrepareAsync(int sessionId, PrepareGroupEnrollmentRequest request)
     {
@@ -22,7 +22,7 @@ public class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserService c
         if (existing != null)
         {
             var previous = await db.ClientPackages.SingleAsync(p => p.Id == existing.ClientPackageId);
-            if (previous.PackageId != request.PackageId) throw new DbUpdateConcurrencyException("A different package was already selected for this class.");
+            if (previous.PackageId != request.PackageId || request.ClientPackageId.HasValue && previous.Id != request.ClientPackageId.Value) throw new DbUpdateConcurrencyException("A different package was already selected for this class.");
             await tx.CommitAsync(); return await GetAsync(existing.Id);
         }
         var catalog = await db.Packages.SingleOrDefaultAsync(p => p.Id == request.PackageId && p.IsActive && p.BillingType == SessionBillingType.Group &&
@@ -30,9 +30,22 @@ public class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserService c
         if (catalog.SessionsLimit <= 0 || catalog.Price < 0 || catalog.DurationDays <= 0) throw new InvalidOperationException("Invalid group package configuration.");
         if (!await db.ClientLocationMemberships.AnyAsync(m => m.ClientId == client.Id && m.LocationId == session.LocationId && m.GroupAccessEnabled))
             throw new InvalidOperationException("Enable group access for the client at this location first.");
-        var package = await db.ClientPackages.Where(p => p.ClientId == client.Id && p.PackageId == catalog.Id && p.ExpectedBillingType == SessionBillingType.Group && p.ClosureDisposition == null &&
-            p.LocationId == session.LocationId && (p.PaymentStatus != PaymentStatus.Paid || p.IsActive && (p.ValidUntil == null || p.ValidUntil >= session.StartAt) && p.UsedSessions < p.TotalSessions))
-            .OrderByDescending(p => p.PurchaseDate).FirstOrDefaultAsync();
+        var options = await GetPackageOptionsAsync(sessionId, client.Id);
+        ClientPackage? package = null;
+        if (request.ClientPackageId.HasValue)
+        {
+            var choice = options.OwnedPackages.SingleOrDefault(p => p.ClientPackageId == request.ClientPackageId && p.PackageId == catalog.Id);
+            if (choice == null || !choice.CanSelect) throw new InvalidOperationException("Selected client package is unavailable.");
+            package = await db.ClientPackages.SingleAsync(p => p.Id == choice.ClientPackageId);
+        }
+        else
+        {
+            var choice = options.OwnedPackages.Where(p => p.PackageId == catalog.Id && p.CanSelect)
+                .OrderByDescending(p => p.IsEligible).ThenBy(p => p.ValidUntil ?? DateTime.MaxValue).ThenBy(p => p.ClientPackageId).FirstOrDefault();
+            if (choice != null) package = await db.ClientPackages.SingleAsync(p => p.Id == choice.ClientPackageId);
+        }
+        if (package == null && !options.Offers.Any(p => p.PackageId == catalog.Id && p.CanSelect))
+            throw new InvalidOperationException("The offer cannot cover the session date.");
         if (package == null)
         {
             var now = DateTime.UtcNow; var free = catalog.Price == 0;
