@@ -53,6 +53,28 @@ public class PlatformOrganizationTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => service.GetAsync(First));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => branding.GetDraftAsync());
     }
+    [PostgresFact]
+    public async Task LegacyStatusAloneCannotExposeAnotherStudiosStaffOrCurrentBranding()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var admin = new User { Email = "admin@atlas.test" };
+        var owner = new User { Email = "owner@atlas.test" };
+        db.Add(new UserRole { User = admin, Role = new Role { Name = "SuperAdmin" } });
+        db.Add(new UserRole { User = owner, Role = new Role { Name = "Owner" } });
+        var other = Guid.NewGuid(); var profile = Guid.NewGuid();
+        db.Add(new OrganizationBrandingProfile { Id = profile, Name = "Other" });
+        db.Add(new Organization { Id = other, Name = "Other", Slug = "other", BrandingProfileId = profile, Status = "LegacyActive" });
+        await db.SaveChangesAsync();
+        var service = Service(db, admin.Id);
+        Assert.True((await service.GetAsync(First)).CrmAccessEnabled);
+        Assert.False((await service.GetAsync(other)).CrmAccessEnabled);
+        Assert.Single((await service.UsersAsync(First, "Owner", 1, 25)).Items);
+        Assert.Empty((await service.UsersAsync(other, null, 1, 25)).Items);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => Service(db, admin.Id, profile: profile).GetCurrentAsync());
+        await using var otherContext = database.Context(organizationId: other);
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => Service(otherContext, admin.Id).GetCurrentAsync());
+    }
     private sealed class Storage : IObjectStorageService
     {
         public Task<StoredObjectDto> UploadAsync(string key, byte[] content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();

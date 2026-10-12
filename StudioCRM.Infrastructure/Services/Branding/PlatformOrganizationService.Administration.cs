@@ -89,7 +89,7 @@ public partial class PlatformOrganizationService
         var org = await RequireAsync(id); Page(page, pageSize);
         if (role != null && role != "Owner" && role != "Trainer") throw new InvalidOperationException("Role must be Owner or Trainer.");
         // During the transition show the actual legacy roles, including staff added after migration.
-        if (org.Status == "LegacyActive")
+        if (org.Status == "LegacyActive" && org.Id == StudioCRM.Infrastructure.Persistence.StudioCRMDbContext.LegacyOrganizationId)
         {
             var legacy = db.Users.AsNoTracking().Where(u => u.UserRoles.Any(r => r.Role.Name == "Owner" || r.Role.Name == "Trainer"));
             if (role != null) legacy = legacy.Where(u => u.UserRoles.Any(r => r.Role.Name == role));

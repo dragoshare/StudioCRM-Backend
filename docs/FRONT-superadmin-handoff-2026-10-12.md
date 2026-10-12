@@ -144,3 +144,7 @@ Konto mające wyłącznie członkostwo Draft nie otrzymuje przez ten endpoint no
 ## Ograniczenie rejestracji i zaproszeń w etapie przejściowym
 
 Publiczna rejestracja klienta, tworzenie oraz ponowne wysyłanie zaproszenia są teraz jawnie ograniczone do bieżącego BSworkout w statusie LegacyActive, tak jak akceptacja zaproszenia i tworzenie kadry. Zapobiega to utworzeniu globalnej roli lub wysłaniu zaproszenia w kontekście innego studia przed ukończeniem wieloorganizacyjnej autoryzacji. Bez zmian kontraktów, bez nowej migracji. Formularze BSworkout pozostają obsługiwane; formularzy rejestracji i zaproszeń dla Atlas Demo nadal nie należy uruchamiać.
+
+## Weryfikacja trybu zgodności BSworkout
+
+Status LegacyActive jest uznawany za dotychczasowy CRM tylko razem ze stałym ID BSworkout. Inna organizacja błędnie oznaczona tym statusem nie otrzyma crmAccessEnabled=true ani globalnej listy kadry BSworkout. GET /api/organization dodatkowo sprawdza zgodność organizacji z kontekstem danych; błędna konfiguracja profilu nie przełącza studia. Kontrakty frontendu i migracje pozostają bez zmian.
