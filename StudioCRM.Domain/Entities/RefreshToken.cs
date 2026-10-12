@@ -1,10 +1,14 @@
-﻿namespace StudioCRM.Domain.Entities;
+namespace StudioCRM.Domain.Entities;
 
 public class RefreshToken
 {
     public int Id { get; set; }
 
     public int UserId { get; set; }
+
+    // Null denotes a legacy token or a platform session; ScopeVersion distinguishes them.
+    public Guid? OrganizationId { get; set; }
+    public int ScopeVersion { get; set; }
 
     public string Token { get; set; } = string.Empty;
 

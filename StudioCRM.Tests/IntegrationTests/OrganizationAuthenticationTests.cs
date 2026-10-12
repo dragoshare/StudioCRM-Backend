@@ -62,4 +62,35 @@ public class OrganizationAuthenticationTests
             Assert.Equal(!accepted, validation.Result?.Failure != null);
         }
     }
-}
+    [PostgresFact]
+    public async Task RefreshKeepsStoredScopeAndRejectsForeignOrPlatformScopeWithoutRotatingToken()
+    {
+        await using var test = await TestDatabase.CreateAsync();
+        await using var db = test.Context();
+        var user = new User { Email = "refresh@atlas.test", IsActive = true };
+        db.Add(new UserRole { User = user, Role = new Role { Name = "Owner" } });
+        await db.SaveChangesAsync();
+        foreach (var (version, org, valid) in new (int, Guid?, bool)[] {
+            (0, null, true), (1, StudioCRMDbContext.LegacyOrganizationId, true),
+            (1, Guid.NewGuid(), false), (1, null, false), (2, StudioCRMDbContext.LegacyOrganizationId, false),
+            (0, StudioCRMDbContext.LegacyOrganizationId, false) })
+        {
+            var token = new RefreshToken { UserId = user.Id, Token = Guid.NewGuid().ToString(),
+                ScopeVersion = version, OrganizationId = org, ExpiresAt = DateTime.UtcNow.AddDays(1) };
+            db.Add(token); await db.SaveChangesAsync();
+            if (valid)
+            {
+                var response = await PortalSecurityTests.Auth(db).RefreshAsync(new() { RefreshToken = token.Token });
+                var rotated = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.RefreshTokens, x => x.Token == response.RefreshToken);
+                Assert.Equal(1, rotated.ScopeVersion);
+                Assert.Equal(StudioCRMDbContext.LegacyOrganizationId, rotated.OrganizationId);
+                Assert.NotNull(token.RevokedAt);
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => PortalSecurityTests.Auth(db).RefreshAsync(new() { RefreshToken = token.Token }));
+                await db.Entry(token).ReloadAsync();
+                Assert.Null(token.RevokedAt);
+            }
+        }
+    }}

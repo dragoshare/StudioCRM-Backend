@@ -290,6 +290,8 @@ public class AuthService : IAuthService
         {
             UserId = user.Id,
             Token = refreshToken,
+            OrganizationId = SessionOrganization(user),
+            ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow
         });
@@ -384,6 +386,8 @@ public class AuthService : IAuthService
         {
             UserId = user.Id,
             Token = refreshToken,
+            OrganizationId = SessionOrganization(user),
+            ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow
         });
@@ -471,6 +475,7 @@ public class AuthService : IAuthService
         await _context.Entry(refreshToken.User).ReloadAsync();
         if (!refreshToken.IsActive || !refreshToken.User.IsActive)
             throw new InvalidOperationException("Invalid refresh token.");
+        ValidateRefreshScope(refreshToken);
         refreshToken.RevokedAt = DateTime.UtcNow;
 
         var newRefreshToken = GenerateRefreshToken();
@@ -479,6 +484,8 @@ public class AuthService : IAuthService
         {
             UserId = refreshToken.UserId,
             Token = newRefreshToken,
+            OrganizationId = SessionOrganization(refreshToken.User),
+            ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
             CreatedAt = DateTime.UtcNow
         });
@@ -660,6 +667,23 @@ public class AuthService : IAuthService
         await _emailService.SendEmailVerificationAsync(user.Email, verificationLink);
     }
 
+    private Guid? SessionOrganization(User user) => user.UserRoles.Any(r => r.Role.Name == "SuperAdmin")
+        ? null : _context.OrganizationId;
+
+    private void ValidateRefreshScope(RefreshToken token)
+    {
+        // The legacy deployment may rotate old tokens into an explicitly scoped session.
+        // Future tenant selection must never infer a context from the current request alone.
+        if (token.ScopeVersion == 0)
+        {
+            if (token.OrganizationId != null || _context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId)
+                throw new InvalidOperationException("Invalid refresh token scope.");
+            return;
+        }
+        if (token.ScopeVersion != 1 || token.OrganizationId != SessionOrganization(token.User) ||
+            (token.OrganizationId.HasValue && token.OrganizationId != StudioCRMDbContext.LegacyOrganizationId))
+            throw new InvalidOperationException("Invalid refresh token scope.");
+    }
     private AuthResponseDto BuildAuthResponse(User user, string refreshToken)
     {
         var roleNames = user.UserRoles

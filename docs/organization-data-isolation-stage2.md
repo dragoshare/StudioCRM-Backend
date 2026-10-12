@@ -28,3 +28,9 @@ Branch: codex/platform-organizations. Ten etap NIE uruchamia dostępu CRM dla dr
 ## Walidacja
 
 Pełny zestaw 200 testów przeszedł na lokalnym PostgreSQL, w tym trzy nowe testy dwóch organizacji. Dodatkowy test obejmuje archiwalne pakiety i odrzucanie jawnie obcego OrganizationId. Testy używają osobnych losowych schematów, nie danych produkcyjnych.
+
+## Odświeżanie sesji — kolejny etap
+
+Migracja 20261012060227_BindRefreshTokensToOrganization dodaje do RefreshTokens OrganizationId (nullable) i ScopeVersion (0 dla istniejących rekordów). Nowe sesje mają wersję 1: organizację BSworkout albo null dla panelu platformy. Odświeżenie sprawdza zapisany kontekst przed unieważnieniem starego tokena. Sesje starszego formatu są obsługiwane tylko w kontekście BSworkout i przy rotacji otrzymują jawny kontekst. Obca organizacja, nieznana wersja lub próba użycia sesji platformy jako sesji Ownera są odrzucane. W tym etapie nadal nie ma przełączania organizacji ani autoryzacji opartej na członkostwach.
+
+Walidacja: 204 testy, wszystkie poprawne; migracja wykonana na lokalnej kopii platform_org_migration_trial. Zdalne bazy bez zmian.
