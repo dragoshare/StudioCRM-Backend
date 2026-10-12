@@ -9,6 +9,8 @@ namespace StudioCRM.Api.Controllers;
 [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
 public class PlatformOrganizationAdministrationController(IPlatformOrganizationService service) : ControllerBase
 {
+    [HttpGet("{organizationId:guid}/activation-readiness")]
+    public async Task<IActionResult> ActivationReadiness(Guid organizationId) => Ok(await service.ActivationReadinessAsync(organizationId));
     [HttpPost]
     public async Task<IActionResult> Create(CreateOrganizationRequest request)
     {

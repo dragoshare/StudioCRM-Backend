@@ -88,6 +88,28 @@ public class OrganizationAdministrationTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.AssignOwnerAsync(second.OrganizationId, legacy.Id, new() { Reason = "Reject" }));
         Assert.Empty((await service.UsersAsync(second.OrganizationId, null, 1, 25)).Items);
     }
+    [PostgresFact]
+    public async Task ActivationReadinessReportsOwnerAndRuntimeAndProtectsPlatformAccess()
+    {
+        await using var test = await TestDatabase.CreateAsync(); await using var db = test.Context();
+        var ids = await Seed(db); var service = Service(db, ids.Admin);
+        var draft = await service.CreateAsync(new() { Name = "Demo", Slug = "demo", Reason = "Test" });
+        var readiness = await service.ActivationReadinessAsync(draft.OrganizationId);
+        Assert.False(readiness.CanActivate); Assert.Equal(0, readiness.EligibleOwnerCount);
+        Assert.Contains(readiness.Blockers, b => b.Code == "EligibleOwnerRequired");
+        Assert.Contains(readiness.Blockers, b => b.Code == "OrganizationRuntimeNotReady");
+        await service.AssignOwnerAsync(draft.OrganizationId, ids.Owner, new() { Reason = "Test" });
+        readiness = await service.ActivationReadinessAsync(draft.OrganizationId);
+        Assert.Equal(1, readiness.EligibleOwnerCount);
+        Assert.DoesNotContain(readiness.Blockers, b => b.Code == "EligibleOwnerRequired");
+        // Simulate an old conflicting assignment that must be diagnosed, never silently moved.
+        db.Add(new UserRole { UserId = ids.Owner, Role = new Role { Name = "Owner" } }); await db.SaveChangesAsync();
+        Assert.Contains((await service.ActivationReadinessAsync(draft.OrganizationId)).Blockers,
+            b => b.Code == "OwnerAccountBelongsToAnotherOrganization");
+        Assert.Equal("Draft", (await service.GetAsync(draft.OrganizationId)).Status);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service(db, ids.Owner, "Owner").ActivationReadinessAsync(draft.OrganizationId));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ActivationReadinessAsync(Guid.NewGuid()));
+    }
     private sealed class Storage : IObjectStorageService
     {
         public Task<StoredObjectDto> UploadAsync(string key, byte[] content, string contentType, CancellationToken ct = default) => throw new NotSupportedException();

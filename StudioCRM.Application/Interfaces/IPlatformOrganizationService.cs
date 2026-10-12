@@ -13,6 +13,7 @@ public interface IPlatformOrganizationService
     Task<PlatformUserPageDto> SearchUsersAsync(string query, int page, int pageSize);
     Task<OrganizationPageDto> ListAsync(int page, int pageSize);
     Task<OrganizationSummaryDto> GetAsync(Guid organizationId);
+    Task<OrganizationActivationReadinessDto> ActivationReadinessAsync(Guid organizationId);
     Task<IBrandingService> BrandingAsync(Guid organizationId);
     Task<PublicOrganizationDto> GetCurrentAsync();
 }

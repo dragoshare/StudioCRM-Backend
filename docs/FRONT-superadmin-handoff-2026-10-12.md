@@ -153,3 +153,14 @@ Publiczna rejestracja klienta, tworzenie oraz ponowne wysyłanie zaproszenia są
 ## Weryfikacja trybu zgodności BSworkout
 
 Status LegacyActive jest uznawany za dotychczasowy CRM tylko razem ze stałym ID BSworkout. Inna organizacja błędnie oznaczona tym statusem nie otrzyma crmAccessEnabled=true ani globalnej listy kadry BSworkout. GET /api/organization dodatkowo sprawdza zgodność organizacji z kontekstem danych; błędna konfiguracja profilu nie przełącza studia. Kontrakty frontendu i migracje pozostają bez zmian.
+
+## Atlas Demo i diagnostyka aktywacji
+
+W testowym API utworzono Atlas Demo: `24c277c6-d22e-4039-bd71-801aa7da38fc`, slug `atlas-demo`, status Draft. Nie przypisano mu automatycznie konta BSworkout. Istniejąca organizacja „test” pozostaje bez zmian.
+
+Nowy odczyt dla SuperAdmina: GET `/api/super-admin/organizations/{organizationId}/activation-readiness`.
+Odpowiedź: organizationId, status, canActivate, eligibleOwnerCount, blockers (tablica obiektów code/message).
+Kody: EligibleOwnerRequired, OwnerAccountBelongsToAnotherOrganization, OrganizationNotDraft, OrganizationRuntimeNotReady.
+EligibleOwnerCount oznacza aktywnych zweryfikowanych Ownerów bez roli platformowej; osobno należy sprawdzać blokadę konfliktu konta. Nie traktować samego licznika jako gotowości.
+
+W aktualnej wersji canActivate jest zawsze false ze względu na OrganizationRuntimeNotReady. To diagnostyka braków, nie endpoint aktywacji. Front może pokazać listę powodów; nie odblokowywać przycisku tylko dlatego, że przypisano Ownera. Endpoint nie zmienia danych ani nie wysyła wiadomości. Wymaga wdrożenia nowego kodu, nie wymaga nowej migracji.
