@@ -10,6 +10,7 @@ public interface IAuthService
     Task<AuthResponseDto> RegisterPublicGroupClientAsync(PublicGroupRegisterRequest request);
     Task<AuthResponseDto?> LoginAsync(LoginRequestDto request);
     Task<AuthMeDto?> GetMeAsync(int userId);
+    Task<UserOrganizationPageDto> GetOrganizationsAsync(int userId, int page, int pageSize);
     Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request);
     Task LogoutAsync(int userId);
     Task ForgotPasswordAsync(ForgotPasswordDto request);

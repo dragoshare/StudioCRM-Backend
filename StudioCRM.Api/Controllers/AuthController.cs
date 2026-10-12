@@ -128,6 +128,15 @@ public class AuthController : ControllerBase
     }
 
     [Authorize]
+    [HttpGet("organizations")]
+    [ResponseCache(NoStore = true, Location = ResponseCacheLocation.None)]
+    public async Task<IActionResult> Organizations(int page = 1, int pageSize = 25)
+    {
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        try { return Ok(await _authService.GetOrganizationsAsync(userId, page, pageSize)); }
+        catch (InvalidOperationException ex) { return BadRequest(new { message = ex.Message }); }
+    }
+    [Authorize]
     [HttpGet("me")]
     public async Task<IActionResult> Me()
     {

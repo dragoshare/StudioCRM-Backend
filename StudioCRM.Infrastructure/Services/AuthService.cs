@@ -17,7 +17,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class AuthService : IAuthService
+public partial class AuthService : IAuthService
 {
     private readonly StudioCRMDbContext _context;
     private readonly JwtSettings _jwtSettings;

@@ -120,3 +120,24 @@ Izolacja danych i logowanie wielu studiów nie są jeszcze gotowe do produkcyjne
 ## Uzupełnienie: automatyczne członkostwa kadry
 
 Dotychczasowe tworzenie trenera, ręczna rejestracja trenera oraz przyjęcie zaproszenia zapisują teraz także członkostwo BSworkout. Dodanie profilu trenera Ownerowi zachowuje rolę Ownera. Formularze i kontrakty API pozostają bez zmian. Zapis konta, profilu i członkostwa jest transakcyjny. Nie wymaga to nowej migracji ponad już wymienione. Ścieżki te nadal są przeznaczone wyłącznie dla BSworkout w trybie LegacyActive; nie uruchamiają kadry Atlas Demo.
+
+## Nowe: lista organizacji własnego konta
+
+`GET /api/auth/organizations?page=1&pageSize=25`, wymagany Bearer. Endpoint pobiera userId wyłącznie z sesji, nie przyjmuje userId innej osoby. Paginacja jak pozostałe listy: page 1..100000, pageSize 1..100. Niepoprawna paginacja daje 400.
+
+Przykład odpowiedzi (ID Demo symboliczne):
+```json
+{
+  "items": [
+    {"organizationId":"b5100000-0000-4000-8000-000000000002","name":"BSworkout","uiVariant":"bsworkout","status":"LegacyActive","roles":["Owner"],"isCurrent":true,"canEnter":true,"unavailableReason":null},
+    {"organizationId":"<uuid-demo>","name":"Atlas Demo","uiVariant":"default","status":"Draft","roles":["Trainer"],"isCurrent":false,"canEnter":false,"unavailableReason":"OrganizationNotActive"}
+  ],
+  "total":2,"page":1,"pageSize":25
+}
+```
+
+Role pokazane dla Draft są zarejestrowanym członkostwem, nie aktywnymi uprawnieniami sesji. Organizacje bez członkostwa nie są ujawniane. BSworkout uwzględnia dotychczasowe globalne role w trybie LegacyActive, również dla klientów. SuperAdmin dostaje pustą listę osobistych organizacji i korzysta z `/api/super-admin/organizations`.
+
+Frontend może zbudować widok „Moje studia”, pokazać bieżące studio i niedostępne przypisania. `canEnter=true` jest obecnie możliwe wyłącznie dla już bieżącego BSworkout. NIE oznacza istnienia endpointu przełączenia. `unavailableReason`: `OrganizationNotActive` dla Draft, `OrganizationSwitchingNotAvailable` dla pozostałych niedostępnych przypadków. W interfejsie tłumaczyć te kody na tekst; nie wyświetlać surowych nazw. Endpoint nie zmienia tokenów ani aktywnej organizacji i nie wymaga dodatkowej migracji.
+
+Konto mające wyłącznie członkostwo Draft nie otrzymuje przez ten endpoint nowego sposobu logowania. Pełna sesja wyboru organizacji pozostaje do wdrożenia.
