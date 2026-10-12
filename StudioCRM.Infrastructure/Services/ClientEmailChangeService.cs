@@ -19,7 +19,7 @@ public class ClientEmailChangeService(StudioCRMDbContext db, ICurrentUserService
     public async Task<List<ClientEmailChangeDto>> GetAsync(int? clientId)
     {
         if (!current.IsOwner && !current.IsClient) throw new UnauthorizedAccessException();
-        var query = db.ClientEmailChangeRequests.IgnoreQueryFilters().AsQueryable();
+        var query = db.ClientEmailChangeRequests.IncludingOrganizationArchive(db.OrganizationId).AsQueryable();
         if (!current.IsOwner) query = query.Where(x => x.Client.UserId == current.UserId && !x.Client.IsDeleted);
         if (clientId.HasValue) query = query.Where(x => x.ClientId == clientId);
         return await query.OrderByDescending(x => x.Id).Take(200).Select(x => new ClientEmailChangeDto

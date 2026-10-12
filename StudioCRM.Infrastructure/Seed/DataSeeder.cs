@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
@@ -358,7 +358,7 @@ public static class DataSeeder
         int ownerUserId)
     {
         var trainer = await context.Trainers
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(context.OrganizationId)
             .FirstOrDefaultAsync(t => t.UserId == ownerUserId);
 
         if (trainer is null)
@@ -494,7 +494,7 @@ public static class DataSeeder
             await EnsureUserRoleAsync(context, user.Id, "Trainer");
 
             var trainer = await context.Trainers
-                .IgnoreQueryFilters()
+                .IncludingOrganizationArchive(context.OrganizationId)
                 .FirstOrDefaultAsync(t => t.UserId == user.Id);
 
             var isProtectedExistingTrainerSeed = isProtectedTrainerSeed && trainer is not null;
@@ -1391,7 +1391,7 @@ public static class DataSeeder
     private static async Task SeedSessionsAsync(StudioCRMDbContext context)
     {
         var existingSeedSessions = await context.Sessions
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(context.OrganizationId)
             .CountAsync(s => s.Note != null && s.Note.StartsWith(SeedNotePrefix));
 
         if (existingSeedSessions >= 70)

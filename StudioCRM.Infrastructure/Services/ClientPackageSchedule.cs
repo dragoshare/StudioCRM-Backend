@@ -13,7 +13,7 @@ internal static class ClientPackageSchedule
         var ids = packageIds.Distinct().ToArray();
         if (ids.Length == 0) return new();
         var now = DateTime.UtcNow;
-        return await context.SessionParticipants.IgnoreQueryFilters()
+        return await context.SessionParticipants.IncludingOrganizationArchive(context.OrganizationId)
             .Where(p => p.ClientId == clientId && p.ClientPackageId.HasValue &&
                 ids.Contains(p.ClientPackageId.Value) && !p.Session.IsDeleted &&
                 p.Session.Status == "Planned" && p.Session.StartAt >= now &&

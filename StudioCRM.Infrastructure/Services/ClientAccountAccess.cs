@@ -6,5 +6,5 @@ namespace StudioCRM.Infrastructure.Services;
 public static class ClientAccountAccess
 {
     public static Task<bool> IsBlockedAsync(StudioCRMDbContext context, int userId) =>
-        context.Clients.IgnoreQueryFilters().AnyAsync(c => c.UserId == userId && (c.PortalAccessBlocked || c.IsDeleted));
+        context.Clients.IncludingOrganizationArchive(context.OrganizationId).AnyAsync(c => c.UserId == userId && (c.PortalAccessBlocked || c.IsDeleted));
 }

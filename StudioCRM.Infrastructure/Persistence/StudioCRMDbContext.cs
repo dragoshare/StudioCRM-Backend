@@ -12,11 +12,13 @@ public partial class StudioCRMDbContext : DbContext
 
     private readonly OutlookSettings _outlookSettings;
 
-    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options, IOptions<OutlookSettings>? outlookSettings = null, StudioCRM.Application.Interfaces.ICurrentUserService? currentUser = null)
+    public StudioCRMDbContext(DbContextOptions<StudioCRMDbContext> options, IOptions<OutlookSettings>? outlookSettings = null, StudioCRM.Application.Interfaces.ICurrentUserService? currentUser = null, Guid? organizationId = null)
         : base(options)
     {
         _outlookSettings = outlookSettings?.Value ?? new OutlookSettings();
         _activityCurrentUser = currentUser;
+        OrganizationId = organizationId ?? LegacyOrganizationId;
+        if (OrganizationId == Guid.Empty) throw new ArgumentException("Organization context cannot be empty.");
     }
 
     public DbSet<Organization> Organizations => Set<Organization>();
@@ -1158,6 +1160,7 @@ public partial class StudioCRMDbContext : DbContext
                 }
             );
         });
+        ConfigureOrganizationData(modelBuilder);
     }
 
     private void NormalizeDateTimesToUtc()

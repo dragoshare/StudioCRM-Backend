@@ -1,3 +1,4 @@
+using StudioCRM.Infrastructure.Persistence;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Domain.Enums;
@@ -8,7 +9,7 @@ public partial class ClientPaymentService
     public async Task<ClientBillingTotalsDto> GetClientTotalsAsync(int clientId)
     {
         await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
-        var result = await _context.Clients.IgnoreQueryFilters().AsNoTracking().Where(c => c.Id == clientId)
+        var result = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).AsNoTracking().Where(c => c.Id == clientId)
             .Select(c => new ClientBillingTotalsDto
             {
                 ClientId = c.Id, ClientName = c.FirstName + " " + c.LastName,

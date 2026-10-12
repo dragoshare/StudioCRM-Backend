@@ -1,4 +1,4 @@
-﻿using System.Net.Http.Headers;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -37,7 +37,7 @@ public class OutlookContactService : IOutlookContactService
     {
         if (!_currentUser.IsOwner) throw new UnauthorizedAccessException("Only owner can prepare calendar addresses.");
         var domain = ClientCalendarAddress.ValidateDomain(_settings.CalendarEmailDomain);
-        var clients = await _context.Clients.IgnoreQueryFilters()
+        var clients = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId)
             .Where(c => c.CalendarEmail == null || c.CalendarEmail == "").ToListAsync();
         foreach (var client in clients) ClientCalendarAddress.Ensure(client, domain);
         await _context.SaveChangesAsync();

@@ -10,7 +10,7 @@ internal static class SessionCorrectionRecorder
     public static async Task<string> CaptureAsync(StudioCRMDbContext context, int sessionId)
     {
         var snapshot = await context.Sessions
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(context.OrganizationId)
             .Where(x => x.Id == sessionId)
             .Select(x => new
             {

@@ -150,7 +150,7 @@ public class SubscriptionService : ISubscriptionService
     {
         await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
-        var client = await _context.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == clientId);
+        var client = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).FirstOrDefaultAsync(c => c.Id == clientId);
         if (client is null)
             throw new InvalidOperationException("Client not found.");
 
@@ -316,7 +316,7 @@ public class SubscriptionService : ISubscriptionService
 
     private async Task<SubscriptionDto> BuildSubscriptionAsync(int clientId)
     {
-        var client = await _context.Clients.IgnoreQueryFilters()
+        var client = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(c => c.Location)
             .FirstOrDefaultAsync(c => c.Id == clientId);
 
@@ -542,7 +542,7 @@ public class SubscriptionService : ISubscriptionService
     {
         if (_currentUser.IsOwner)
         {
-            var clients = readOnly ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+            var clients = readOnly ? _context.Clients.IncludingOrganizationArchive(_context.OrganizationId) : _context.Clients;
             if (!await clients.AnyAsync(c => c.Id == clientId))
                 throw new InvalidOperationException("Client not found or archived.");
             return;

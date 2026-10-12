@@ -29,6 +29,7 @@ public partial class StudioCRMDbContext
     {
         if (ChangeTracker.Entries<ActivityLogEntry>().Any(e => e.State != EntityState.Unchanged))
             throw new InvalidOperationException("Activity history is read-only.");
+        PrepareOrganizationWrites();
         PrepareCalendarAddresses();
         NormalizeDateTimesToUtc();
         return ActivityLogCapture.Capture(ChangeTracker);
@@ -38,11 +39,11 @@ public partial class StudioCRMDbContext
     private IQueryable<string> ActorNameQuery(int? id) => Users.AsNoTracking().Where(u => u.Id == id)
         .Select(u => (u.FirstName + " " + u.LastName).Trim() == "" ? u.Email : (u.FirstName + " " + u.LastName).Trim());
 
-    private static FormattableString InsertActivity(IEnumerable<ActivityLogEntry> entries) => $"""
+    private FormattableString InsertActivity(IEnumerable<ActivityLogEntry> entries) => $"""
         INSERT INTO "ActivityLogEntries"
-        ("ChangeSetId", "CreatedAt", "ActorUserId", "ActorName", "Source", "Operation",
+        ("OrganizationId", "ChangeSetId", "CreatedAt", "ActorUserId", "ActorName", "Source", "Operation",
          "EntityType", "EntityId", "EntityLabel", "BeforeJson", "AfterJson", "ChangedFieldsJson")
-        SELECT "ChangeSetId", "CreatedAt", "ActorUserId", "ActorName", "Source", "Operation",
+        SELECT {OrganizationId}, "ChangeSetId", "CreatedAt", "ActorUserId", "ActorName", "Source", "Operation",
                "EntityType", "EntityId", "EntityLabel", "BeforeJson", "AfterJson", "ChangedFieldsJson"
         FROM jsonb_to_recordset(CAST({JsonSerializer.Serialize(entries)} AS jsonb)) AS entries(
             "ChangeSetId" uuid, "CreatedAt" timestamptz, "ActorUserId" integer, "ActorName" text,

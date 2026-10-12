@@ -21,7 +21,7 @@ internal static class SessionAccountingCorrectionManager
 
         foreach (var counted in countedPackages)
         {
-            var package = await context.ClientPackages.IgnoreQueryFilters()
+            var package = await context.ClientPackages.IncludingOrganizationArchive(context.OrganizationId)
                 .Include(x => x.Client)
                 .FirstOrDefaultAsync(x => x.Id == counted.ClientPackageId);
             if (package is null)

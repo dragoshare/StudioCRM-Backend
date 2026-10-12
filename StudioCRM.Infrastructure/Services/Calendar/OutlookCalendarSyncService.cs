@@ -271,13 +271,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var syncedAt = DateTime.UtcNow;
         await _context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "CalendarEventLinks"
-                ("SessionId", "CalendarIntegrationId", "Provider", "ExternalEventId", "SyncedAt")
+                ("OrganizationId", "SessionId", "CalendarIntegrationId", "Provider", "ExternalEventId", "SyncedAt")
             VALUES
-                ({sessionId}, {integrationId}, {provider}, {externalEventId}, {syncedAt})
+                ({_context.OrganizationId}, {sessionId}, {integrationId}, {provider}, {externalEventId}, {syncedAt})
             ON CONFLICT ("SessionId", "Provider") DO UPDATE SET
                 "CalendarIntegrationId" = EXCLUDED."CalendarIntegrationId",
                 "ExternalEventId" = EXCLUDED."ExternalEventId",
-                "SyncedAt" = EXCLUDED."SyncedAt";
+                "SyncedAt" = EXCLUDED."SyncedAt" WHERE "CalendarEventLinks"."OrganizationId" = EXCLUDED."OrganizationId";
             """);
     }
 
@@ -304,13 +304,13 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
         await _context.Database.ExecuteSqlInterpolatedAsync($"""
             INSERT INTO "ExternalCalendarEvents"
-                ("CalendarIntegrationId", "Provider", "ExternalEventId", "Subject", "BodyPreview",
+                ("OrganizationId", "CalendarIntegrationId", "Provider", "ExternalEventId", "Subject", "BodyPreview",
                  "StartAt", "EndAt", "LocationName", "LocationEmail", "OrganizerEmail",
                  "AttendeesJson", "MappingWarningsJson", "SeriesMasterId", "IsRecurring",
                  "IsConvertedToSession", "SessionId", "ImportedAt", "CategoriesJson",
                  "CategoryColorsJson")
             VALUES
-                ({integrationId}, {provider}, {externalEventId}, {session.Title}, {session.Note},
+                ({_context.OrganizationId}, {integrationId}, {provider}, {externalEventId}, {session.Title}, {session.Note},
                  {session.StartAt}, {session.EndAt}, {session.Location.Name}, {session.Location.CalendarEmail}, {organizerEmail},
                  {attendeesJson}, {mappingWarningsJson}, {masterId}, {true},
                  {true}, {session.Id}, {importedAt}, {categoriesJson},
@@ -330,7 +330,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 "SessionId" = EXCLUDED."SessionId",
                 "ImportedAt" = EXCLUDED."ImportedAt",
                 "CategoriesJson" = EXCLUDED."CategoriesJson",
-                "CategoryColorsJson" = EXCLUDED."CategoryColorsJson";
+                "CategoryColorsJson" = EXCLUDED."CategoryColorsJson" WHERE "ExternalCalendarEvents"."OrganizationId" = EXCLUDED."OrganizationId";
             """);
 
         session.OutlookCategoryColorsJson = categoryColorsJson;
@@ -476,7 +476,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 .Where(a => a.GetProperty("type").GetString() != "resource")
                 .Select(a => a.GetProperty("emailAddress").GetProperty("address").GetString()!.ToLowerInvariant())
                 .ToList();
-            var known = await _context.Clients.IgnoreQueryFilters()
+            var known = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId)
                 .Where(c => c.CalendarEmail != null && addresses.Contains(c.CalendarEmail.ToLower()))
                 .Select(c => c.CalendarEmail!).ToListAsync();
             if (addresses.Any(a => !known.Contains(a, StringComparer.OrdinalIgnoreCase)))

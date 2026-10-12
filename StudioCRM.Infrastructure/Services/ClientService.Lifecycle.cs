@@ -1,3 +1,4 @@
+using StudioCRM.Infrastructure.Persistence;
 using System.Net.Mail;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Clients;
@@ -27,7 +28,7 @@ public partial class ClientService
     public async Task<ClientArchiveCheckDto> CheckArchiveAsync(int id)
     {
         EnsureOwner();
-        if (!await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Id == id))
+        if (!await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(c => c.Id == id))
             throw new KeyNotFoundException("Client does not exist.");
         var result = new ClientArchiveCheckDto { ClientId = id };
         if (await _context.SessionParticipants.AnyAsync(p => p.ClientId == id &&
@@ -75,7 +76,7 @@ public partial class ClientService
     public async Task<bool> SetPortalAccessAsync(int id, bool blocked)
     {
         EnsureOwner();
-        var client = await _context.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == id);
+        var client = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).FirstOrDefaultAsync(c => c.Id == id);
         if (client == null) return false;
         var before = ClientAuditState(client);
         client.PortalAccessBlocked = blocked;
@@ -113,18 +114,18 @@ public partial class ClientService
     {
         EnsureOwner();
         await using var transaction = await _context.Database.BeginTransactionAsync(System.Data.IsolationLevel.Serializable);
-        var client = await _context.Clients.IgnoreQueryFilters().FirstOrDefaultAsync(c => c.Id == id);
+        var client = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).FirstOrDefaultAsync(c => c.Id == id);
         if (client == null) return false;
         if (!client.IsDeleted) throw new InvalidOperationException("Archive the client first.");
         if (client.UserId.HasValue || client.ActivePackageId.HasValue || client.NextPackageId.HasValue ||
             !string.IsNullOrWhiteSpace(client.TrainingPlanFileId) || !string.IsNullOrWhiteSpace(client.TrainingPlanUrl) ||
             !string.IsNullOrWhiteSpace(client.GoogleDriveFolderId) ||
-            await _context.SessionParticipants.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
-            await _context.ClientPackages.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
-            await _context.ClientPayments.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
-            await _context.ClientBalanceTransactions.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
-            await _context.ClientMilestones.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
-            await _context.ClientEmailChangeRequests.IgnoreQueryFilters().AnyAsync(x => x.ClientId == id) ||
+            await _context.SessionParticipants.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
+            await _context.ClientPackages.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
+            await _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
+            await _context.ClientBalanceTransactions.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
+            await _context.ClientMilestones.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
+            await _context.ClientEmailChangeRequests.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(x => x.ClientId == id) ||
             await _context.Invitations.AnyAsync(x => x.ClientId == id))
             throw new InvalidOperationException("Client has account or history. Keep this client archived.");
         _context.Clients.Remove(client);

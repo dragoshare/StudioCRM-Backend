@@ -62,7 +62,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var payoutFrom = NormalizeNullableDateTime(filter.PayoutFrom);
         var payoutTo = NormalizeNullableDateTime(filter.PayoutTo);
 
-        var query = _context.ClientPayments.IgnoreQueryFilters()
+        var query = _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client)
                 .ThenInclude(c => c.Trainer)
                 .ThenInclude(t => t!.User)
@@ -299,7 +299,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     {
         await EnsureStaffAccessToClientAsync(clientId, readOnly: true);
 
-        var activePackage = await _context.ClientPackages.IgnoreQueryFilters()
+        var activePackage = await _context.ClientPackages.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
@@ -960,7 +960,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task<ClientBillingSummaryDto> BuildSummaryAsync(int clientId)
     {
-        var client = await _context.Clients.IgnoreQueryFilters()
+        var client = await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(c => c.Id == clientId);
 
         if (client is null)
@@ -984,7 +984,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .Select(cp => MapPackage(cp, $"{client.FirstName} {client.LastName}".Trim(), nextSessions.TryGetValue(cp.Id, out var next) ? next : null))
             .ToList();
 
-        var paymentEntities = await _context.ClientPayments.IgnoreQueryFilters()
+        var paymentEntities = await _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
@@ -1044,7 +1044,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private IQueryable<ClientPayment> BasePaymentQuery()
     {
-        return _context.ClientPayments.IgnoreQueryFilters()
+        return _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
@@ -1166,7 +1166,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     {
         if (_currentUser.IsOwner)
         {
-            var clients = readOnly ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+            var clients = readOnly ? _context.Clients.IncludingOrganizationArchive(_context.OrganizationId) : _context.Clients;
             if (!await clients.AnyAsync(c => c.Id == clientId))
                 throw new InvalidOperationException("Client not found or archived.");
             return;
@@ -1184,7 +1184,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task<ClientPaymentDto> GetPaymentDtoAsync(int paymentId)
     {
-        var payment = await _context.ClientPayments.IgnoreQueryFilters()
+        var payment = await _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)

@@ -1,3 +1,4 @@
+using StudioCRM.Infrastructure.Persistence;
 using System.Data;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,7 @@ public partial class ClientService
     public async Task<List<ClientLocationDto>> GetLocationsAsync(int clientId)
     {
         await EnsureReadableClientAsync(clientId);
-        return await _context.ClientLocationMemberships.IgnoreQueryFilters().Where(x => x.ClientId == clientId)
+        return await _context.ClientLocationMemberships.IncludingOrganizationArchive(_context.OrganizationId).Where(x => x.ClientId == clientId)
             .OrderByDescending(x => x.IsHomeLocation).ThenBy(x => x.LocationId)
             .Select(x => new ClientLocationDto { LocationId = x.LocationId, Name = x.Location.Name,
                 IsHomeLocation = x.IsHomeLocation, GroupAccessEnabled = x.GroupAccessEnabled }).ToListAsync();
@@ -71,7 +72,7 @@ public partial class ClientService
         if (email.Length > 320 || phone.Length > 30 || name.Length > 300) throw new InvalidOperationException("Search input is too long.");
         if (email.Length == 0 && phone.Length < 6 && name.Length < 3) throw new InvalidOperationException("Provide an email, phone of at least 6 digits or name of at least 3 characters.");
         // Exact normalized matches warn without blocking shared family contact details.
-        var query = _context.Clients.IgnoreQueryFilters().Where(x => x.Id != filter.ExcludeClientId &&
+        var query = _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).Where(x => x.Id != filter.ExcludeClientId &&
             ((email != "" && x.Email.ToLower() == email) ||
              (phone.Length >= 6 && (x.PhoneNumber ?? "").Replace(" ", "").Replace("+", "").Replace("-", "").Replace("(", "").Replace(")", "").Replace(".", "") == phone) ||
              (name.Length >= 3 && (x.FirstName + " " + x.LastName).ToLower() == name)));
@@ -88,7 +89,7 @@ public partial class ClientService
     {
         await EnsureReadableClientAsync(clientId);
         ValidatePage(page, pageSize);
-        var query = _context.ClientPackages.IgnoreQueryFilters().Include(x => x.Location).Include(x => x.Client).Where(x => x.ClientId == clientId);
+        var query = _context.ClientPackages.IncludingOrganizationArchive(_context.OrganizationId).Include(x => x.Location).Include(x => x.Client).Where(x => x.ClientId == clientId);
         var total = await query.CountAsync();
         var packages = await query.OrderByDescending(x => x.PurchaseDate).ThenByDescending(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
         var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, clientId, packages.Select(x => x.Id));
@@ -100,7 +101,7 @@ public partial class ClientService
         EnsureOwner();
         ValidatePage(page, pageSize);
         if (clientId.HasValue) await EnsureReadableClientAsync(clientId.Value);
-        var query = _context.ClientPackages.IgnoreQueryFilters().Where(x => x.ClosureDisposition == "RefundPending" || x.ClosureDisposition == "Refunded");
+        var query = _context.ClientPackages.IncludingOrganizationArchive(_context.OrganizationId).Where(x => x.ClosureDisposition == "RefundPending" || x.ClosureDisposition == "Refunded");
         if (clientId.HasValue) query = query.Where(x => x.ClientId == clientId);
         var total = await query.CountAsync();
         var items = await query.OrderByDescending(x => x.ClosedAt).ThenByDescending(x => x.Id).Skip((page - 1) * pageSize).Take(pageSize)

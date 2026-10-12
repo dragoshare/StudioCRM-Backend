@@ -882,7 +882,7 @@ public class SessionService : ISessionService
     public async Task<bool> RestoreAsync(int id)
     {
         var session = await _context.Sessions
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(s => s.Id == id);
 
         if (session is null)
@@ -901,7 +901,7 @@ public class SessionService : ISessionService
     public async Task<List<SessionDto>> GetDeletedAsync()
     {
         var sessions = await BaseQuery(includeDeleted: true)
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .Where(s => s.Status == "Deleted")
             .OrderByDescending(s => s.UpdatedAt)
             .ToListAsync();
@@ -1199,7 +1199,7 @@ public class SessionService : ISessionService
 
     private IQueryable<Session> BaseQuery(bool includeDeleted = false)
     {
-        return _context.Sessions.IgnoreQueryFilters().Where(s => includeDeleted || !s.IsDeleted)
+        return _context.Sessions.IncludingOrganizationArchive(_context.OrganizationId).Where(s => includeDeleted || !s.IsDeleted)
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
             .Include(s => s.Location)

@@ -45,7 +45,7 @@ internal static class ActivityLogLabels
 
         var missing = Missing(changes.Select(c => c.ReferenceId("ClientId")), clients);
         if (missing.Length > 0)
-            foreach (var row in await ReadRows(db.Clients.IgnoreQueryFilters().AsNoTracking()
+            foreach (var row in await ReadRows(db.Clients.IncludingOrganizationArchive(db.OrganizationId).AsNoTracking()
                 .Where(c => missing.Contains(c.Id)).Select(c => new NameRow(c.Id, c.FirstName + " " + c.LastName)), asynchronous, ct))
                 clients[row.Id] = row.Name.Trim();
 
@@ -57,7 +57,7 @@ internal static class ActivityLogLabels
 
         missing = Missing(changes.Select(c => c.ReferenceId("TrainerContractId")), contracts);
         if (missing.Length > 0)
-            foreach (var row in await ReadRows(db.TrainerContracts.IgnoreQueryFilters().AsNoTracking()
+            foreach (var row in await ReadRows(db.TrainerContracts.IncludingOrganizationArchive(db.OrganizationId).AsNoTracking()
                 .Where(c => missing.Contains(c.Id)).Select(c => new ContractRow(c.Id, c.TrainerId, c.ContractNumber)), asynchronous, ct))
                 contracts[row.Id] = new(row.TrainerId, row.Number);
 
@@ -65,7 +65,7 @@ internal static class ActivityLogLabels
         missing = Missing(changes.Select(c => c.ReferenceId("TrainerId"))
             .Concat(contracts.Where(c => relevantContractIds.Contains(c.Key)).Select(c => (int?)c.Value.TrainerId)), trainers);
         if (missing.Length > 0)
-            foreach (var row in await ReadRows(db.Trainers.IgnoreQueryFilters().AsNoTracking()
+            foreach (var row in await ReadRows(db.Trainers.IncludingOrganizationArchive(db.OrganizationId).AsNoTracking()
                 .Where(t => missing.Contains(t.Id)).Select(t => new TrainerRow(t.Id, t.UserId)), asynchronous, ct))
                 trainers[row.Id] = row.UserId;
 

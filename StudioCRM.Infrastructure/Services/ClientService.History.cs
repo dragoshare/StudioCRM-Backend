@@ -1,3 +1,4 @@
+using StudioCRM.Infrastructure.Persistence;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
@@ -50,7 +51,7 @@ public partial class ClientService
     {
         await EnsureReadableClientAsync(clientId);
         ValidatePage(request.Page, request.PageSize);
-        var query = _context.SessionParticipants.IgnoreQueryFilters()
+        var query = _context.SessionParticipants.IncludingOrganizationArchive(_context.OrganizationId)
             .Where(x => x.ClientId == clientId && !x.Session.IsDeleted);
         var now = DateTime.UtcNow;
         query = request.Scope switch

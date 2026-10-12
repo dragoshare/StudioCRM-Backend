@@ -139,7 +139,7 @@ public class PackageService : IPackageService
     public async Task<bool> DeleteAsync(int id)
     {
         var package = await _context.Packages
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (package is null)
@@ -156,7 +156,7 @@ public class PackageService : IPackageService
             .AnyAsync(cp => cp.PackageId == id && cp.IsActive);
 
         var isScheduledAsNextPackage = await _context.Clients
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .AnyAsync(c => c.ActivePackageId == id || c.NextPackageId == id);
 
         if (isUsedByActiveSubscription || isScheduledAsNextPackage)
@@ -176,7 +176,7 @@ public class PackageService : IPackageService
     public async Task<bool> RestoreAsync(int id)
     {
         var package = await _context.Packages
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(p => p.Id == id);
 
         if (package is null || !package.IsDeleted)
@@ -195,7 +195,7 @@ public class PackageService : IPackageService
     public async Task<List<PackageDto>> GetDeletedAsync()
     {
         return await _context.Packages
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Location)
             .Where(p => p.IsDeleted)
             .Select(p => MapToDto(p))

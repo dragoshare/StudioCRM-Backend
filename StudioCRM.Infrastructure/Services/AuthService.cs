@@ -209,7 +209,7 @@ public class AuthService : IAuthService
         if (existingUser)
             throw new InvalidOperationException("User with this email already exists.");
 
-        if (await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == email.ToLower()))
+        if (await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(c => c.Email.ToLower() == email.ToLower()))
             throw new InvalidOperationException("A client profile with this email already exists. Ask the studio for a portal invitation.");
         var locationExists = await _context.Locations
             .AnyAsync(l => l.Id == request.LocationId && l.IsActive);

@@ -73,7 +73,7 @@ public class InvitationService : IInvitationService
             request.LocationId = client.LocationId;
             request.TrainerId = client.TrainerId;
         }
-        else if (role == "Client" && await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == email))
+        else if (role == "Client" && await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(c => c.Email.ToLower() == email))
         {
             throw new InvalidOperationException("A client with this email exists. Invite the existing client using ClientId.");
         }
@@ -501,7 +501,7 @@ public class InvitationService : IInvitationService
             await _context.SaveChangesAsync();
             return;
         }
-        if (await _context.Clients.IgnoreQueryFilters().AnyAsync(c => c.Email.ToLower() == invitation.Email.ToLower()))
+        if (await _context.Clients.IncludingOrganizationArchive(_context.OrganizationId).AnyAsync(c => c.Email.ToLower() == invitation.Email.ToLower()))
             throw new InvalidOperationException("A client now exists with this email. Cancel this invitation and invite the existing client.");
         var client = new Client
         {

@@ -1,4 +1,4 @@
-﻿using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Trainers;
 using StudioCRM.Application.Interfaces;
@@ -111,7 +111,7 @@ public class TrainerService : ITrainerService
             throw new InvalidOperationException("User with this email already exists.");
 
         var existingTrainer = await _context.Trainers
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(t => t.UserId == user.Id);
 
         if (existingTrainer is not null && !existingTrainer.IsDeleted)
@@ -268,7 +268,7 @@ public class TrainerService : ITrainerService
     public async Task<bool> RestoreAsync(int id)
     {
         var trainer = await _context.Trainers
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .Include(t => t.User)
             .FirstOrDefaultAsync(t => t.Id == id);
 
@@ -289,7 +289,7 @@ public class TrainerService : ITrainerService
     public async Task<List<TrainerDto>> GetDeletedAsync()
     {
         return await _context.Trainers
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .Include(t => t.User)
             .ThenInclude(u => u.UserRoles)
             .ThenInclude(ur => ur.Role)

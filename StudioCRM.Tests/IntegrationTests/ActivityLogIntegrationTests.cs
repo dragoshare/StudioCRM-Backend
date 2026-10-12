@@ -39,6 +39,16 @@ public class ActivityLogIntegrationTests
         var migration = new StudioCRM.Infrastructure.Migrations.AddGlobalActivityLog();
         var commands = db.GetService<IMigrationsSqlGenerator>().Generate(migration.UpOperations, db.Model);
         foreach (var command in commands) await db.Database.ExecuteSqlRawAsync(command.CommandText);
+        var boundaries = new StudioCRM.Infrastructure.Migrations.AddOrganizationDataBoundaries();
+        var auditOperations = boundaries.UpOperations.Where(operation => operation switch
+        {
+            Microsoft.EntityFrameworkCore.Migrations.Operations.AddColumnOperation x => x.Table == "ActivityLogEntries",
+            Microsoft.EntityFrameworkCore.Migrations.Operations.CreateIndexOperation x => x.Table == "ActivityLogEntries",
+            Microsoft.EntityFrameworkCore.Migrations.Operations.AddForeignKeyOperation x => x.Table == "ActivityLogEntries",
+            _ => false
+        }).ToList();
+        foreach (var command in db.GetService<IMigrationsSqlGenerator>().Generate(auditOperations, db.Model))
+            await db.Database.ExecuteSqlRawAsync(command.CommandText);
         db.Add(new Package { Name = "After migration" });
         await db.SaveChangesAsync();
         Assert.Single(await db.ActivityLogEntries.ToListAsync());

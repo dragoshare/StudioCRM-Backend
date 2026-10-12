@@ -366,7 +366,7 @@ public partial class ClientService : IClientService
     {
         EnsureOwner();
         var client = await _context.Clients
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .FirstOrDefaultAsync(c => c.Id == id);
 
         if (client is null || !client.IsDeleted)
@@ -387,7 +387,7 @@ public partial class ClientService : IClientService
     {
         EnsureOwner();
         return await _context.Clients
-            .IgnoreQueryFilters()
+            .IncludingOrganizationArchive(_context.OrganizationId)
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Include(c => c.ActivePackage)
@@ -569,7 +569,7 @@ public partial class ClientService : IClientService
     }
 
     private IQueryable<Client> ReadableClients() => _currentUser.IsOwner
-        ? _context.Clients.IgnoreQueryFilters() : _context.Clients;
+        ? _context.Clients.IncludingOrganizationArchive(_context.OrganizationId) : _context.Clients;
 
     private IQueryable<ClientDto> BuildClientQuery(bool includeArchived = false)
     {
