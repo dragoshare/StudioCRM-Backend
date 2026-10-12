@@ -36,6 +36,7 @@ public class InvitationService : IInvitationService
 
     public async Task<InvitationDto> CreateAsync(CreateInvitationDto request)
     {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         if (!_currentUser.UserId.HasValue)
             throw new InvalidOperationException("User is not authenticated.");
 
@@ -351,6 +352,7 @@ public class InvitationService : IInvitationService
 
     public async Task<InvitationDto?> ResendAsync(int id)
     {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         var invitation = await _context.Invitations
             .Include(i => i.Location)
             .Include(i => i.Trainer)

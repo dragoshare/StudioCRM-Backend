@@ -86,4 +86,17 @@ public class StaffMembershipProvisioningTests
             Assert.Empty(await verify.UserRoles.ToListAsync());
             Assert.Empty(await verify.Set<OrganizationMembership>().ToListAsync());
         }
+    }    [PostgresFact]
+    public async Task OtherStudioCannotRegisterPublicAccountsOrSendInvitations()
+    {
+        await using var test = await TestDatabase.CreateAsync();
+        await using var db = test.Context(organizationId: Guid.NewGuid());
+        var auth = PortalSecurityTests.Auth(db);
+        var invitations = new InvitationService(db, new PortalSecurityTests.Actor(1, "Owner"), Options.Create(new AppSettings()), null!);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => auth.RegisterPublicGroupClientAsync(new() { Email = "blocked@atlas.test" }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invitations.CreateAsync(new() { Email = "blocked@atlas.test", Role = "Trainer" }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => invitations.ResendAsync(1));
+        Assert.Empty(await db.Users.ToListAsync());
+        Assert.Empty(await db.UserRoles.ToListAsync());
+        Assert.Empty(await db.Invitations.IgnoreQueryFilters().ToListAsync());
     }}

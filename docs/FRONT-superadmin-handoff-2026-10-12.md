@@ -141,3 +141,6 @@ Role pokazane dla Draft są zarejestrowanym członkostwem, nie aktywnymi uprawni
 Frontend może zbudować widok „Moje studia”, pokazać bieżące studio i niedostępne przypisania. `canEnter=true` jest obecnie możliwe wyłącznie dla już bieżącego BSworkout. NIE oznacza istnienia endpointu przełączenia. `unavailableReason`: `OrganizationNotActive` dla Draft, `OrganizationSwitchingNotAvailable` dla pozostałych niedostępnych przypadków. W interfejsie tłumaczyć te kody na tekst; nie wyświetlać surowych nazw. Endpoint nie zmienia tokenów ani aktywnej organizacji i nie wymaga dodatkowej migracji.
 
 Konto mające wyłącznie członkostwo Draft nie otrzymuje przez ten endpoint nowego sposobu logowania. Pełna sesja wyboru organizacji pozostaje do wdrożenia.
+## Ograniczenie rejestracji i zaproszeń w etapie przejściowym
+
+Publiczna rejestracja klienta, tworzenie oraz ponowne wysyłanie zaproszenia są teraz jawnie ograniczone do bieżącego BSworkout w statusie LegacyActive, tak jak akceptacja zaproszenia i tworzenie kadry. Zapobiega to utworzeniu globalnej roli lub wysłaniu zaproszenia w kontekście innego studia przed ukończeniem wieloorganizacyjnej autoryzacji. Bez zmian kontraktów, bez nowej migracji. Formularze BSworkout pozostają obsługiwane; formularzy rejestracji i zaproszeń dla Atlas Demo nadal nie należy uruchamiać.

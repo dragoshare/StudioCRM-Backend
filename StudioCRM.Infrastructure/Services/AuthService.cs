@@ -204,6 +204,7 @@ public partial class AuthService : IAuthService
 
     public async Task<AuthResponseDto> RegisterPublicGroupClientAsync(PublicGroupRegisterRequest request)
     {
+        await LegacyStaffMembership.RequireLegacyAsync(_context);
         var email = request.Email.Trim();
 
         if (string.IsNullOrWhiteSpace(email))
