@@ -348,7 +348,7 @@ public class AuthService : IAuthService
                 .ThenInclude(ur => ur.Role)
             .FirstAsync(u => u.Id == user.Id);
 
-        return BuildAuthResponse(registeredUser, refreshToken);
+        return await BuildAuthResponse(registeredUser, refreshToken);
     }
 
     public async Task<AuthResponseDto?> LoginAsync(LoginRequestDto request)
@@ -395,7 +395,7 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
 
         await transaction.CommitAsync();
-        return BuildAuthResponse(user, refreshToken);
+        return await BuildAuthResponse(user, refreshToken);
     }
 
     public async Task<AuthMeDto?> GetMeAsync(int userId)
@@ -410,9 +410,7 @@ public class AuthService : IAuthService
             return null;
         }
 
-        var roleNames = user.UserRoles
-            .Select(ur => ur.Role.Name)
-            .ToList();
+        var roleNames = await OrganizationAuthorization.RolesAsync(_context, user.Id);
 
         var client = await _context.Clients
             .Where(c => c.UserId == user.Id)
@@ -495,7 +493,7 @@ public class AuthService : IAuthService
         await _context.SaveChangesAsync();
 
         await transaction.CommitAsync();
-        return BuildAuthResponse(refreshToken.User, newRefreshToken);
+        return await BuildAuthResponse(refreshToken.User, newRefreshToken);
     }
 
     public async Task LogoutAsync(int userId)
@@ -684,11 +682,9 @@ public class AuthService : IAuthService
             (token.OrganizationId.HasValue && token.OrganizationId != StudioCRMDbContext.LegacyOrganizationId))
             throw new InvalidOperationException("Invalid refresh token scope.");
     }
-    private AuthResponseDto BuildAuthResponse(User user, string refreshToken)
+    private async Task<AuthResponseDto> BuildAuthResponse(User user, string refreshToken)
     {
-        var roleNames = user.UserRoles
-            .Select(ur => ur.Role.Name)
-            .ToList();
+        var roleNames = await OrganizationAuthorization.RolesAsync(_context, user.Id);
 
         var primaryRole = roleNames.FirstOrDefault() ?? "Client";
 

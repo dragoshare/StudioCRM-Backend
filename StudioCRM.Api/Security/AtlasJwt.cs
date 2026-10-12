@@ -34,9 +34,15 @@ public static class AtlasJwt
             }
             if (!int.TryParse(rawId, out var userId) ||
                 !await db.Users.AnyAsync(u => u.Id == userId && u.IsActive && u.Email == tokenEmail && u.AuthVersion == tokenVersion &&
-                    roles.All(role => u.UserRoles.Any(r => r.Role.Name == role)) &&
                     !db.Clients.IncludingOrganizationArchive(db.OrganizationId).Any(c => c.UserId == u.Id && (c.IsDeleted || c.PortalAccessBlocked))))
+            {
                 context.Fail("Account is inactive or client portal access is blocked.");
+                return;
+            }
+            var allowedRoles = await StudioCRM.Infrastructure.Services.OrganizationAuthorization.RolesAsync(db, userId);
+            if (roles.Length == 0 || roles.Any(role => !allowedRoles.Contains(role)) ||
+                (roles.Contains("SuperAdmin") && organizationClaims.Length != 0))
+                context.Fail("Roles are not available in this organization.");
         }
     };
     options.TokenValidationParameters = new TokenValidationParameters

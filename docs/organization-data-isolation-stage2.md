@@ -34,3 +34,10 @@ Pełny zestaw 200 testów przeszedł na lokalnym PostgreSQL, w tym trzy nowe tes
 Migracja 20261012060227_BindRefreshTokensToOrganization dodaje do RefreshTokens OrganizationId (nullable) i ScopeVersion (0 dla istniejących rekordów). Nowe sesje mają wersję 1: organizację BSworkout albo null dla panelu platformy. Odświeżenie sprawdza zapisany kontekst przed unieważnieniem starego tokena. Sesje starszego formatu są obsługiwane tylko w kontekście BSworkout i przy rotacji otrzymują jawny kontekst. Obca organizacja, nieznana wersja lub próba użycia sesji platformy jako sesji Ownera są odrzucane. W tym etapie nadal nie ma przełączania organizacji ani autoryzacji opartej na członkostwach.
 
 Walidacja: 204 testy, wszystkie poprawne; migracja wykonana na lokalnej kopii platform_org_migration_trial. Zdalne bazy bez zmian.
+## Wspólne rozwiązywanie ról organizacji
+
+OrganizationAuthorization.RolesAsync jest wspólnym źródłem ról dla odpowiedzi logowania, Auth/me i walidacji JWT. Konto SuperAdmin otrzymuje wyłącznie rolę platformową, nawet jeżeli ma historycznie również globalną rolę Owner. W statusie Active role Owner/Trainer wynikają z członkostwa w organizacji kontekstu, a Client z aktywnego, niezablokowanego profilu klienta tej organizacji. Brak członkostwa nie powoduje przejścia na globalne role. Draft i nieznany status nie nadają dostępu CRM. Odebranie członkostwa jest widoczne przy kolejnym sprawdzeniu uprawnień.
+
+Wyjątek migracyjny jest ograniczony do stałego ID BSworkout i statusu LegacyActive: nadal korzysta z globalnych ról. Nie przełączamy tego studia automatycznie na Active, ponieważ dodawanie kadry i zaproszenia muszą jeszcze utrzymywać członkostwa zamiast globalnych uprawnień.
+
+Warstwa HTTP nadal odrzuca tokeny innego studia. Przełączanie organizacji i aktywowanie Atlas Demo wymagają dokończenia kontekstu żądania, profili użytkowników, publicznych ścieżek i integracji. Ten etap nie stanowi wdrożenia pełnej wieloorganizacyjności.
