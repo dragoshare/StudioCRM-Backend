@@ -435,6 +435,7 @@ public class AuthService : IAuthService
             UserId = user.Id,
             Email = user.Email,
             Role = primaryRole,
+            OrganizationId = roleNames.Contains("SuperAdmin") ? null : _context.OrganizationId,
             Roles = roleNames,
             FullName = $"{user.FirstName} {user.LastName}".Trim(),
             AvatarUrl = user.AvatarUrl,
@@ -676,6 +677,7 @@ public class AuthService : IAuthService
             UserId = user.Id,
             Email = user.Email,
             Role = primaryRole,
+            OrganizationId = roleNames.Contains("SuperAdmin") ? null : _context.OrganizationId,
             EmailVerified = user.EmailVerifiedAt.HasValue,
             EmailVerificationRequired = !user.EmailVerifiedAt.HasValue
         };
@@ -691,6 +693,9 @@ public class AuthService : IAuthService
             new Claim(ClaimTypes.NameIdentifier, user.Id.ToString()),
             new Claim(ClaimTypes.Name, user.Email)
         };
+
+        if (!roleNames.Contains("SuperAdmin"))
+            claims.Add(new Claim("organization_id", _context.OrganizationId.ToString()));
 
         foreach (var role in roleNames)
         {

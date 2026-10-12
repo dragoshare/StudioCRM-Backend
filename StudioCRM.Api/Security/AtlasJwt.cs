@@ -22,10 +22,20 @@ public static class AtlasJwt
             var versionClaim = context.Principal?.FindFirstValue("auth_version");
             var tokenVersion = versionClaim is null ? 0 : int.TryParse(versionClaim, out var parsed) ? parsed : -1;
             var roles = context.Principal?.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray() ?? [];
+            // During the compatibility stage, only the existing studio may access CRM.
+            // Never interpret an arbitrary organization claim as permission to switch tenants.
+            var organizationClaims = context.Principal?.FindAll("organization_id").ToArray() ?? [];
+            if (organizationClaims.Length > 1 || (organizationClaims.Length == 1 &&
+                (!Guid.TryParse(organizationClaims[0].Value, out var organizationId) ||
+                 organizationId != StudioCRMDbContext.LegacyOrganizationId || organizationId != db.OrganizationId)))
+            {
+                context.Fail("Organization context is unavailable.");
+                return;
+            }
             if (!int.TryParse(rawId, out var userId) ||
                 !await db.Users.AnyAsync(u => u.Id == userId && u.IsActive && u.Email == tokenEmail && u.AuthVersion == tokenVersion &&
                     roles.All(role => u.UserRoles.Any(r => r.Role.Name == role)) &&
-                    !db.Clients.IgnoreQueryFilters().Any(c => c.UserId == u.Id && (c.IsDeleted || c.PortalAccessBlocked))))
+                    !db.Clients.IncludingOrganizationArchive(db.OrganizationId).Any(c => c.UserId == u.Id && (c.IsDeleted || c.PortalAccessBlocked))))
                 context.Fail("Account is inactive or client portal access is blocked.");
         }
     };

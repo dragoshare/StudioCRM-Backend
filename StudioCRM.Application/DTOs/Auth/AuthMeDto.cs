@@ -2,6 +2,9 @@ namespace StudioCRM.Application.DTOs.Auth;
 
 public class AuthMeDto
 {
+    // Null for the platform-only SuperAdmin panel.
+    public Guid? OrganizationId { get; set; }
+
     public int UserId { get; set; }
 
     public string Email { get; set; } = string.Empty;

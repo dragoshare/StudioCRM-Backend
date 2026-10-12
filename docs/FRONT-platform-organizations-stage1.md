@@ -73,3 +73,15 @@ Następny etap: membership-scoped roles, organizationId w tokenie i `/api/auth/m
 Branding docelowo należy do Ownera. Obecne endpointy SuperAdmina są jeszcze zgodnościowe; nowy panel nie powinien rozwijać ich edycji. Przeniesienie uprawnień nastąpi przy wdrożeniu kontekstu organizacji — nie wystarczy zmiana atrybutu roli.
 
 Impersonacja później: oddzielne actor/subject/organization, ograniczona sesja bez odziedziczenia SuperAdmina, reason, audit, cofnięcie i banner frontu.
+
+## Kontrakt identyfikacji przy logowaniu — 12.10.2026
+
+Odpowiedź logowania/odświeżenia i GET /api/Auth/me zawierają teraz `organizationId: string | null`.
+- Owner, Trainer i Client obecnego studia: `b5100000-0000-4000-8000-000000000002`.
+- SuperAdmin: `null` — panel platformy nie ma wybranej aktywnej organizacji CRM.
+- GET /api/organization nadal dotyczy istniejącego BSworkout (LegacyActive). Front nie powinien używać go jako aktywnej organizacji SuperAdmina.
+- Tokeny CRM zawierają podpisany claim `organization_id`. Front korzysta z odpowiedzi API, nie ustawia własnego ID w nagłówku.
+- Nie ma jeszcze endpointu przełączania organizacji. Atlas Demo/Draft nadal nie umożliwia pracy w CRM.
+- Starsze tokeny bez organization_id są akceptowane wyłącznie według dotychczasowego modelu jednego studia. Obce/błędne/powtórzone organization_id jest odrzucane.
+
+To etap zgodności kontraktu, nie zakończenie autoryzacji wielu organizacji. W dalszym etapie role muszą pochodzić z członkostwa organizacji, kontekst musi być zachowany przy refresh tokenie, a integracje i publiczne endpointy muszą rozwiązywać organizację niezależnie od sesji przeglądarki.

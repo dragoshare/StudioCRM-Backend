@@ -1,9 +1,12 @@
-﻿namespace StudioCRM.Application.DTOs.Auth;
+namespace StudioCRM.Application.DTOs.Auth;
 
 public class AuthResponseDto
 {
     public string Token { get; set; } = string.Empty;
     public string RefreshToken { get; set; } = string.Empty;
+
+    // Null for the platform-only SuperAdmin panel.
+    public Guid? OrganizationId { get; set; }
 
     public int UserId { get; set; }
 
