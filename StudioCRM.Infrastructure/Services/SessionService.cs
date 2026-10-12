@@ -208,7 +208,7 @@ public class SessionService : ISessionService
                 RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes),
                 CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes),
                 PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity),
-                PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count),
+                PlannedSessionType = request.IsPubliclyBookable ? "Group" : request.PlannedSessionType ?? ResolveSessionType(participants.Count),
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
                 OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors),
                 PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
@@ -386,7 +386,7 @@ public class SessionService : ISessionService
             session.RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes ?? session.RegistrationClosesBeforeMinutes);
             session.CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes ?? session.CancellationClosesBeforeMinutes);
             session.PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity);
-            session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count);
+            session.PlannedSessionType = request.IsPubliclyBookable ? "Group" : request.PlannedSessionType ?? ResolveSessionType(participants.Count);
             session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
             session.OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors);
             session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
@@ -2142,6 +2142,7 @@ public class SessionService : ISessionService
             1 => "OneToOne",
             2 => "TwoToOne",
             3 => "ThreeToOne",
+            4 => "FourToOne",
             _ => "Group"
         };
     }

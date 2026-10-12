@@ -203,6 +203,14 @@ public class OutlookEventMapperService
             TrainerId = trainer.Id,
             LocationId = location.Id,
             Status = "Planned",
+            PlannedSessionType = clients.Select(c => c.Id).Distinct().Count() switch
+            {
+                1 => nameof(SessionBillingType.OneToOne),
+                2 => nameof(SessionBillingType.TwoToOne),
+                3 => nameof(SessionBillingType.ThreeToOne),
+                4 => nameof(SessionBillingType.FourToOne),
+                _ => null
+            },
 
             OutlookCategoriesJson = evt.CategoriesJson,
             OutlookCategoryColorsJson = evt.CategoryColorsJson,
@@ -414,6 +422,7 @@ public class OutlookEventMapperService
             PackageId = activeClientPackage?.PackageId,
             ClientPackageId = activeClientPackage?.Id,
             AttendanceStatus = "Planned",
+
             CountsAgainstPackage = true,
             SessionsCharged = 1,
             PlannedBillingType = activeClientPackage?.ExpectedBillingType,
