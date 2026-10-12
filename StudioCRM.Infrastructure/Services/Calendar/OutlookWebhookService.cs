@@ -535,7 +535,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         foreach (var client in clientsToAdd)
         {
             var activeClientPackage = await _context.ClientPackages
-                .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+                .Where(cp => cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ClientId == client.Id && cp.IsActive)
                 .OrderByDescending(cp => cp.PurchaseDate)
                 .FirstOrDefaultAsync();
 

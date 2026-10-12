@@ -207,7 +207,7 @@ public class ClientPortalService : IClientPortalService
         var activeCycle = await _context.ClientPackages
             .Include(cp => cp.Package)
             .Where(cp =>
-                cp.ClientId == client.Id &&
+                cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ClientId == client.Id &&
                 cp.IsActive &&
                 (client.TrainerId.HasValue
                     ? cp.ExpectedBillingType != StudioCRM.Domain.Enums.SessionBillingType.Group
@@ -266,7 +266,7 @@ public class ClientPortalService : IClientPortalService
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
             .Where(cp =>
-                cp.ClientId == client.Id &&
+                cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ClientId == client.Id &&
                 cp.IsActive &&
                 (client.TrainerId.HasValue
                     ? cp.ExpectedBillingType != StudioCRM.Domain.Enums.SessionBillingType.Group

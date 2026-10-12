@@ -4,6 +4,7 @@ namespace StudioCRM.Application.DTOs.Packages;
 
 public class UpdatePackageDto
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode? BillingMode { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public decimal Price { get; set; }

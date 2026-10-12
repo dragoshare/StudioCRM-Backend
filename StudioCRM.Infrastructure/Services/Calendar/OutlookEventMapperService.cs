@@ -411,7 +411,7 @@ public class OutlookEventMapperService
     private async Task AddClientToSessionAsync(int sessionId, Client client)
     {
         var activeClientPackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.BillingMode == PackageBillingMode.SessionBased)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 

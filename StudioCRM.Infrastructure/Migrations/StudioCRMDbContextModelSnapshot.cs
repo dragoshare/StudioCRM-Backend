@@ -613,6 +613,9 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
 
+                    b.Property<int>("BillingMode")
+                        .HasColumnType("integer");
+
                     b.Property<int>("ClientId")
                         .HasColumnType("integer");
 
@@ -666,6 +669,15 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<int>("PaymentStatus")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("PeriodAutoRenewEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("PeriodDurationDays")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("PeriodStartsAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int?>("PreviousClientPackageId")
                         .HasColumnType("integer");
 
@@ -716,15 +728,24 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.HasIndex("ClientId")
                         .IsUnique()
                         .HasDatabaseName("IX_ClientPackages_OneActivePerClient")
-                        .HasFilter("\"IsActive\" = TRUE AND \"ExpectedBillingType\" <> 5");
+                        .HasFilter("\"IsActive\" = TRUE AND \"ExpectedBillingType\" <> 5 AND \"BillingMode\" = 0");
 
                     b.HasIndex("LocationId");
 
                     b.HasIndex("PackageId");
 
+                    b.HasIndex("PreviousClientPackageId")
+                        .IsUnique()
+                        .HasFilter("\"BillingMode\" = 1 AND \"PreviousClientPackageId\" IS NOT NULL");
+
                     b.HasIndex("ClientId", "IsActive");
 
-                    b.ToTable("ClientPackages");
+                    b.HasIndex("BillingMode", "IsActive", "ValidUntil");
+
+                    b.ToTable("ClientPackages", t =>
+                        {
+                            t.HasCheckConstraint("CK_ClientPackages_PeriodTerms", "\"BillingMode\" <> 1 OR (\"TotalSessions\" = 0 AND \"UsedSessions\" = 0 AND \"PeriodDurationDays\" BETWEEN 1 AND 3660 AND \"PeriodStartsAt\" IS NOT NULL AND \"ValidUntil\" IS NOT NULL AND \"ValidUntil\" > \"PeriodStartsAt\")");
+                        });
                 });
 
             modelBuilder.Entity("StudioCRM.Domain.Entities.ClientPayment", b =>
@@ -1590,6 +1611,9 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("BillingMode")
+                        .HasColumnType("integer");
 
                     b.Property<int>("BillingType")
                         .HasColumnType("integer");

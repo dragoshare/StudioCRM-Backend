@@ -13,6 +13,8 @@ public partial class ClientPackageService
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74101}, {clientId})");
         await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74121}, {clientPackageId})");
         var p = await LoadManagedAsync(clientId, clientPackageId);
+        if (p.BillingMode == PackageBillingMode.PeriodBased)
+            throw new InvalidOperationException("Use period renewal or assign a new period instead of a training-package expiry decision.");
         if (Version(p) != request.ExpectedVersion) throw new DbUpdateConcurrencyException("Package changed; refresh preview.");
         if (p.ClosureDisposition != null || !p.IsActive || p.ValidUntil == null || p.ValidUntil >= DateTime.UtcNow)
             throw new InvalidOperationException("Decision requires an expired, active, open package.");
@@ -32,12 +34,12 @@ public partial class ClientPackageService
             p.ClosedAt = DateTime.UtcNow; p.ClosureReason = request.Reason.Trim();
             Audit(p, "ExpiredPackageEnded", before, request.Reason);
             await _context.SaveChangesAsync();
-            if (p.ExpectedBillingType != SessionBillingType.Group)
+            if ((p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group))
             {
                 if (p.Client.SubscriptionAutoRenewEnabled && p.Client.RenewalCancellationRequestedAt == null)
                 {
                     var nextId = p.Client.NextPackageId ?? p.PackageId;
-                    if (!await _context.Packages.AnyAsync(x => x.Id == nextId && x.IsActive && x.BillingType != SessionBillingType.Group))
+                    if (!await _context.Packages.AnyAsync(x => x.Id == nextId && x.IsActive && (x.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && x.BillingType != SessionBillingType.Group)))
                         throw new InvalidOperationException("Next personal package is unavailable.");
                     replacementId = await CreateCoreAsync(new CreateClientPackageRequest { ClientId = clientId, PackageId = nextId, PurchaseDate = DateTime.UtcNow }, false);
                     var next = await _context.ClientPackages.SingleAsync(x => x.Id == replacementId);

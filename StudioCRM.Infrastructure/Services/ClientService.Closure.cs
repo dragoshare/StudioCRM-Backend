@@ -40,6 +40,7 @@ public partial class ClientService
         EnsureOwner();
         ValidateReason(request.Reason);
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74101}, {clientId})");
         var client = await _context.Clients.FirstOrDefaultAsync(c => c.Id == clientId)
             ?? throw new KeyNotFoundException("Client not found or archived.");
         var preview = await GetClosurePreviewAsync(clientId);
@@ -59,6 +60,7 @@ public partial class ClientService
         {
             var package = packages.Single(p => p.Id == decision.ClientPackageId);
             var packageBefore = PackageAuditState(package);
+            package.PeriodAutoRenewEnabled = false;
             package.IsActive = false;
             package.ClosureDisposition = decision.Disposition == "Retain" ? "Retained" : "RefundPending";
             package.ClosedAt = DateTime.UtcNow;
@@ -99,6 +101,7 @@ public partial class ClientService
         EnsureOwner();
         ValidateReason(request.Reference);
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74101}, {clientId})");
         await EnsureReadableClientAsync(clientId);
         var package = await _context.ClientPackages.SingleOrDefaultAsync(p => p.Id == packageId && p.ClientId == clientId)
             ?? throw new KeyNotFoundException("Package not found.");
@@ -122,6 +125,7 @@ public partial class ClientService
         if (request.ValidUntil.Kind != DateTimeKind.Utc || request.ValidUntil <= DateTime.UtcNow)
             throw new InvalidOperationException("Provide a future UTC ValidUntil date.");
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
+        await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74101}, {clientId})");
         var client = await _context.Clients.SingleOrDefaultAsync(c => c.Id == clientId)
             ?? throw new InvalidOperationException("Restore the client first.");
         var package = await _context.ClientPackages.SingleOrDefaultAsync(p => p.Id == packageId && p.ClientId == clientId)
@@ -130,8 +134,8 @@ public partial class ClientService
             throw new InvalidOperationException("Package has no retained entries to resume.");
         if (package.LocationId.HasValue && package.LocationId != client.LocationId)
             throw new InvalidOperationException("Package belongs to a different location.");
-        if (package.ExpectedBillingType != SessionBillingType.Group && await _context.ClientPackages.AnyAsync(p =>
-                p.ClientId == clientId && p.IsActive && p.ExpectedBillingType != SessionBillingType.Group))
+        if ((package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && package.ExpectedBillingType != SessionBillingType.Group) && await _context.ClientPackages.AnyAsync(p =>
+                p.ClientId == clientId && p.IsActive && (p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group)))
             throw new InvalidOperationException("Client already has an active individual package.");
         var before = PackageAuditState(package);
         package.IsActive = true;
@@ -139,7 +143,7 @@ public partial class ClientService
         package.ClosedAt = null;
         package.ClosureReason = null;
         package.ValidUntil = request.ValidUntil;
-        if (package.ExpectedBillingType != SessionBillingType.Group) client.ActivePackageId = package.PackageId;
+        if ((package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && package.ExpectedBillingType != SessionBillingType.Group)) client.ActivePackageId = package.PackageId;
         client.Status = "Active";
         client.UpdatedAt = DateTime.UtcNow;
         AuditPackage(clientId, package, "RetainedPackageResumed", before, request.Reason.Trim());

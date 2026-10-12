@@ -18,7 +18,7 @@ public partial class ClientPaymentService
                     t.Type != BalanceTransactionType.PaymentCredit && t.Type != BalanceTransactionType.PaymentReversal).Sum(t => t.Amount)
             }).SingleAsync();
         var active = await _context.ClientPackages.AsNoTracking().Where(p => p.ClientId == clientId && p.IsActive &&
-            p.ClosureDisposition == null && p.ExpectedBillingType != SessionBillingType.Group)
+            p.ClosureDisposition == null && (p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(p => p.ActivatedAt ?? p.PurchaseDate).ThenByDescending(p => p.Id)
             .Select(p => new { p.Id, p.Name, p.TotalPrice, p.AmountPaid, p.PaymentStatus }).FirstOrDefaultAsync();
         result.ActiveClientPackageId = active?.Id;

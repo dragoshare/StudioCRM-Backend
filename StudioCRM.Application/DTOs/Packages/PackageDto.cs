@@ -4,6 +4,8 @@ namespace StudioCRM.Application.DTOs.Packages;
 
 public class PackageDto
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public int Id { get; set; }
 
     public string Name { get; set; } = string.Empty;
@@ -14,7 +16,7 @@ public class PackageDto
     public int SessionsPerWeek { get; set; }
     public int DurationDays { get; set; }
     public SessionBillingType BillingType { get; set; }
-    public string PackageType => StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(BillingType);
+    public string PackageType => BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "PeriodBased" : StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(BillingType);
     public int ParticipantsCount { get; set; }
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }

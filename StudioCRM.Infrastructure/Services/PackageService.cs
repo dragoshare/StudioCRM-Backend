@@ -33,14 +33,15 @@ public class PackageService : IPackageService
         }
         var total = await query.CountAsync();
         var items = await query.OrderBy(p => p.Name).ThenBy(p => p.Id).Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
-            .Select(p => new PackageOptionDto { Id = p.Id, Name = p.Name, LocationId = p.LocationId,
-                Price = p.Price, Currency = p.Currency, PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(p.BillingType),
-                BillingType = p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive }).ToListAsync();
+            .Select(p => new PackageOptionDto { BillingMode = p.BillingMode, Id = p.Id, Name = p.Name, LocationId = p.LocationId,
+                Price = p.Price, Currency = p.Currency, PackageType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "PeriodBased" : StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(p.BillingType),
+                BillingType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "" : p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive }).ToListAsync();
         return new() { Items = items, TotalCount = total, Page = filter.Page, PageSize = filter.PageSize, TotalPages = (int)Math.Ceiling(total / (double)filter.PageSize) };
     }
 
     public async Task<PackageDto> CreateAsync(CreatePackageDto request)
     {
+        ValidatePeriodMode(request.BillingMode, request.Price, request.DurationDays, request.IsPubliclyAvailable);
         if (request.LocationId.HasValue)
         {
             var locationExists = await _context.Locations.AnyAsync(l => l.Id == request.LocationId.Value);
@@ -50,15 +51,16 @@ public class PackageService : IPackageService
 
         var package = new Package
         {
+            BillingMode = request.BillingMode,
             Name = request.Name,
             Description = request.Description,
             Price = request.Price,
             Currency = request.Currency,
-            SessionsLimit = request.SessionsLimit,
-            SessionsPerWeek = request.SessionsPerWeek,
+            SessionsLimit = request.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : request.SessionsLimit,
+            SessionsPerWeek = request.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : request.SessionsPerWeek,
             DurationDays = request.DurationDays,
-            BillingType = request.BillingType,
-            ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType),
+            BillingType = request.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? StudioCRM.Domain.Enums.SessionBillingType.OneToOne : request.BillingType,
+            ParticipantsCount = request.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : ResolveParticipantsCount(request.ParticipantsCount, request.BillingType),
             LocationId = request.LocationId,
             IsPubliclyAvailable = request.IsPubliclyAvailable,
             PublicSlug = NormalizePublicSlug(request.PublicSlug),
@@ -116,15 +118,18 @@ public class PackageService : IPackageService
                 throw new InvalidOperationException("Location does not exist.");
         }
 
+        ValidatePeriodMode(request.BillingMode ?? package.BillingMode, request.Price, request.DurationDays, request.IsPubliclyAvailable);
+        if (request.BillingMode.HasValue && request.BillingMode != package.BillingMode)
+            throw new InvalidOperationException("Package billing mode cannot be changed. Create a separate offer.");
         package.Name = request.Name;
         package.Description = request.Description;
         package.Price = request.Price;
         package.Currency = request.Currency;
-        package.SessionsLimit = request.SessionsLimit;
-        package.SessionsPerWeek = request.SessionsPerWeek;
+        package.SessionsLimit = package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : request.SessionsLimit;
+        package.SessionsPerWeek = package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : request.SessionsPerWeek;
         package.DurationDays = request.DurationDays;
-        package.BillingType = request.BillingType;
-        package.ParticipantsCount = ResolveParticipantsCount(request.ParticipantsCount, request.BillingType);
+        package.BillingType = package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? StudioCRM.Domain.Enums.SessionBillingType.OneToOne : request.BillingType;
+        package.ParticipantsCount = package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? 0 : ResolveParticipantsCount(request.ParticipantsCount, request.BillingType);
         package.LocationId = request.LocationId;
         package.IsPubliclyAvailable = request.IsPubliclyAvailable;
         package.PublicSlug = NormalizePublicSlug(request.PublicSlug);
@@ -214,7 +219,7 @@ public class PackageService : IPackageService
             .Include(c => c.Trainer)
                 .ThenInclude(t => t!.User)
             .Include(c => c.Location)
-            .Where(c => c.ActivePackageId == id);
+            .Where(c => c.ActivePackageId == id || _context.ClientPackages.Any(p => p.ClientId == c.Id && p.PackageId == id && p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased && p.IsActive && p.ClosureDisposition == null));
 
         if (_currentUser.IsTrainer && !_currentUser.IsOwner)
         {
@@ -285,6 +290,7 @@ public class PackageService : IPackageService
         return new PackageDto
         {
             Id = package.Id,
+            BillingMode = package.BillingMode,
             Name = package.Name,
             Description = package.Description,
             Price = package.Price,
@@ -323,6 +329,13 @@ public class PackageService : IPackageService
         }
 
         return resolved;
+    }
+
+    private static void ValidatePeriodMode(StudioCRM.Domain.Enums.PackageBillingMode mode, decimal price, int days, bool publicOffer)
+    {
+        if (!Enum.IsDefined(mode)) throw new InvalidOperationException("Unknown billing mode.");
+        if (mode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased && (price < 0 || days < 1 || days > 3660 || publicOffer))
+            throw new InvalidOperationException("Period packages require a nonnegative price, 1..3660 days and Owner assignment.");
     }
 
     private static string? NormalizePublicSlug(string? value)

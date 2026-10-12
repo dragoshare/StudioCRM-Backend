@@ -106,7 +106,7 @@ public class OperationalAlertService : IOperationalAlertService
             .Where(c =>
                 !c.IsDeleted &&
                 c.Status != "Inactive" &&
-                !_context.ClientPackages.Any(cp => cp.ClientId == c.Id && cp.IsActive) &&
+                !_context.ClientPackages.Any(cp => cp.ClientId == c.Id && cp.IsActive && cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased) &&
                 !_context.ClientPackages.Any(cp =>
                     cp.ClientId == c.Id &&
                     !cp.IsActive &&
@@ -202,7 +202,9 @@ public class OperationalAlertService : IOperationalAlertService
                     Type = isEnded ? "PackageEndedPaymentRequired" : "PackagePaymentRequired",
                     Severity = cp.PaymentStatus == PaymentStatus.Overdue || isEnded ? "Warning" : "Info",
                     Title = isEnded ? "Pakiet zakończony - wymaga opłacenia" : "Pakiet wymaga opłacenia",
-                    Message = isEnded
+                    Message = cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased
+                        ? $"{cp.Client.FirstName} {cp.Client.LastName}: {cp.Name}, do zapłaty {amountDue} {cp.Currency}"
+                        : isEnded
                         ? $"{cp.Client.FirstName} {cp.Client.LastName}: pakiet {cp.Name} został wykorzystany, do zapłaty {amountDue} {cp.Currency}"
                         : $"{cp.Client.FirstName} {cp.Client.LastName}: {cp.Name}, do zapłaty {amountDue} {cp.Currency}, zostało {remainingSessions} treningów",
                     ClientId = cp.ClientId,
@@ -233,7 +235,7 @@ public class OperationalAlertService : IOperationalAlertService
                 cp.Client.RenewalCancellationRequestedAt == null &&
                 !_context.ClientPackages.Any(active =>
                     active.ClientId == cp.ClientId &&
-                    active.IsActive));
+                    active.IsActive && active.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased));
 
         query = ApplyClientPackageScope(query, filter.LocationId, trainerId);
 

@@ -24,7 +24,7 @@ public partial class ClientPackageService
 
     private static string State(ClientPackage p) => JsonSerializer.Serialize(new
     {
-        p.Id, p.ClientId, p.PackageId, p.TotalSessions, p.UsedSessions, p.TotalPrice,
+        p.Id, p.ClientId, p.PackageId, p.BillingMode, p.PeriodStartsAt, p.PeriodDurationDays, p.PeriodAutoRenewEnabled, p.TotalSessions, p.UsedSessions, p.TotalPrice,
         p.OriginalPrice, p.AmountPaid, p.BalanceApplied, p.ExpectedUnitPrice, p.IsActive,
         p.ClosureDisposition, p.ValidUntil, p.PaymentDueDate, p.ClosedAt, p.RenewalSource,
         p.RefundAmount, p.RefundConfirmedAt, p.RefundReference
@@ -43,6 +43,11 @@ public partial class ClientPackageService
     {
         RequireOwner();
         await EnsureStaffAccessToClientAsync(clientId);
+        if (_context.Database.CurrentTransaction != null)
+        {
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74101}, {clientId})");
+            await _context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock({74121}, {id})");
+        }
         return await _context.ClientPackages.Include(p => p.Client)
             .SingleOrDefaultAsync(p => p.ClientId == clientId && p.Id == id)
             ?? throw new InvalidOperationException("Package not found.");
@@ -64,8 +69,8 @@ public partial class ClientPackageService
             ClientPackageId = p.Id, Version = Version(p), AmountDue = Math.Max(0, p.TotalPrice - p.AmountPaid),
             RemainingSessions = Math.Max(0, p.TotalSessions - p.UsedSessions),
             CanDelete = deleteReason == null, DeleteBlockReason = deleteReason,
-            CanEdit = blockers.Count == 0 && !payments && !balance && !counted && p.AmountPaid == 0,
-            CanCorrect = blockers.Count == 0, CanClose = blockers.Count == 0, Blockers = blockers
+            CanEdit = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0 && !payments && !balance && !counted && p.AmountPaid == 0,
+            CanCorrect = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0, CanClose = blockers.Count == 0, Blockers = blockers
         };
     }
 
@@ -81,6 +86,8 @@ public partial class ClientPackageService
 
     internal static void ValidateCorrection(ClientPackage p, PackageChangeRequest r)
     {
+        if (p.BillingMode == PackageBillingMode.PeriodBased)
+            throw new InvalidOperationException("Period service terms cannot be corrected through session-package management. Close and assign a new period.");
         if (r.TotalSessions.HasValue && (r.TotalSessions <= 0 || r.TotalSessions < p.UsedSessions))
             throw new InvalidOperationException("Total sessions must be positive and not less than used sessions.");
         if (p.IsActive && r.TotalSessions.HasValue && r.TotalSessions <= p.UsedSessions)
@@ -133,7 +140,7 @@ public partial class ClientPackageService
             throw new InvalidOperationException("Resolve outstanding debt with WaiveDue before refunding or transferring funds.");
         if (request.DebtDisposition == "WaiveDue") p.TotalPrice = p.AmountPaid;
         var wasActive = p.IsActive;
-        p.IsActive = false; p.ClosureDisposition = request.DebtDisposition == "KeepDue" ? "ClosedWithDebt" : "Closed"; p.ClosedAt = DateTime.UtcNow; p.ClosureReason = request.Reason.Trim();
+        p.PeriodAutoRenewEnabled = false; p.IsActive = false; p.ClosureDisposition = request.DebtDisposition == "KeepDue" ? "ClosedWithDebt" : "Closed"; p.ClosedAt = DateTime.UtcNow; p.ClosureReason = request.Reason.Trim();
         if (request.FundsDisposition == "Refund")
         {
             p.ClosureDisposition = "RefundPending";
@@ -150,7 +157,7 @@ public partial class ClientPackageService
             });
         }
         RefreshStatus(p);
-        if (wasActive && p.ExpectedBillingType != SessionBillingType.Group)
+        if (wasActive && (p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group))
         {
             p.Client.ActivePackageId = null;
             p.Client.NextPackageId = null;
@@ -204,6 +211,6 @@ public partial class ClientPackageService
             p.PaymentDueDate < DateTime.UtcNow ? PaymentStatus.Overdue :
             p.AmountPaid > 0 ? PaymentStatus.PartiallyPaid : PaymentStatus.Unpaid;
         p.PaidAt = p.PaymentStatus == PaymentStatus.Paid ? p.PaidAt ?? DateTime.UtcNow : null;
-        if (p.IsActive && p.ExpectedBillingType != SessionBillingType.Group) p.Client.BillingStatus = p.PaymentStatus.ToString();
+        if (p.IsActive && (p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group)) p.Client.BillingStatus = p.PaymentStatus.ToString();
     }
 }

@@ -647,7 +647,7 @@ public partial class ClientService : IClientService
         var clientIds = clients.Select(c => c.Id).ToList();
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .ThenByDescending(cp => cp.Id)
             .Select(cp => new

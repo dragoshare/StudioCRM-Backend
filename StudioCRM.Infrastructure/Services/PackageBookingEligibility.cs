@@ -8,7 +8,7 @@ internal static class PackageBookingEligibility
     public static async Task<ClientPackage?> ResolveAsync(StudioCRMDbContext db, int clientId, Session session, int entries, int? packageId = null)
     {
         var group = GroupBookingPolicy.IsGroup(session);
-        var candidates = await db.ClientPackages.Where(p => p.ClientId == clientId && (packageId == null || p.Id == packageId) && p.IsActive && p.ClosureDisposition == null &&
+        var candidates = await db.ClientPackages.Where(p => p.BillingMode == PackageBillingMode.SessionBased && p.ClientId == clientId && (packageId == null || p.Id == packageId) && p.IsActive && p.ClosureDisposition == null &&
             (p.ExpectedBillingType == SessionBillingType.Group) == group &&
             (p.LocationId == null || p.LocationId == session.LocationId) &&
             (p.ValidUntil == null || p.ValidUntil >= session.StartAt) &&

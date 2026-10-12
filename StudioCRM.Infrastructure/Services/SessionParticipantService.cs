@@ -308,7 +308,7 @@ public class SessionParticipantService : ISessionParticipantService
                         (actualBillingType != SessionBillingType.Group || cp.PaymentStatus == PaymentStatus.Paid) &&
                         (actualBillingType == SessionBillingType.Group
                             ? cp.ExpectedBillingType == SessionBillingType.Group
-                            : cp.ExpectedBillingType != SessionBillingType.Group) &&
+                            : (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group)) &&
                         (cp.LocationId == null || cp.LocationId == session.LocationId))
                     .OrderByDescending(cp => cp.Id == participant.ClientPackageId)
                     .ThenByDescending(cp => cp.PurchaseDate)
@@ -550,7 +550,7 @@ public class SessionParticipantService : ISessionParticipantService
                 cp.IsActive &&
                 (isGroupSession
                     ? cp.ExpectedBillingType == SessionBillingType.Group
-                    : cp.ExpectedBillingType != SessionBillingType.Group) &&
+                    : (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group)) &&
                 (cp.LocationId == null || cp.LocationId == sessionLocationId))
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();

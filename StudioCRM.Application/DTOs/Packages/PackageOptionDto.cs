@@ -1,6 +1,8 @@
 namespace StudioCRM.Application.DTOs.Packages;
 public class PackageOptionDto
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public int Id { get; set; }
     public string Name { get; set; } = "";
     public int? LocationId { get; set; }

@@ -979,6 +979,8 @@ public class SessionService : ISessionService
         if (clientPackage is null)
             throw new InvalidOperationException("Client package not found.");
 
+        if (clientPackage.BillingMode != PackageBillingMode.SessionBased)
+            throw new InvalidOperationException("Period packages do not include training entries.");
         if (participant.ClientId != clientPackage.ClientId)
             throw new InvalidOperationException("This package does not belong to this client.");
 
@@ -1556,7 +1558,7 @@ public class SessionService : ISessionService
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
             .Where(cp => isGroupSession
                 ? cp.ExpectedBillingType == SessionBillingType.Group
-                : cp.ExpectedBillingType != SessionBillingType.Group)
+                : (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .Where(cp => cp.LocationId == null || cp.LocationId == sessionLocationId)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
