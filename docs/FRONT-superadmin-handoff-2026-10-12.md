@@ -164,3 +164,12 @@ Kody: EligibleOwnerRequired, OwnerAccountBelongsToAnotherOrganization, Organizat
 EligibleOwnerCount oznacza aktywnych zweryfikowanych Ownerów bez roli platformowej; osobno należy sprawdzać blokadę konfliktu konta. Nie traktować samego licznika jako gotowości.
 
 W aktualnej wersji canActivate jest zawsze false ze względu na OrganizationRuntimeNotReady. To diagnostyka braków, nie endpoint aktywacji. Front może pokazać listę powodów; nie odblokowywać przycisku tylko dlatego, że przypisano Ownera. Endpoint nie zmienia danych ani nie wysyła wiadomości. Wymaga wdrożenia nowego kodu, nie wymaga nowej migracji.
+## 2026-10-13 — account organization validation
+
+Authentication now resolves a single studio from account memberships, client/trainer profiles (including archived profiles), and legacy CRM roles. Legacy global CRM roles bind the account to BSworkout. SuperAdmin remains a platform identity without a studio. Conflicting bindings, missing bindings and inactive/draft studios cannot authenticate. Login and refresh reject accounts without roles in the current context; JWT validation rechecks the binding. Login no longer returns the misleading fallback Client role for an account with no permissions.
+
+This is validation groundwork, not activation: HTTP context still defaults to BSworkout and foreign organization JWT claims remain disabled. Atlas Demo is still Draft. No frontend organization selector is required under the one-account/one-studio policy. Next: resolve the immutable request DbContext from the verified account binding, adapt organization/profile lookup and restrict unsupported new-studio operations before adding activation.
+
+Historical test accounts that have both BSworkout global roles and membership in another studio now fail authentication until explicitly reconciled; the backend never silently chooses a studio. No database migration or production data change is part of this patch.
+
+Validation: all 218 tests passed, none skipped, against local PostgreSQL with test collection parallelism disabled.

@@ -39,6 +39,11 @@ public static class AtlasJwt
                 context.Fail("Account is inactive or client portal access is blocked.");
                 return;
             }
+            if (!await StudioCRM.Infrastructure.Services.AccountOrganizationResolver.MatchesContextAsync(db, userId))
+            {
+                context.Fail("Account organization is unavailable or ambiguous.");
+                return;
+            }
             var allowedRoles = await StudioCRM.Infrastructure.Services.OrganizationAuthorization.RolesAsync(db, userId);
             if (roles.Length == 0 || roles.Any(role => !allowedRoles.Contains(role)) ||
                 (roles.Contains("SuperAdmin") && organizationClaims.Length != 0))

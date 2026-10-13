@@ -390,6 +390,9 @@ public partial class AuthService : IAuthService
             return null;
         }
 
+        if (!await AccountOrganizationResolver.MatchesContextAsync(_context, user.Id) ||
+            (await OrganizationAuthorization.RolesAsync(_context, user.Id)).Count == 0) return null;
+
         user.LastLoginAt = DateTime.UtcNow;
         user.UpdatedAt = DateTime.UtcNow;
 
@@ -487,6 +490,9 @@ public partial class AuthService : IAuthService
         if (!refreshToken.IsActive || !refreshToken.User.IsActive)
             throw new InvalidOperationException("Invalid refresh token.");
         ValidateRefreshScope(refreshToken);
+        if (!await AccountOrganizationResolver.MatchesContextAsync(_context, refreshToken.UserId) ||
+            (await OrganizationAuthorization.RolesAsync(_context, refreshToken.UserId)).Count == 0)
+            throw new InvalidOperationException("Invalid refresh token.");
         refreshToken.RevokedAt = DateTime.UtcNow;
 
         var newRefreshToken = GenerateRefreshToken();
@@ -699,7 +705,8 @@ public partial class AuthService : IAuthService
     {
         var roleNames = await OrganizationAuthorization.RolesAsync(_context, user.Id);
 
-        var primaryRole = roleNames.FirstOrDefault() ?? "Client";
+        if (roleNames.Count == 0) throw new InvalidOperationException("Account has no access to this organization.");
+        var primaryRole = roleNames[0];
 
         var token = GenerateJwtToken(user, roleNames);
 
