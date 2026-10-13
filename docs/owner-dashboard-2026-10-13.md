@@ -135,3 +135,40 @@ Obliczenia są po stronie SQL/backendu; nie pobieramy całego grafiku ani histor
 Nowe endpointy nie dodają własnej migracji. Wymagają schematu z przygotowanej migracji pakietów okresowych `20261012192652_AddPeriodBasedPackages`. Kod jest na gałęzi `codex/bsworkout-personalization`; dostępność na live trzeba potwierdzić po migracji i wdrożeniu. Frontend może wdrożyć widok po publikacji tych endpointów.
 
 Weryfikacja: kompilacja bez błędów/ostrzeżeń; 4/4 testy integracyjne na izolowanym PostgreSQL. Testy obejmują polską granicę miesiąca, wpłaty/refundy/statusy/waluty, archiwizowanego płatnika, unikalną aktywność trening+usługa, zera na wykresie, brak daty dołączenia, alerty i dostęp innych ról.
+
+
+## Opcjonalny filtr lokalizacji (2026-10-13)
+
+Wszystkie odpowiedzi/DTO pozostają bez zmian. Nowy opcjonalny parametr query `locationId: int`:
+
+- `GET /api/owner/dashboard/summary?period=2026-10&locationId=2`
+- `GET /api/owner/dashboard/revenue?months=12&period=2026-10&locationId=2`
+- `GET /api/owner/dashboard/recent-clients?limit=4&locationId=2`
+- `GET /api/owner/dashboard/attention?locationId=2`
+
+Brak parametru = całe studio. Nie wysyłać `0` jako „wszystkie”. Dodatni identyfikator jest sprawdzany w dostępnych lokalizacjach: 400 dla <=0 lub niepoprawnego int, 404 dla nieistniejącej/niedostępnej lokalizacji (także należącej do innej organizacji na branchu platform-organizations). Istniejąca lokalizacja bez danych zwraca 200, zera/pustą listę. Walidacja dodaje jedno zapytanie tylko przy podanym parametrze. Filtr obejmuje również poprzedni miesiąc, poprzedni rok, średnią i wszystkie pozycje wykresu.
+
+| Metryka | Powiązanie używane do filtrowania |
+| --- | --- |
+| Przychody | zapisane `ClientPayment.LocationId` |
+| Zwroty | zapisane `ClientPackage.LocationId` |
+| Wykonane treningi / aktywni uczestnicy | `Session.LocationId`, niezależnie od lokalizacji macierzystej uczestnika |
+| Aktywni klienci usług okresowych | `ClientPackage.LocationId` |
+| Nowi / ostatnio dołączeni / brak daty dołączenia | aktualne `Client.LocationId` |
+| Brak treningu 30 dni / brak daty bazowej | klienci macierzyści tej lokalizacji z pakietem na wejścia lub historią treningową w tej lokalizacji; ostatni trening również w tej lokalizacji |
+| Jedno pozostałe wejście | `ClientPackage.LocationId`, niezależnie od lokalizacji macierzystej klienta |
+
+Przy wybranej lokalizacji alert nieaktywności oznacza „brak treningu w tej lokalizacji”, a nie w całym studiu. Trening w innym oddziale nie zeruje tego lokalnego licznika. Samo GroupAccessEnabled nie dowodzi aktywności ani posiadania pakietu i nie dodaje klienta do statystyk treningowych.
+
+### Brakujące powiązania i ograniczenia danych
+
+Przegląd modeli i ścieżek zapisu (bez aktualizacji historycznych danych):
+
+- Session.LocationId i Client.LocationId są wymagane. ClientPayment.LocationId i ClientPackage.LocationId dopuszczają null.
+- Nowe ręczne wpłaty oraz płatności Tpay zapisują lokalizację rozliczenia. Nowe przypisania pakietów, subskrypcje i usługi okresowe zapisują lokalizację oferty lub klienta w momencie utworzenia; odnowienie usługi kopiuje ją z poprzedniego okresu.
+- Wpisy finansowe/pakiety bez zapisanej lokalizacji są uwzględniane tylko globalnie. Nie zgadujemy lokalizacji na podstawie aktualnego profilu klienta, katalogu oferty, powiązanego pakietu wpłaty ani miejsca treningu. Dotyczy także usług okresowych i alertu jednego wejścia. Bez udokumentowanego przypisania nie da się wiarygodnie podzielić tych kwot; ewentualna korekta wymaga osobnej decyzji/audytu.
+- Zwrot jest przypisany do lokalizacji zakupionego pakietu. Nie ma osobnego historycznego miejsca dokonania zwrotu ani rozbicia go między lokalizacje wpłat.
+- Brak historii zmian lokalizacji macierzystej: nowe/recent statystyki są liczone wg dzisiejszego przypisania, nie historycznego oddziału pozyskania klienta. Przeniesienie profilu może zmienić podział historycznej liczby nowych klientów. Aby uzyskać historycznie niezmienny podział, potrzebny byłby osobny zapis lokalizacji dołączenia; nie odtwarzamy go z domysłów.
+- Sumy finansowe lokalizacji mogą być mniejsze od globalnej przez brak przypisań. Aktywnych klientów nie należy sumować między lokalizacjami: ta sama osoba może trenować w obu, a globalnie jest liczona raz.
+
+Zmiana nie wymaga migracji ani backfillu. Test regresji obejmuje obie lokalizacje, wizytę poza lokalizacją macierzystą, wpłatę bez lokalizacji mimo powiązania z pakietem, zwrot, usługę okresową, porównania, listy, alerty i niepoprawne ID.
