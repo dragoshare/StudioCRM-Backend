@@ -64,6 +64,10 @@ if (string.IsNullOrWhiteSpace(connectionString))
 
 builder.Services.AddDbContext<StudioCRMDbContext>(options =>
     options.UseNpgsql(connectionString));
+builder.Services.AddScoped<OrganizationDbContextFactory>();
+builder.Services.AddScoped<StudioCRM.Api.Security.RequestOrganizationContext>();
+builder.Services.AddScoped<StudioCRMDbContext>(sp => sp.GetRequiredService<OrganizationDbContextFactory>()
+    .Create(sp.GetRequiredService<StudioCRM.Api.Security.RequestOrganizationContext>().Freeze()));
 
 // Services
 builder.Services.AddScoped<IAuthService, AuthService>();
@@ -264,6 +268,7 @@ app.UseHttpsRedirection();
 
 app.UseAuthentication();
 app.UseAuthorization();
+app.UseMiddleware<StudioCRM.Api.Security.OrganizationCapabilityMiddleware>();
 
 app.MapMethods("/health", new[] { "GET", "HEAD" }, () => Results.Ok(new
 {

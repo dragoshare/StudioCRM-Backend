@@ -173,3 +173,11 @@ This is validation groundwork, not activation: HTTP context still defaults to BS
 Historical test accounts that have both BSworkout global roles and membership in another studio now fail authentication until explicitly reconciled; the backend never silently chooses a studio. No database migration or production data change is part of this patch.
 
 Validation: all 218 tests passed, none skipped, against local PostgreSQL with test collection parallelism disabled.
+
+## 2026-10-13 — request context for an active second studio
+
+Login and refresh can now resolve the account studio automatically using independent database contexts. JWT validation checks the account binding and organization status before setting the request context; the CRM context cannot change after it is created. `/api/auth/me` returns that studio's organizationId and roles. `/api/organization` returns its own published branding. Anonymous requests and background workers still use BSworkout.
+
+For non-legacy Active studios only Auth Me/Logout/ChangePassword/Login/Refresh, GET organization and Locations controller actions are enabled. Other authenticated actions return HTTP 403 with code OrganizationCapabilityUnavailable. Public registration, Outlook, payments and background processing for new studios are not enabled. This is an initial restricted surface, not full CRM readiness.
+
+Atlas Demo remains Draft in the test database. No activation endpoint or database status change is included. Next steps: staff/client provisioning without legacy global roles, organization-scoped settings and guarded activation. Frontend should not show unsupported functions in the new studio. Existing activation-readiness remains blocked until these prerequisites are implemented.

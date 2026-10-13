@@ -16,18 +16,25 @@ public static class AtlasJwt
         {
             var rawId = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier)
                 ?? context.Principal?.FindFirstValue("sub");
-            var db = context.HttpContext.RequestServices.GetRequiredService<StudioCRMDbContext>();
+
             var tokenEmail = context.Principal?.FindFirstValue(ClaimTypes.Email)
                 ?? context.Principal?.FindFirstValue("email");
             var versionClaim = context.Principal?.FindFirstValue("auth_version");
             var tokenVersion = versionClaim is null ? 0 : int.TryParse(versionClaim, out var parsed) ? parsed : -1;
             var roles = context.Principal?.FindAll(ClaimTypes.Role).Select(c => c.Value).ToArray() ?? [];
-            // During the compatibility stage, only the existing studio may access CRM.
-            // Never interpret an arbitrary organization claim as permission to switch tenants.
             var organizationClaims = context.Principal?.FindAll("organization_id").ToArray() ?? [];
+            var organizationId = StudioCRMDbContext.LegacyOrganizationId;
             if (organizationClaims.Length > 1 || (organizationClaims.Length == 1 &&
-                (!Guid.TryParse(organizationClaims[0].Value, out var organizationId) ||
-                 organizationId != StudioCRMDbContext.LegacyOrganizationId || organizationId != db.OrganizationId)))
+                (!Guid.TryParse(organizationClaims[0].Value, out organizationId) || organizationId == Guid.Empty)))
+            {
+                context.Fail("Organization context is unavailable.");
+                return;
+            }
+            var factory = context.HttpContext.RequestServices.GetService<OrganizationDbContextFactory>();
+            // This independent context must not freeze the request context before validation succeeds.
+            await using var probe = factory?.Create(organizationId);
+            var db = probe ?? context.HttpContext.RequestServices.GetRequiredService<StudioCRMDbContext>();
+            if (db.OrganizationId != organizationId)
             {
                 context.Fail("Organization context is unavailable.");
                 return;
@@ -47,7 +54,11 @@ public static class AtlasJwt
             var allowedRoles = await StudioCRM.Infrastructure.Services.OrganizationAuthorization.RolesAsync(db, userId);
             if (roles.Length == 0 || roles.Any(role => !allowedRoles.Contains(role)) ||
                 (roles.Contains("SuperAdmin") && organizationClaims.Length != 0))
+            {
                 context.Fail("Roles are not available in this organization.");
+                return;
+            }
+            context.HttpContext.RequestServices.GetService<RequestOrganizationContext>()?.SetValidated(organizationId);
         }
     };
     options.TokenValidationParameters = new TokenValidationParameters

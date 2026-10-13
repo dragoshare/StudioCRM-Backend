@@ -32,7 +32,7 @@ public partial class PlatformOrganizationService(StudioCRMDbContext db, Branding
     public async Task<PublicOrganizationDto> GetCurrentAsync()
     {
         // Server configuration chooses the deployment's studio. No client-controlled tenant switch.
-        var org = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.BrandingProfileId == currentProfile.ProfileId && o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId && o.Id == db.OrganizationId)
+        var org = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == db.OrganizationId && (o.Status == "Active" || (o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId && o.BrandingProfileId == currentProfile.ProfileId)))
             ?? throw new KeyNotFoundException("Current organization is not configured.");
         return new(org.Id, org.Name, org.UiVariant, await For(org).GetPublishedAsync());
     }

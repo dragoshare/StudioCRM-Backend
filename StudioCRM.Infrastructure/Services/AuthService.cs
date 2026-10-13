@@ -25,15 +25,17 @@ public partial class AuthService : IAuthService
     private readonly IEmailService _emailService;
     private readonly ILogger<AuthService> _logger;
     private readonly PasswordHasher<User> _passwordHasher;
+    private readonly OrganizationDbContextFactory? _organizationContexts;
 
     public AuthService(
         StudioCRMDbContext context,
         IOptions<JwtSettings> jwtOptions,
         IOptions<AppSettings> appOptions,
         IEmailService emailService,
-        ILogger<AuthService> logger)
+        ILogger<AuthService> logger, OrganizationDbContextFactory? organizationContexts = null)
     {
         _context = context;
+        _organizationContexts = organizationContexts;
         _jwtSettings = jwtOptions.Value;
         _appSettings = appOptions.Value;
         _emailService = emailService;
@@ -371,6 +373,16 @@ public partial class AuthService : IAuthService
                 .ThenInclude(ur => ur.Role)
             .FirstOrDefaultAsync(u => u.Email == request.Email);
 
+        if (user != null && _organizationContexts != null)
+        {
+            var binding = await AccountOrganizationResolver.ResolveAsync(_context, user.Id);
+            if (!binding.CanAuthenticate) return null;
+            if (!binding.IsPlatformAdmin && binding.OrganizationId != _context.OrganizationId)
+            {
+                await using var studio = _organizationContexts.Create(binding.OrganizationId!.Value);
+                return await ForOrganization(studio).LoginAsync(request);
+            }
+        }
         if (user is null || !user.IsActive || await ClientAccountAccess.IsBlockedAsync(_context, user.Id))
         {
             return null;
@@ -470,6 +482,23 @@ public partial class AuthService : IAuthService
 
     public async Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request)
     {
+        if (_organizationContexts != null)
+        {
+            var stored = await _context.RefreshTokens.AsNoTracking().Where(t => t.Token == request.RefreshToken)
+                .Select(t => new { t.UserId, t.OrganizationId, t.ScopeVersion }).SingleOrDefaultAsync();
+            if (stored != null)
+            {
+                var binding = await AccountOrganizationResolver.ResolveAsync(_context, stored.UserId);
+                if (!binding.CanAuthenticate) throw new InvalidOperationException("Invalid refresh token.");
+                if (!binding.IsPlatformAdmin && binding.OrganizationId != _context.OrganizationId)
+                {
+                    if (stored.ScopeVersion != 1 || stored.OrganizationId != binding.OrganizationId)
+                        throw new InvalidOperationException("Invalid refresh token scope.");
+                    await using var studio = _organizationContexts.Create(binding.OrganizationId!.Value);
+                    return await ForOrganization(studio).RefreshAsync(request);
+                }
+            }
+        }
         await using var transaction = await _context.Database.BeginTransactionAsync();
 
         var refreshToken = await _context.RefreshTokens
@@ -684,6 +713,9 @@ public partial class AuthService : IAuthService
         await _emailService.SendEmailVerificationAsync(user.Email, verificationLink);
     }
 
+    private AuthService ForOrganization(StudioCRMDbContext db) => new(db, Options.Create(_jwtSettings),
+        Options.Create(_appSettings), _emailService, _logger);
+
     private Guid? SessionOrganization(User user) => user.UserRoles.Any(r => r.Role.Name == "SuperAdmin")
         ? null : _context.OrganizationId;
 
@@ -697,8 +729,7 @@ public partial class AuthService : IAuthService
                 throw new InvalidOperationException("Invalid refresh token scope.");
             return;
         }
-        if (token.ScopeVersion != 1 || token.OrganizationId != SessionOrganization(token.User) ||
-            (token.OrganizationId.HasValue && token.OrganizationId != StudioCRMDbContext.LegacyOrganizationId))
+        if (token.ScopeVersion != 1 || token.OrganizationId != SessionOrganization(token.User))
             throw new InvalidOperationException("Invalid refresh token scope.");
     }
     private async Task<AuthResponseDto> BuildAuthResponse(User user, string refreshToken)
