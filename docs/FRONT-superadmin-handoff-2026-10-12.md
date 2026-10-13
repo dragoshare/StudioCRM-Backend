@@ -181,3 +181,5 @@ Login and refresh can now resolve the account studio automatically using indepen
 For non-legacy Active studios only Auth Me/Logout/ChangePassword/Login/Refresh, GET organization and Locations controller actions are enabled. Other authenticated actions return HTTP 403 with code OrganizationCapabilityUnavailable. Public registration, Outlook, payments and background processing for new studios are not enabled. This is an initial restricted surface, not full CRM readiness.
 
 Atlas Demo remains Draft in the test database. No activation endpoint or database status change is included. Next steps: staff/client provisioning without legacy global roles, organization-scoped settings and guarded activation. Frontend should not show unsupported functions in the new studio. Existing activation-readiness remains blocked until these prerequisites are implemented.
+
+Validation: all 224 tests passed, none skipped, on local PostgreSQL.
