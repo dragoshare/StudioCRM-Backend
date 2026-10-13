@@ -35,6 +35,7 @@ public class CalendarAddressMappingTests
         await db.SaveChangesAsync();
         var result = await new OutlookEventMapperService(db).MapToSessionAsync(evt);
         Assert.NotNull(result.Session);
+        Assert.Equal("TwoToOne", result.Session!.PlannedSessionType);
         var ids = await db.SessionParticipants.Where(p => p.SessionId == result.Session!.Id).Select(p => p.ClientId).ToListAsync();
         Assert.Equal(2, ids.Count);
         Assert.Contains(offline.Id, ids);

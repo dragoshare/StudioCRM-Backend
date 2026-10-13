@@ -4,10 +4,16 @@ namespace StudioCRM.Application.DTOs.Billing;
 
 public class ClientPackageBillingDto
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public string PackageType { get; set; } = string.Empty;
     public DateTime? NextSessionAt { get; set; }
     public int ClientPackageId { get; set; }
     public int PackageId { get; set; }
+    public string? PeriodStatus { get; set; }
+    public DateTime? PeriodStartsAt { get; set; }
+    public int PeriodDurationDays { get; set; }
+    public bool PeriodAutoRenewEnabled { get; set; }
     public string PackageName { get; set; } = string.Empty;
 
     public bool IsActive { get; set; }

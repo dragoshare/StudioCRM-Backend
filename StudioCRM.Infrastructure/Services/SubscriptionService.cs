@@ -50,7 +50,7 @@ public class SubscriptionService : ISubscriptionService
         if (nextPackage is null)
             throw new InvalidOperationException("Package does not exist or is inactive.");
 
-        if (nextPackage.BillingType == SessionBillingType.Group)
+        if (nextPackage.BillingMode != PackageBillingMode.SessionBased || nextPackage.BillingType == SessionBillingType.Group)
             throw new InvalidOperationException("Group packages must be assigned separately.");
         if (nextPackage.LocationId.HasValue && nextPackage.LocationId.Value != client.LocationId)
             throw new InvalidOperationException("Package is not available for this client's location.");
@@ -181,7 +181,7 @@ public class SubscriptionService : ISubscriptionService
             .Include(cp => cp.Client)
             .FirstOrDefaultAsync(cp => cp.Id == clientPackageId);
 
-        if (completedPackage is null || !completedPackage.IsActive)
+        if (completedPackage is null || completedPackage.BillingMode != PackageBillingMode.SessionBased || !completedPackage.IsActive)
             return;
 
         if (completedPackage.UsedSessions < completedPackage.TotalSessions)
@@ -198,7 +198,9 @@ public class SubscriptionService : ISubscriptionService
         if (!client.SubscriptionAutoRenewEnabled || client.RenewalCancellationRequestedAt is not null)
         {
             completedPackage.IsActive = false;
-            client.Status = "Inactive";
+            client.Status = await _context.ClientPackages.AnyAsync(p => p.ClientId == client.Id &&
+                p.BillingMode == PackageBillingMode.PeriodBased && p.IsActive && p.ClosureDisposition == null && p.ValidUntil > DateTime.UtcNow)
+                ? "Active" : "Inactive";
             client.BillingStatus = "Cancelled";
             client.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
@@ -212,7 +214,7 @@ public class SubscriptionService : ISubscriptionService
         if (package is null)
             throw new InvalidOperationException("Next subscription package does not exist or is inactive.");
 
-        if (package.BillingType == SessionBillingType.Group)
+        if (package.BillingMode != PackageBillingMode.SessionBased || package.BillingType == SessionBillingType.Group)
             throw new InvalidOperationException("Group packages cannot renew personal subscriptions.");
         var existingNextCycle = await _context.ClientPackages.FirstOrDefaultAsync(cp =>
             cp.ClientId == client.Id &&
@@ -324,13 +326,13 @@ public class SubscriptionService : ISubscriptionService
             throw new InvalidOperationException("Client not found.");
 
         var currentCycle = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
         var nextPackageId = client.SubscriptionAutoRenewEnabled && !client.RenewalCancellationRequestedAt.HasValue ? client.NextPackageId ?? currentCycle?.PackageId : null;
         var nextPackage = nextPackageId.HasValue
-            ? await _context.Packages.FirstOrDefaultAsync(p => p.Id == nextPackageId.Value && p.BillingType != SessionBillingType.Group && p.IsActive && !p.IsDeleted)
+            ? await _context.Packages.FirstOrDefaultAsync(p => p.Id == nextPackageId.Value && (p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && p.BillingType != SessionBillingType.Group) && p.IsActive && !p.IsDeleted)
             : null;
 
         var nextSessions = await ClientPackageSchedule.GetNextSessionsAsync(_context, client.Id, currentCycle is null ? Array.Empty<int>() : new[] { currentCycle.Id });
@@ -353,7 +355,7 @@ public class SubscriptionService : ISubscriptionService
     private async Task<SubscriptionUsageDto> BuildUsageAsync(int clientId)
     {
         var currentCycle = await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 

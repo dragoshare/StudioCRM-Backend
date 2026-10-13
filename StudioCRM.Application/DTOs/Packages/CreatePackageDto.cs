@@ -4,6 +4,8 @@ namespace StudioCRM.Application.DTOs.Packages;
 
 public class CreatePackageDto
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public string Name { get; set; } = string.Empty;
     public string? Description { get; set; }
     public decimal Price { get; set; }

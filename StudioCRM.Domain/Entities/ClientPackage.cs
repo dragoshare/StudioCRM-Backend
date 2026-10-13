@@ -1,15 +1,20 @@
-﻿using StudioCRM.Domain.Enums;
+using StudioCRM.Domain.Enums;
 
 namespace StudioCRM.Domain.Entities;
 
 public class ClientPackage
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public int Id { get; set; }
 
     public int ClientId { get; set; }
     public Client Client { get; set; } = null!;
 
     public int PackageId { get; set; }
+    public DateTime? PeriodStartsAt { get; set; }
+    public int PeriodDurationDays { get; set; }
+    public bool PeriodAutoRenewEnabled { get; set; }
     public Package Package { get; set; } = null!;
 
     public string Name { get; set; } = string.Empty;

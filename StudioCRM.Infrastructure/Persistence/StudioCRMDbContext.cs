@@ -434,9 +434,14 @@ public partial class StudioCRMDbContext : DbContext
                 .OnDelete(DeleteBehavior.Restrict);
 
             entity.HasIndex(x => new { x.ClientId, x.IsActive });
+            entity.HasIndex(x => new { x.BillingMode, x.IsActive, x.ValidUntil });
+            entity.HasIndex(x => x.PreviousClientPackageId).IsUnique()
+                .HasFilter("\"BillingMode\" = 1 AND \"PreviousClientPackageId\" IS NOT NULL");
+            entity.ToTable(t => t.HasCheckConstraint("CK_ClientPackages_PeriodTerms",
+                "\"BillingMode\" <> 1 OR (\"TotalSessions\" = 0 AND \"UsedSessions\" = 0 AND \"PeriodDurationDays\" BETWEEN 1 AND 3660 AND \"PeriodStartsAt\" IS NOT NULL AND \"ValidUntil\" IS NOT NULL AND \"ValidUntil\" > \"PeriodStartsAt\")"));
             entity.HasIndex(x => x.ClientId)
                 .IsUnique()
-                .HasFilter("\"IsActive\" = TRUE AND \"ExpectedBillingType\" <> 5")
+                .HasFilter("\"IsActive\" = TRUE AND \"ExpectedBillingType\" <> 5 AND \"BillingMode\" = 0")
                 .HasDatabaseName("IX_ClientPackages_OneActivePerClient");
         });
 

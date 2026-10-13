@@ -66,14 +66,14 @@ internal static class SessionAccountingCorrectionManager
                             "Session cannot be corrected while the renewed package has a pending payment.");
                 }
 
-                if (package.ExpectedBillingType != SessionBillingType.Group)
+                if ((package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && package.ExpectedBillingType != SessionBillingType.Group))
                 {
                     var hasOtherActivePackage = await context.ClientPackages.AnyAsync(x =>
                         x.ClientId == package.ClientId &&
                         x.Id != package.Id &&
                         (renewal == null || x.Id != renewal.Id) &&
                         x.IsActive &&
-                        x.ExpectedBillingType != SessionBillingType.Group);
+                        (x.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && x.ExpectedBillingType != SessionBillingType.Group));
                     if (hasOtherActivePackage)
                         throw new InvalidOperationException(
                             "Session cannot be corrected because the client already has another active package.");
@@ -105,7 +105,7 @@ internal static class SessionAccountingCorrectionManager
                 continue;
 
             plan.Package.IsActive = true;
-            if (plan.Package.ExpectedBillingType != SessionBillingType.Group)
+            if ((plan.Package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && plan.Package.ExpectedBillingType != SessionBillingType.Group))
             {
                 plan.Package.Client.ActivePackageId = plan.Package.PackageId;
                 plan.Package.Client.Status = "Active";

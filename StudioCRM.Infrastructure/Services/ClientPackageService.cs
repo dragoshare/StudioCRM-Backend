@@ -54,6 +54,12 @@ public partial class ClientPackageService : IClientPackageService
         if (package is null)
             throw new InvalidOperationException("Package does not exist.");
 
+        if (package.BillingMode == PackageBillingMode.PeriodBased)
+        {
+            if (importing) throw new InvalidOperationException("Assign period packages with StartsOn instead of importing session usage.");
+            return await CreatePeriodAsync(client, package, request);
+        }
+        if (request.StartsOn.HasValue || request.AutoRenew) throw new InvalidOperationException("Period settings require a period package.");
         if (request.ExpectedBillingType.HasValue &&
             (!Enum.IsDefined(request.ExpectedBillingType.Value) ||
              (request.ExpectedBillingType == SessionBillingType.Group) != (package.BillingType == SessionBillingType.Group)))
@@ -82,7 +88,7 @@ public partial class ClientPackageService : IClientPackageService
             .AnyAsync(cp =>
                 cp.ClientId == request.ClientId &&
                 cp.IsActive &&
-                cp.ExpectedBillingType != SessionBillingType.Group);
+                (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group));
 
         if (!isGroupPackage && hasActivePackage)
             throw new InvalidOperationException("Client already has an active subscription cycle. Use subscription next-package endpoint to schedule package changes.");
@@ -162,6 +168,8 @@ public partial class ClientPackageService : IClientPackageService
 
         await EnsureStaffAccessToClientAsync(clientId);
 
+        if (clientPackage.BillingMode == PackageBillingMode.PeriodBased)
+            throw new InvalidOperationException("Period service dates control activity; assign a new period instead of activating training entries.");
         if (clientPackage.ClosureDisposition != null)
             throw new InvalidOperationException("Closed package requires the dedicated retained-package resume action; refunded packages cannot be activated.");
         var isGroupPackage = clientPackage.ExpectedBillingType == SessionBillingType.Group;
@@ -173,7 +181,7 @@ public partial class ClientPackageService : IClientPackageService
                 .Where(cp =>
                     cp.ClientId == clientId &&
                     cp.IsActive &&
-                    cp.ExpectedBillingType != SessionBillingType.Group)
+                    (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
                 .ToListAsync();
 
         if (activePackages.Any(p => p.Id != clientPackageId))
@@ -209,6 +217,8 @@ public partial class ClientPackageService : IClientPackageService
 
         await EnsureStaffAccessToClientAsync(clientId);
 
+        if (clientPackage.BillingMode == PackageBillingMode.PeriodBased)
+            throw new InvalidOperationException("Period service dates control activity; assign a new period instead of activating training entries.");
         if (clientPackage.ClosureDisposition != null)
             throw new InvalidOperationException("Closed packages must remain in the client history.");
         if (clientPackage.RenewalSource == "OpeningBalance")
@@ -253,11 +263,13 @@ public partial class ClientPackageService : IClientPackageService
         }
 
         var client = clientPackage.Client;
-        if (clientPackage.IsActive && clientPackage.ExpectedBillingType != SessionBillingType.Group)
+        if (clientPackage.IsActive && (clientPackage.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && clientPackage.ExpectedBillingType != SessionBillingType.Group))
         {
             client.ActivePackageId = null;
             client.BillingStatus = "Pending";
-            client.Status = "Inactive";
+            client.Status = await _context.ClientPackages.AnyAsync(p => p.ClientId == client.Id &&
+                p.BillingMode == PackageBillingMode.PeriodBased && p.IsActive && p.ClosureDisposition == null && p.ValidUntil > DateTime.UtcNow)
+                ? "Active" : "Inactive";
             client.UpdatedAt = DateTime.UtcNow;
         }
 

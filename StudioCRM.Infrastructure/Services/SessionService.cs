@@ -208,7 +208,7 @@ public class SessionService : ISessionService
                 RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes),
                 CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes),
                 PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity),
-                PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count),
+                PlannedSessionType = request.IsPubliclyBookable ? "Group" : request.PlannedSessionType ?? ResolveSessionType(participants.Count),
                 OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories),
                 OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors),
                 PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories),
@@ -386,7 +386,7 @@ public class SessionService : ISessionService
             session.RegistrationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.RegistrationClosesBeforeMinutes ?? session.RegistrationClosesBeforeMinutes);
             session.CancellationClosesBeforeMinutes = GroupBookingPolicy.ValidateMinutes(request.CancellationClosesBeforeMinutes ?? session.CancellationClosesBeforeMinutes);
             session.PublicCapacity = NormalizePublicCapacity(request.IsPubliclyBookable, request.PublicCapacity);
-            session.PlannedSessionType = request.PlannedSessionType ?? ResolveSessionType(participants.Count);
+            session.PlannedSessionType = request.IsPubliclyBookable ? "Group" : request.PlannedSessionType ?? ResolveSessionType(participants.Count);
             session.OutlookCategoriesJson = SerializeOutlookCategories(outlookCategories);
             session.OutlookCategoryColorsJson = SerializeOutlookCategoryColors(outlookCategoryColors);
             session.PrimaryOutlookCategory = GetPrimaryOutlookCategory(outlookCategories);
@@ -979,6 +979,8 @@ public class SessionService : ISessionService
         if (clientPackage is null)
             throw new InvalidOperationException("Client package not found.");
 
+        if (clientPackage.BillingMode != PackageBillingMode.SessionBased)
+            throw new InvalidOperationException("Period packages do not include training entries.");
         if (participant.ClientId != clientPackage.ClientId)
             throw new InvalidOperationException("This package does not belong to this client.");
 
@@ -1556,7 +1558,7 @@ public class SessionService : ISessionService
             .Where(cp => cp.ClientId == clientId && cp.IsActive)
             .Where(cp => isGroupSession
                 ? cp.ExpectedBillingType == SessionBillingType.Group
-                : cp.ExpectedBillingType != SessionBillingType.Group)
+                : (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .Where(cp => cp.LocationId == null || cp.LocationId == sessionLocationId)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
@@ -2142,6 +2144,7 @@ public class SessionService : ISessionService
             1 => "OneToOne",
             2 => "TwoToOne",
             3 => "ThreeToOne",
+            4 => "FourToOne",
             _ => "Group"
         };
     }

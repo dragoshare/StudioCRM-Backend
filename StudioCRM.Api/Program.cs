@@ -185,6 +185,10 @@ builder.Services.AddHttpClient<IOutlookTokenService, OutlookTokenService>();
 
 builder.Services.AddHostedService<OutlookSubscriptionRenewalWorker>();
 builder.Services.AddHostedService<SessionAutoCompletionWorker>();
+builder.Services.AddScoped<PeriodPackageService>();
+builder.Services.AddSingleton(TimeProvider.System);
+builder.Services.AddScoped<OwnerOverviewService>();
+builder.Services.AddHostedService<PeriodPackageWorker>();
 
 builder.Services.Configure<ResendClientOptions>(options =>
 {

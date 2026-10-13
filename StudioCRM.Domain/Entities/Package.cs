@@ -4,6 +4,8 @@ namespace StudioCRM.Domain.Entities;
 
 public class Package
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; set; } = StudioCRM.Domain.Enums.PackageBillingMode.SessionBased;
+
     public int Id { get; set; }
 
     public string Name { get; set; } = string.Empty;

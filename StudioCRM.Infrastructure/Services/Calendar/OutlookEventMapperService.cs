@@ -203,6 +203,14 @@ public class OutlookEventMapperService
             TrainerId = trainer.Id,
             LocationId = location.Id,
             Status = "Planned",
+            PlannedSessionType = clients.Select(c => c.Id).Distinct().Count() switch
+            {
+                1 => nameof(SessionBillingType.OneToOne),
+                2 => nameof(SessionBillingType.TwoToOne),
+                3 => nameof(SessionBillingType.ThreeToOne),
+                4 => nameof(SessionBillingType.FourToOne),
+                _ => null
+            },
 
             OutlookCategoriesJson = evt.CategoriesJson,
             OutlookCategoryColorsJson = evt.CategoryColorsJson,
@@ -403,7 +411,7 @@ public class OutlookEventMapperService
     private async Task AddClientToSessionAsync(int sessionId, Client client)
     {
         var activeClientPackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.BillingMode == PackageBillingMode.SessionBased)
             .OrderByDescending(cp => cp.PurchaseDate)
             .FirstOrDefaultAsync();
 
@@ -414,6 +422,7 @@ public class OutlookEventMapperService
             PackageId = activeClientPackage?.PackageId,
             ClientPackageId = activeClientPackage?.Id,
             AttendanceStatus = "Planned",
+
             CountsAgainstPackage = true,
             SessionsCharged = 1,
             PlannedBillingType = activeClientPackage?.ExpectedBillingType,

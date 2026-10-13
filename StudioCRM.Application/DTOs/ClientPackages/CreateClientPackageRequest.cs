@@ -1,4 +1,4 @@
-﻿using StudioCRM.Domain.Enums;
+using StudioCRM.Domain.Enums;
 
 namespace StudioCRM.Application.DTOs.ClientPackages;
 public class CreateClientPackageRequest
@@ -12,6 +12,9 @@ public class CreateClientPackageRequest
     public decimal? TotalPrice { get; set; }
 
     public SessionBillingType? ExpectedBillingType { get; set; }
+
+    public DateOnly? StartsOn { get; set; }
+    public bool AutoRenew { get; set; }
 
     public DateTime PurchaseDate { get; set; }
     public DateTime? ValidUntil { get; set; }

@@ -441,7 +441,14 @@ public partial class ClientService : IClientService
         if (filter.TrainerId.HasValue)
             query = query.Where(c => c.TrainerId == filter.TrainerId.Value);
 
-        if (filter.LocationId.HasValue)
+        if (filter.GroupAccessEnabled.HasValue)
+        {
+            if (!filter.LocationId.HasValue || filter.LocationId <= 0)
+                throw new InvalidOperationException("LocationId is required for GroupAccessEnabled.");
+            query = query.Where(c => _context.ClientLocationMemberships.Any(m => m.ClientId == c.Id &&
+                m.LocationId == filter.LocationId.Value && m.GroupAccessEnabled == filter.GroupAccessEnabled.Value));
+        }
+        else if (filter.LocationId.HasValue)
             query = query.Where(c => c.LocationId == filter.LocationId.Value);
 
         if (!string.IsNullOrWhiteSpace(filter.Status))
@@ -640,7 +647,7 @@ public partial class ClientService : IClientService
         var clientIds = clients.Select(c => c.Id).ToList();
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .ThenByDescending(cp => cp.Id)
             .Select(cp => new

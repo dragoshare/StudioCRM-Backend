@@ -303,7 +303,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             .Include(cp => cp.Client)
             .Include(cp => cp.Location)
                 .ThenInclude(l => l!.LegalEntity)
-            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
@@ -875,6 +875,8 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
     private async Task ActivatePackageAfterPaymentIfNeededAsync(ClientPackage clientPackage)
     {
+        // Service dates are selected by the Owner; payment must not move or reopen them.
+        if (clientPackage.BillingMode == PackageBillingMode.PeriodBased) return;
         if (clientPackage.ClosureDisposition != null || clientPackage.PaymentStatus != PaymentStatus.Paid || clientPackage.IsActive ||
             clientPackage.UsedSessions >= clientPackage.TotalSessions ||
             clientPackage.ValidUntil.HasValue && clientPackage.ValidUntil.Value <= DateTime.UtcNow)
@@ -904,13 +906,13 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         }
 
         var hasActivePackage = await _context.ClientPackages
-            .AnyAsync(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && cp.ExpectedBillingType != SessionBillingType.Group);
+            .AnyAsync(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group));
 
         if (hasActivePackage)
             return;
 
         var activePackages = await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == clientPackage.ClientId && cp.IsActive && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .ToListAsync();
 
         foreach (var activePackage in activePackages)
@@ -967,7 +969,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             throw new InvalidOperationException("Client not found.");
 
         var activePackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
 
@@ -1037,7 +1039,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         }
 
         return await _context.ClientPackages
-            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && cp.ExpectedBillingType != SessionBillingType.Group)
+            .Where(cp => cp.ClientId == clientId && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
             .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
             .FirstOrDefaultAsync();
     }
@@ -1331,9 +1333,16 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             AmountPaid = clientPackage.AmountPaid,
             AmountDue = amountDue,
             Currency = clientPackage.Currency,
-            PackageType = StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(clientPackage.ExpectedBillingType),
+            PackageType = clientPackage.BillingMode == PackageBillingMode.PeriodBased ? "PeriodBased" : StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(clientPackage.ExpectedBillingType),
             NextSessionAt = nextSessionAt,
-            ExpectedBillingType = clientPackage.ExpectedBillingType.ToString(),
+            BillingMode = clientPackage.BillingMode,
+            PeriodStatus = clientPackage.BillingMode != PackageBillingMode.PeriodBased ? null :
+                clientPackage.ClosureDisposition != null ? "Closed" : clientPackage.ValidUntil <= DateTime.UtcNow ? "Expired" :
+                !clientPackage.IsActive ? "Inactive" : clientPackage.PeriodStartsAt > DateTime.UtcNow ? "Scheduled" : "Active",
+            PeriodStartsAt = clientPackage.PeriodStartsAt,
+            PeriodDurationDays = clientPackage.PeriodDurationDays,
+            PeriodAutoRenewEnabled = clientPackage.PeriodAutoRenewEnabled,
+            ExpectedBillingType = clientPackage.BillingMode == PackageBillingMode.PeriodBased ? "" : clientPackage.ExpectedBillingType.ToString(),
             LocationId = clientPackage.LocationId,
             LocationName = clientPackage.Location != null ? clientPackage.Location.Name : null,
             PaymentStatus = clientPackage.PaymentStatus.ToString(),
