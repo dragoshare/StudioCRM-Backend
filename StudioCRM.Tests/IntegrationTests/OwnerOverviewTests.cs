@@ -100,4 +100,51 @@ public class OwnerOverviewTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => Service(db).RecentClientsAsync(10000));
         Assert.Null(OwnerOverviewService.Percent(10, 0)); Assert.Equal(0, OwnerOverviewService.Percent(0, 0));
     }
+
+    [PostgresFact]
+    public async Task LocationUsesRecordedActivityAndMoneyWithoutGuessingMissingAssignments()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var a = new Location { Name = "Klaj" }; var b = new Location { Name = "Niepolomice" };
+        var client = new Client { FirstName = "Visitor", Location = a, TrainingStartDate = At(8, 1), Status = "Active" };
+        var diet = new Client { FirstName = "Diet", Location = b, TrainingStartDate = At(10, 2), Status = "Active" };
+        var trainer = new Trainer { User = new User { Email = "location-dashboard@test.example" } };
+        foreach (var (location, date) in new[] { (a, At(9, 1)), (b, At(10, 5)) })
+            db.Add(new SessionParticipant { Client = client, AttendanceStatus = "Present", Session = new Session {
+                Trainer = trainer, Location = location, StartAt = date, EndAt = date.AddHours(1), Status = "Completed" } });
+        var pass = new ClientPackage { Client = client, Package = new Package { Name = "Group", BillingType = SessionBillingType.Group },
+            ExpectedBillingType = SessionBillingType.Group, Location = b, TotalSessions = 4, UsedSessions = 3, ValidUntil = At(11, 1) };
+        db.Add(pass);
+        db.Add(new ClientPackage { Client = diet, Package = new Package { Name = "Diet", BillingMode = PackageBillingMode.PeriodBased },
+            Location = b, BillingMode = PackageBillingMode.PeriodBased, TotalSessions = 0, PeriodStartsAt = At(10, 1), ValidUntil = At(11, 1), PeriodDurationDays = 31 });
+        db.Add(new ClientPackage { Client = diet, Package = new Package { Name = "Refund" }, Location = b,
+            IsActive = false, RefundConfirmedAt = At(10, 6), RefundAmount = 20 });
+        foreach (var (location, amount) in new (Location?, decimal)[] { (a, 100), (b, 200), (null, 50) })
+            db.Add(new ClientPayment { Client = client, ClientPackage = pass, Location = location, Amount = amount,
+                PaymentDate = At(10, 2), Status = ClientPaymentStatus.Confirmed });
+        db.Add(new ClientPayment { Client = client, Location = a, Amount = 50, PaymentDate = At(9, 2), Status = ClientPaymentStatus.Confirmed });
+        await db.SaveChangesAsync();
+        var service = Service(db);
+        var all = await service.SummaryAsync("2026-10");
+        var left = await service.SummaryAsync("2026-10", a.Id);
+        var right = await service.SummaryAsync("2026-10", b.Id);
+        Assert.Equal(330, all.Revenue.Current); Assert.Equal(100, left.Revenue.Current); Assert.Equal(180, right.Revenue.Current);
+        Assert.Equal(50, left.Revenue.Previous); Assert.Equal(100, left.Revenue.ChangePercent);
+        Assert.Equal(0, left.ActiveClients.Current); Assert.Equal(2, right.ActiveClients.Current);
+        Assert.Equal(0, left.CompletedSessions.Current); Assert.Equal(1, right.CompletedSessions.Current);
+        Assert.Equal(0, left.NewClients); Assert.Equal(1, right.NewClients);
+        var chart = await service.RevenueAsync(6, "2026-10", b.Id);
+        Assert.Equal(180, chart.Total); Assert.Equal(180, chart.Items[^1].Revenue);
+        Assert.Equal(diet.Id, Assert.Single(await service.RecentClientsAsync(4, b.Id)).Id);
+        Assert.Equal(client.Id, Assert.Single(await service.RecentClientsAsync(4, a.Id)).Id);
+        Assert.Equal(1, (await service.AttentionAsync(a.Id)).ClientsWithoutTraining30Days);
+        Assert.Equal(0, (await service.AttentionAsync()).ClientsWithoutTraining30Days);
+        Assert.Equal(0, (await service.AttentionAsync(a.Id)).ClientsWithOneRemainingSession);
+        Assert.Equal(1, (await service.AttentionAsync(b.Id)).ClientsWithOneRemainingSession);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.SummaryAsync(null, 0));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.SummaryAsync(null, int.MaxValue));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RevenueAsync(6, null, int.MaxValue));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.RecentClientsAsync(4, int.MaxValue));
+        await Assert.ThrowsAsync<KeyNotFoundException>(() => service.AttentionAsync(int.MaxValue));
+    }
 }
