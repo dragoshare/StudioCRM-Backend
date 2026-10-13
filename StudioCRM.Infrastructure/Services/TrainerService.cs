@@ -7,7 +7,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class TrainerService : ITrainerService
+public partial class TrainerService : ITrainerService
 {
     private readonly StudioCRMDbContext _context;
     private readonly PasswordHasher<User> _passwordHasher;
@@ -29,6 +29,8 @@ public class TrainerService : ITrainerService
 
     private async Task<TrainerDto> CreateAsyncCore(CreateTrainerDto request)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId)
+            return await CreateOrganizationTrainerAsync(request);
         await LegacyStaffMembership.RequireLegacyAsync(_context);
         var existingUser = await _context.Users
             .Include(u => u.UserRoles)

@@ -183,3 +183,8 @@ For non-legacy Active studios only Auth Me/Logout/ChangePassword/Login/Refresh, 
 Atlas Demo remains Draft in the test database. No activation endpoint or database status change is included. Next steps: staff/client provisioning without legacy global roles, organization-scoped settings and guarded activation. Frontend should not show unsupported functions in the new studio. Existing activation-readiness remains blocked until these prerequisites are implemented.
 
 Validation: all 224 tests passed, none skipped, on local PostgreSQL.
+
+## Aktualizacja: aktywacja SetupOnly
+
+Bieżący kontrakt aktywacji i dostępnych funkcji: [FRONT-organization-activation-2026-10-13.md](FRONT-organization-activation-2026-10-13.md).
+Poprzednie informacje o bezwarunkowym blokerze OrganizationRuntimeNotReady są historyczne. Nowy endpoint umożliwia aktywację tylko w ograniczonym trybie konfiguracji; nie oznacza pełnej gotowości CRM.

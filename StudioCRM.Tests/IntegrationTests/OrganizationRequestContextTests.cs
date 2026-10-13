@@ -81,6 +81,10 @@ public class OrganizationRequestContextTests
     }
 
     [Theory]
+    [InlineData(typeof(TrainersController), "Create", true)]
+    [InlineData(typeof(TrainersController), "Deactivate", false)]
+    [InlineData(typeof(ClientsController), "Create", true)]
+    [InlineData(typeof(ClientsController), "CloseCooperation", false)]
     [InlineData(typeof(LocationsController), "GetAll", true)]
     [InlineData(typeof(AuthController), "Me", true)]
     [InlineData(typeof(AuthController), "Register", false)]

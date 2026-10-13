@@ -97,10 +97,11 @@ public class OrganizationAdministrationTests
         var readiness = await service.ActivationReadinessAsync(draft.OrganizationId);
         Assert.False(readiness.CanActivate); Assert.Equal(0, readiness.EligibleOwnerCount);
         Assert.Contains(readiness.Blockers, b => b.Code == "EligibleOwnerRequired");
-        Assert.Contains(readiness.Blockers, b => b.Code == "OrganizationRuntimeNotReady");
+
         await service.AssignOwnerAsync(draft.OrganizationId, ids.Owner, new() { Reason = "Test" });
         readiness = await service.ActivationReadinessAsync(draft.OrganizationId);
         Assert.Equal(1, readiness.EligibleOwnerCount);
+        Assert.True(readiness.CanActivate);
         Assert.DoesNotContain(readiness.Blockers, b => b.Code == "EligibleOwnerRequired");
         // Simulate an old conflicting assignment that must be diagnosed, never silently moved.
         db.Add(new UserRole { UserId = ids.Owner, Role = new Role { Name = "Owner" } }); await db.SaveChangesAsync();
@@ -109,6 +110,49 @@ public class OrganizationAdministrationTests
         Assert.Equal("Draft", (await service.GetAsync(draft.OrganizationId)).Status);
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service(db, ids.Owner, "Owner").ActivationReadinessAsync(draft.OrganizationId));
         await Assert.ThrowsAsync<KeyNotFoundException>(() => service.ActivationReadinessAsync(Guid.NewGuid()));
+    }
+    [PostgresFact]
+    public async Task SetupActivationIsAuditedRevisionCheckedAndAllowsIsolatedStaffAndClients()
+    {
+        await using var test = await TestDatabase.CreateAsync(); await using var db = test.Context();
+        var ids = await Seed(db); var service = Service(db, ids.Admin);
+        var draft = await service.CreateAsync(new() { Name = "Demo", Slug = "demo", Reason = "Test" });
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ActivateAsync(draft.OrganizationId,
+            new() { Reason = "No owner", ConfirmSetupOnly = true }));
+        var assigned = await service.AssignOwnerAsync(draft.OrganizationId, ids.Owner, new() { Reason = "Test" });
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.ActivateAsync(draft.OrganizationId,
+            new() { Reason = "Stale", ConfirmSetupOnly = true }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ActivateAsync(draft.OrganizationId,
+            new() { Reason = "No confirmation", ExpectedRevision = assigned.Revision }));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service(db, ids.Owner, "Owner").ActivateAsync(draft.OrganizationId,
+            new() { Reason = "No permission", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision }));
+        var active = await service.ActivateAsync(draft.OrganizationId,
+            new() { Reason = "Start setup", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision });
+        Assert.Equal("Active", active.Status); Assert.Equal("SetupOnly", active.AccessMode); Assert.True(active.CrmAccessEnabled);
+        Assert.Single(await db.Set<PlatformAuditEntry>().Where(a => a.Action == "OrganizationActivated").ToListAsync());
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.ActivateAsync(draft.OrganizationId,
+            new() { Reason = "Replay", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision }));
+        await using var studio = test.Context(organizationId: draft.OrganizationId);
+        var location = new Location { Name = "Demo location" }; studio.Add(location); await studio.SaveChangesAsync();
+        var trainerService = new StudioCRM.Infrastructure.Services.TrainerService(studio);
+        var trainer = await trainerService.CreateAsync(new() { Email = "demo-trainer@atlas.test", Password = "Local-password-123!",
+            FirstName = "Demo", LastName = "Trainer", LocationIds = [location.Id] });
+        Assert.Empty(await db.UserRoles.Where(r => r.UserId == trainer.UserId).ToListAsync());
+        Assert.Equal(new[] { "Trainer" }, await StudioCRM.Infrastructure.Services.OrganizationAuthorization.RolesAsync(studio, trainer.UserId));
+        Assert.Empty(await StudioCRM.Infrastructure.Services.OrganizationAuthorization.RolesAsync(db, trainer.UserId));
+        Assert.False(await db.Trainers.AnyAsync(t => t.Id == trainer.Id));
+        Assert.Equal(2, (await service.UsersAsync(draft.OrganizationId, null, 1, 25)).Total);
+        await Assert.ThrowsAsync<InvalidOperationException>(() => trainerService.CreateAsync(new() {
+            Email = "owner@atlas.test", Password = "Unused", LocationIds = [location.Id] }));
+        var clients = new StudioCRM.Infrastructure.Services.ClientService(studio, new PortalSecurityTests.Actor(ids.Owner, "Owner"), null!, null!);
+        var client = await clients.CreateAsync(new() { FirstName = "Demo", LastName = "Client", LocationId = location.Id, TrainerId = trainer.Id });
+        Assert.False(await db.Clients.AnyAsync(c => c.Id == client.Id));
+        Assert.Null((await studio.Clients.SingleAsync(c => c.Id == client.Id)).UserId);
+        Assert.Single(await clients.GetAllAsync());
+        var foreignLocation = new Location { Name = "BS" }; db.Add(foreignLocation); await db.SaveChangesAsync();
+        await Assert.ThrowsAsync<InvalidOperationException>(() => trainerService.CreateAsync(new() {
+            Email = "wrong@atlas.test", Password = "Local-password-123!", LocationIds = [foreignLocation.Id] }));
+        Assert.False(await db.Users.AnyAsync(u => u.Email == "wrong@atlas.test"));
     }
     private sealed class Storage : IObjectStorageService
     {

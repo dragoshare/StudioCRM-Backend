@@ -8,7 +8,8 @@ public partial class PlatformOrganizationService(StudioCRMDbContext db, Branding
     IObjectStorageService storage, IBrandingProfileContext currentProfile) : IPlatformOrganizationService
 {
     private sealed class ProfileScope(Guid id) : IBrandingProfileContext { public Guid ProfileId => id; }
-    private static OrganizationSummaryDto Summary(Organization o) => new(o.Id, o.Name, o.Slug, o.UiVariant, o.Status, o.Revision, o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId);
+    private static OrganizationSummaryDto Summary(Organization o) => new(o.Id, o.Name, o.Slug, o.UiVariant, o.Status, o.Revision, o.Status == "Active" || (o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId),
+        o.Status == "Active" ? "SetupOnly" : o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId ? "FullCrm" : "Unavailable");
     private BrandingService For(Organization o) => new(db, new ProfileScope(o.BrandingProfileId), access, storage);
     public async Task<OrganizationPageDto> ListAsync(int page, int pageSize)
     {
@@ -34,6 +35,6 @@ public partial class PlatformOrganizationService(StudioCRMDbContext db, Branding
         // Server configuration chooses the deployment's studio. No client-controlled tenant switch.
         var org = await db.Organizations.AsNoTracking().SingleOrDefaultAsync(o => o.Id == db.OrganizationId && (o.Status == "Active" || (o.Status == "LegacyActive" && o.Id == StudioCRMDbContext.LegacyOrganizationId && o.BrandingProfileId == currentProfile.ProfileId)))
             ?? throw new KeyNotFoundException("Current organization is not configured.");
-        return new(org.Id, org.Name, org.UiVariant, await For(org).GetPublishedAsync());
+        return new(org.Id, org.Name, org.UiVariant, await For(org).GetPublishedAsync(), Summary(org).AccessMode);
     }
 }

@@ -26,8 +26,27 @@ public partial class PlatformOrganizationService
                 && (r.Role.Name == "Owner" || r.Role.Name == "Trainer" || r.Role.Name == "Client"));
         if (conflicts) blockers.Add(new("OwnerAccountBelongsToAnotherOrganization", "Co najmniej jedno konto Ownera jest powiązane z innym studiem. Wymagane osobne konto i email."));
         if (org.Status != "Draft") blockers.Add(new("OrganizationNotDraft", "Aktywacja dotyczy wyłącznie organizacji Draft."));
-        // Keep this explicit until login, background jobs and public callbacks resolve the account's studio.
-        blockers.Add(new("OrganizationRuntimeNotReady", "Logowanie oraz pełna obsługa CRM nowej organizacji nie są jeszcze uruchomione w tej wersji backendu."));
-        return new(org.Id, org.Status, false, count, blockers);
+        return new(org.Id, org.Status, blockers.Count == 0, count, blockers);
     }
-}
+    public async Task<StudioCRM.Application.Interfaces.OrganizationSummaryDto> ActivateAsync(Guid id, ActivateOrganizationRequest request)
+    {
+        var actor = await access.RequireAdminAsync();
+        Validate(request); ValidateNames("Activation", request.Reason);
+        if (!request.ConfirmSetupOnly) throw new InvalidOperationException("ConfirmSetupOnly is required: integrations and full CRM operations remain disabled.");
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var org = await db.Organizations.SingleOrDefaultAsync(o => o.Id == id)
+            ?? throw new KeyNotFoundException("Organization not found.");
+        CheckRevision(org, request.ExpectedRevision);
+        if (id == StudioCRMDbContext.LegacyOrganizationId) throw new InvalidOperationException("Legacy studio cannot use this activation flow.");
+        var owners = await db.Set<OrganizationMembership>().Where(m => m.OrganizationId == id && m.IsOwner)
+            .OrderBy(m => m.UserId).Select(m => m.UserId).ToListAsync();
+        foreach (var owner in owners) await RequireExclusiveAccountAsync(owner, id);
+        var readiness = await ActivationReadinessAsync(id);
+        if (!readiness.CanActivate) throw new InvalidOperationException("Organization is not ready: " + string.Join(", ", readiness.Blockers.Select(b => b.Code)));
+        var before = Summary(org);
+        org.Status = "Active"; org.Revision++;
+        Audit(org, actor, "OrganizationActivated", request.Reason, before, Summary(org));
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return Summary(org);
+    }}

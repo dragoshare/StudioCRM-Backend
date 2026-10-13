@@ -26,8 +26,8 @@ public partial class AuthService
         {
             var isLegacy = o.Id == legacy && o.Status == "LegacyActive";
             var roles = isLegacy ? legacyRoles : new[] { o.Owner ? "Owner" : null, o.Trainer ? "Trainer" : null }.OfType<string>().ToArray();
-            // Until tenant selection ships, only the current legacy CRM can be entered.
-            var canEnter = isLegacy && roles.Length > 0 && o.Id == _context.OrganizationId;
+            // One account has one studio; this endpoint describes access, not a studio switcher.
+            var canEnter = (isLegacy || o.Status == "Active") && roles.Length > 0 && o.Id == _context.OrganizationId;
             return new UserOrganizationDto(o.Id, o.Name, o.UiVariant, o.Status, roles, canEnter, canEnter,
                 canEnter ? null : o.Status == "Draft" ? "OrganizationNotActive" : "OrganizationSwitchingNotAvailable");
         }).ToList(), total, page, pageSize);

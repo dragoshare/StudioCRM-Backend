@@ -11,9 +11,11 @@ public sealed class OrganizationCapabilityMiddleware(RequestDelegate next)
         {
             var action = http.GetEndpoint()?.Metadata.GetMetadata<ControllerActionDescriptor>();
             var allowed = action?.ControllerTypeInfo.AsType() == typeof(LocationsController)
+                || (action?.ControllerTypeInfo.AsType() == typeof(TrainersController) && action.ActionName is "GetAll" or "GetById" or "Create")
+                || (action?.ControllerTypeInfo.AsType() == typeof(ClientsController) && action.ActionName is "GetAll" or "GetById" or "Create" or "Filter")
                 || (action?.ControllerTypeInfo.AsType() == typeof(CurrentOrganizationController) && action.ActionName == "Get")
                 || (action?.ControllerTypeInfo.AsType() == typeof(AuthController)
-                    && action.ActionName is "Me" or "Logout" or "ChangePassword" or "Login" or "Refresh");
+                    && action.ActionName is "Me" or "Organizations" or "Logout" or "ChangePassword" or "Login" or "Refresh");
             if (!allowed)
             {
                 http.Response.StatusCode = StatusCodes.Status403Forbidden;

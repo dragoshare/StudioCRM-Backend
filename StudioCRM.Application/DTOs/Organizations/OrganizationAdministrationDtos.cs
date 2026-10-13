@@ -27,3 +27,10 @@ public record OrganizationUserDto(int UserId, string FullName, string Email, str
 public record OrganizationUserPageDto(List<OrganizationUserDto> Items, int Total, int Page, int PageSize);
 public record PlatformUserDto(int UserId, string FullName, string Email, string AccountStatus, bool EmailVerified);
 public record PlatformUserPageDto(List<PlatformUserDto> Items, int Total, int Page, int PageSize);
+
+public class ActivateOrganizationRequest
+{
+    [Range(0, long.MaxValue)] public long ExpectedRevision { get; set; }
+    [Required, StringLength(1000)] public string Reason { get; set; } = "";
+    public bool ConfirmSetupOnly { get; set; }
+}
