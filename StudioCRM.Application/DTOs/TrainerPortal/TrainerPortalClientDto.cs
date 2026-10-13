@@ -1,7 +1,11 @@
-﻿namespace StudioCRM.Application.DTOs.TrainerPortal;
+namespace StudioCRM.Application.DTOs.TrainerPortal;
 
-public class TrainerPortalClientDto
+public class TrainerPortalClientDto : StudioCRM.Application.DTOs.Clients.ClientListSummaryDto
 {
+    public int? TrainerId { get; set; }
+    public string? TrainerFullName { get; set; }
+    public int LocationId { get; set; }
+
     public int ClientId { get; set; }
     public int? UserId { get; set; }
     public string PortalAccessStatus { get; set; } = "NoAccount";

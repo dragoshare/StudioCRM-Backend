@@ -74,19 +74,26 @@ public partial class TrainerPortalService : ITrainerPortalService
         return await GetMeAsync();
     }
 
+    private Task EnrichPortalClientsAsync(List<TrainerPortalClientDto> clients) =>
+        ClientListSummaryReader.EnrichAsync(_context, clients.Select(c => (c.ClientId, (ClientListSummaryDto)c)).ToList());
+
     public async Task<List<TrainerPortalClientDto>> GetClientsAsync()
     {
         var trainerId = await GetCurrentTrainerIdAsync();
         if (trainerId is null)
             return new List<TrainerPortalClientDto>();
 
-        return await _context.Clients
+        var clients = await _context.Clients
             .Include(c => c.Location)
             .Where(c => c.TrainerId == trainerId.Value)
             .OrderByDescending(c => c.CreatedAt)
             .Select(c => new TrainerPortalClientDto
             {
                 ClientId = c.Id,
+                TrainerId = c.TrainerId,
+                TrainerFullName = c.Trainer != null ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName : null,
+                LocationId = c.LocationId,
+                ActivePackageId = c.ActivePackageId,
                 UserId = c.UserId,
                 PortalAccessStatus = c.PortalAccessBlocked || (c.User != null && !c.User.IsActive) ? "Blocked" : c.UserId != null ? "Active" : _context.Invitations.Any(i => i.ClientId == c.Id && !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow) ? "Invited" : "NoAccount",
                 FullName = c.FirstName + " " + c.LastName,
@@ -103,6 +110,8 @@ public partial class TrainerPortalService : ITrainerPortalService
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync();
+        await EnrichPortalClientsAsync(clients);
+        return clients;
     }
 
     public async Task<TrainerParticipantProfileDto?> GetParticipantProfileAsync(int sessionId, int clientId)
@@ -274,6 +283,10 @@ public partial class TrainerPortalService : ITrainerPortalService
             .Select(c => new TrainerPortalClientDto
             {
                 ClientId = c.Id,
+                TrainerId = c.TrainerId,
+                TrainerFullName = c.Trainer != null ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName : null,
+                LocationId = c.LocationId,
+                ActivePackageId = c.ActivePackageId,
                 FullName = c.FirstName + " " + c.LastName,
                 Email = c.Email,
                 EmailContactUrl = "mailto:" + c.Email,
@@ -289,6 +302,7 @@ public partial class TrainerPortalService : ITrainerPortalService
             })
             .ToListAsync();
 
+        await EnrichPortalClientsAsync(recentClients);
         return new TrainerPortalDashboardDto
         {
             Me = me,

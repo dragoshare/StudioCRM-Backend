@@ -50,6 +50,10 @@ public partial class TrainerPortalService
             .Select(c => new TrainerPortalClientDto
             {
                 ClientId = c.Id,
+                TrainerId = c.TrainerId,
+                TrainerFullName = c.Trainer != null ? c.Trainer.User.FirstName + " " + c.Trainer.User.LastName : null,
+                LocationId = c.LocationId,
+                ActivePackageId = c.ActivePackageId,
                 UserId = c.UserId,
                 PortalAccessStatus = c.PortalAccessBlocked || (c.User != null && !c.User.IsActive) ? "Blocked" : c.UserId != null ? "Active" : _context.Invitations.Any(i => i.ClientId == c.Id && !i.IsAccepted && i.CancelledAt == null && i.ExpiresAt > DateTime.UtcNow) ? "Invited" : "NoAccount",
                 FullName = c.FirstName + " " + c.LastName,
@@ -66,6 +70,7 @@ public partial class TrainerPortalService
                 CreatedAt = c.CreatedAt
             })
             .ToListAsync();
+        await EnrichPortalClientsAsync(items);
         return ReadPage(items, count, filter);
     }
 

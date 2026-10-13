@@ -641,62 +641,7 @@ public partial class ClientService : IClientService
 
     private async Task<List<ClientDto>> EnrichClientListSummariesAsync(List<ClientDto> clients)
     {
-        if (clients.Count == 0)
-            return clients;
-
-        var clientIds = clients.Select(c => c.Id).ToList();
-
-        var activePackages = await _context.ClientPackages
-            .Where(cp => clientIds.Contains(cp.ClientId) && cp.IsActive && cp.ClosureDisposition == null && (cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ExpectedBillingType != SessionBillingType.Group))
-            .OrderByDescending(cp => cp.ActivatedAt ?? cp.PurchaseDate).ThenByDescending(cp => cp.Id)
-            .ThenByDescending(cp => cp.Id)
-            .Select(cp => new
-            {
-                cp.ClientId,
-                cp.Id,
-                cp.Name,
-                cp.TotalSessions,
-                cp.UsedSessions,
-                cp.PaymentStatus
-            })
-            .ToListAsync();
-
-        var activePackageByClientId = activePackages
-            .GroupBy(cp => cp.ClientId)
-            .ToDictionary(g => g.Key, g => g.First());
-
-        var balancesByClientId = await _context.ClientBalanceTransactions
-            .Where(t =>
-                clientIds.Contains(t.ClientId) &&
-                t.Type != BalanceTransactionType.PaymentCredit &&
-                t.Type != BalanceTransactionType.PaymentReversal)
-            .GroupBy(t => t.ClientId)
-            .Select(g => new
-            {
-                ClientId = g.Key,
-                Balance = g.Sum(t => t.Amount)
-            })
-            .ToDictionaryAsync(x => x.ClientId, x => x.Balance);
-
-        foreach (var client in clients)
-        {
-            if (activePackageByClientId.TryGetValue(client.Id, out var activePackage))
-            {
-                client.ActiveClientPackageId = activePackage.Id;
-                client.ActiveClientPackageName = activePackage.Name;
-                client.ActivePackageTotalSessions = activePackage.TotalSessions;
-                client.ActivePackageUsedSessions = activePackage.UsedSessions;
-                client.ActivePackageRemainingSessions = Math.Max(
-                    0,
-                    activePackage.TotalSessions - activePackage.UsedSessions);
-                client.ActivePackagePaymentStatus = activePackage.PaymentStatus.ToString();
-            }
-
-            client.CurrentBalance = balancesByClientId.TryGetValue(client.Id, out var balance)
-                ? balance
-                : 0;
-        }
-
+        await ClientListSummaryReader.EnrichAsync(_context, clients.Select(c => (c.Id, (ClientListSummaryDto)c)).ToList());
         return clients;
     }
 
