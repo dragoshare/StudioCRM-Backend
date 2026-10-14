@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.ClientPackages;
 using StudioCRM.Domain.Enums;
+using StudioCRM.Application.Common;
 namespace StudioCRM.Application.ClientPackages.Services;
 
 public partial class ClientPackageService
@@ -24,7 +25,7 @@ public partial class ClientPackageService
         {
             if (!request.ValidUntil.HasValue || request.ValidUntil.Value <= DateTime.UtcNow)
                 throw new InvalidOperationException("New validity must be in the future.");
-            p.ValidUntil = NormalizeNullableDateTime(request.ValidUntil);
+            p.ValidUntil = PackageValidity.EndOfStudioDay(NormalizeNullableDateTime(request.ValidUntil));
             Audit(p, "ExpiredPackageExtended", before, request.Reason);
         }
         else

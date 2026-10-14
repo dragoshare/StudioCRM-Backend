@@ -5,6 +5,7 @@ using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -285,7 +286,7 @@ public class SubscriptionService : ISubscriptionService
             ExpectedBillingType = package.BillingType,
             PaymentStatus = amountToPay <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = now,
-            ValidUntil = now.Date.AddDays(settings.DefaultPackageValidityDays),
+            ValidUntil = PackageValidity.EndOfStudioDay(now.Date.AddDays(settings.DefaultPackageValidityDays)),
             PaymentDueDate = amountToPay <= 0 ? null : now.Date.AddDays(settings.DefaultPaymentDueDays),
             PaidAt = amountToPay <= 0 ? now : null,
             ActivatedAt = now,

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Application.ClientPackages.Services;
 
@@ -113,8 +114,8 @@ public partial class ClientPackageService : IClientPackageService
             ExpectedBillingType = request.ExpectedBillingType ?? package.BillingType,
             PaymentStatus = totalPrice <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = NormalizeDateTime(request.PurchaseDate, now),
-            ValidUntil = NormalizeNullableDateTime(request.ValidUntil)
-                ?? now.Date.AddDays(settings.DefaultPackageValidityDays),
+            ValidUntil = PackageValidity.EndOfStudioDay(NormalizeNullableDateTime(request.ValidUntil)
+                ?? now.Date.AddDays(settings.DefaultPackageValidityDays)),
             PaymentDueDate = totalPrice <= 0
                 ? null
                 : NormalizeNullableDateTime(request.PaymentDueDate)

@@ -4,6 +4,7 @@ using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Common;
 namespace StudioCRM.Infrastructure.Services;
 
 public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserService current, ISessionParticipantService participants)
@@ -54,7 +55,7 @@ public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserS
                 TotalPrice = catalog.Price, OriginalPrice = catalog.Price, ExpectedUnitPrice = decimal.Round(catalog.Price / catalog.SessionsLimit, 2),
                 Currency = catalog.Currency, ExpectedBillingType = SessionBillingType.Group, PurchaseDate = now,
                 PaymentStatus = free ? PaymentStatus.Paid : PaymentStatus.Unpaid, IsActive = free,
-                ValidUntil = free ? now.AddDays(catalog.DurationDays) : null, PaidAt = free ? now : null,
+                ValidUntil = free ? PackageValidity.EndOfStudioDay(now.AddDays(catalog.DurationDays)) : null, PaidAt = free ? now : null,
                 ActivatedAt = free ? now : null, PaymentDueDate = free ? null : now.AddDays(3),
                 RequestedByUserId = current.UserId, RenewalSource = "GroupOwnerEnrollment" };
             db.ClientPackages.Add(package); await db.SaveChangesAsync();

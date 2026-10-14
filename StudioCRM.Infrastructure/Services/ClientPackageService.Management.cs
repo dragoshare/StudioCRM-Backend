@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.ClientPackages;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Application.ClientPackages.Services;
 
@@ -114,7 +115,9 @@ public partial class ClientPackageService
         }
         // Consumed entries keep their original valuation; do not rewrite past session accounting.
         if (p.UsedSessions == 0) p.ExpectedUnitPrice = (p.OriginalPrice > 0 ? p.OriginalPrice : p.TotalPrice + p.BalanceApplied) / p.TotalSessions;
-        p.ValidUntil = NormalizeNullableDateTime(request.ValidUntil) ?? p.ValidUntil;
+        p.ValidUntil = (p.BillingMode == PackageBillingMode.SessionBased
+            ? PackageValidity.EndOfStudioDay(NormalizeNullableDateTime(request.ValidUntil))
+            : NormalizeNullableDateTime(request.ValidUntil)) ?? p.ValidUntil;
         p.PaymentDueDate = NormalizeNullableDateTime(request.PaymentDueDate) ?? p.PaymentDueDate;
         RefreshStatus(p);
         Audit(p, "PackageCorrected", before, request.Reason);

@@ -890,7 +890,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
                 .Select(p => p.DurationDays)
                 .FirstAsync();
 
-            clientPackage.ValidUntil = now.Date.AddDays(durationDays);
+            clientPackage.ValidUntil = PackageValidity.EndOfStudioDay(now.Date.AddDays(durationDays));
         }
 
         if (clientPackage.ExpectedBillingType == SessionBillingType.Group)

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -142,7 +143,9 @@ public partial class ClientService
         package.ClosureDisposition = null;
         package.ClosedAt = null;
         package.ClosureReason = null;
-        package.ValidUntil = request.ValidUntil;
+        package.ValidUntil = package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased
+            ? PackageValidity.EndOfStudioDay(request.ValidUntil)
+            : request.ValidUntil;
         if ((package.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && package.ExpectedBillingType != SessionBillingType.Group)) client.ActivePackageId = package.PackageId;
         client.Status = "Active";
         client.UpdatedAt = DateTime.UtcNow;

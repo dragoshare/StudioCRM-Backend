@@ -6,6 +6,7 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -213,7 +214,7 @@ public class PublicGroupClassService : IPublicGroupClassService
             ExpectedBillingType = SessionBillingType.Group,
             PaymentStatus = package.Price <= 0 ? PaymentStatus.Paid : PaymentStatus.Unpaid,
             PurchaseDate = now,
-            ValidUntil = package.Price <= 0 ? now.Date.AddDays(package.DurationDays) : null,
+            ValidUntil = package.Price <= 0 ? PackageValidity.EndOfStudioDay(now.Date.AddDays(package.DurationDays)) : null,
             PaymentDueDate = package.Price <= 0 ? null : now.Date.AddDays(3),
             PaidAt = package.Price <= 0 ? now : null,
             ActivationMode = ClientPackageActivationMode.Immediately,
