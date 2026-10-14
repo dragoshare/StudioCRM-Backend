@@ -325,12 +325,15 @@ public class SessionParticipantService : ISessionParticipantService
 
                     var sessionsCharged = requestedSessionsCharged;
                     var newUsedSessions = usedSessions + sessionsCharged;
+                    var agreedUsedSessions = await AgreedPackageAccounting.ValidateAsync(
+                        _context, activeClientPackage, actualBillingType, session.Id, sessionsCharged);
+                    newUsedSessions = agreedUsedSessions ?? newUsedSessions;
 
                     if (newUsedSessions > activeClientPackage.TotalSessions)
                         throw new InvalidOperationException("Client package has no remaining sessions.");
 
                     var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
-                    var actualUnitPrice = await ResolveActualUnitPriceAsync(
+                    var actualUnitPrice = agreedUsedSessions.HasValue ? expectedUnitPrice : await ResolveActualUnitPriceAsync(
                         activeClientPackage,
                         session.LocationId,
                         actualBillingType);

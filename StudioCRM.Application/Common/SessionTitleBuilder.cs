@@ -35,11 +35,7 @@ public static class SessionTitleBuilder
         if (!ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
             return $"ZAJĘCIA GRUPOWE: {session.Title} | {session.Location.Name}";
 
-        var subject = $"StudioCRM: {session.Title}";
-        var clientName = string.Join(" + ", session.Participants.Select(p =>
-            $"{p.Client.FirstName} {p.Client.LastName}".Trim()));
-
-        return $"{subject} - {clientName}";
+        return Build(session.Participants.Select(p => p.Client).ToList());
     }
 
     private static string ShortName(Client client)

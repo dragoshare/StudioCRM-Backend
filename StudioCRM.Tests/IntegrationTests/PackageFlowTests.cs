@@ -31,6 +31,33 @@ public class PackageFlowTests
         new(db, owner, null!, new PortalSecurityTests.NoSync(), NullLogger<SessionParticipantService>.Instance);
 
     [PostgresFact]
+    public async Task IndividualMixedAgreementPreservesOpeningUsageAndDoesNotCreateBalance()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.PlannedSessionType = "TwoToOne";
+        catalog.BillingType = SessionBillingType.OneToOne;
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId,
+            ExpectedBillingType = SessionBillingType.OneToOne, TotalSessions = 12, UsedSessions = 1,
+            ExpectedUnitPrice = 117.50m, TotalPrice = 1410m, OriginalPrice = 1410m,
+            AgreedSessionTermsJson = "[{\"BillingType\":1,\"Limit\":6,\"OpeningUsed\":1},{\"BillingType\":2,\"Limit\":6,\"OpeningUsed\":0}]" };
+        var participant = new SessionParticipant { Client = client, Session = session };
+        db.AddRange(pass, participant); await db.SaveChangesAsync();
+        var request = new StudioCRM.Application.DTOs.SessionParticipants.CompleteSessionDto
+        { ActualSessionType = "TwoToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true }] };
+        await Participants(db, owner).CompleteSessionAsync(session.Id, request);
+        Assert.Equal(2, pass.UsedSessions);
+        Assert.Equal(117.50m, participant.ActualUnitPrice);
+        Assert.Equal(SessionBillingType.TwoToOne, participant.ActualBillingType);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+        // Recount through the individual-session endpoint must not lose the opening session or double count.
+        await PortalSecurityTests.Sessions(db, owner).CountSessionFromPackageAsync(new()
+        { SessionParticipantId = participant.Id, ClientPackageId = pass.Id, ActualBillingType = SessionBillingType.TwoToOne });
+        Assert.Equal(2, pass.UsedSessions);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [PostgresFact]
     public async Task WorkerKeepsSingleParticipantGroupSeparateFromPersonalPackage()
     {
         await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();

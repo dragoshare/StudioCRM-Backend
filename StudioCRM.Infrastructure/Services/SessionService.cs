@@ -1014,12 +1014,18 @@ public class SessionService : ISessionService
         var previousCharged = isAlreadyCountedThisParticipant ? Math.Max(0, participant.SessionsCharged) : 0;
         var sessionsCharged = 1;
         var newUsedSessions = usedSessions - previousCharged + sessionsCharged;
+        var agreedUsedSessions = await AgreedPackageAccounting.ValidateAsync(
+            _context, clientPackage, request.ActualBillingType, participant.SessionId, sessionsCharged);
+        newUsedSessions = agreedUsedSessions ?? newUsedSessions;
 
         if (newUsedSessions > clientPackage.TotalSessions)
             throw new InvalidOperationException("Client package has no remaining sessions.");
 
         var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
-        var actualUnitPrice = request.ActualUnitPrice.HasValue
+        if (agreedUsedSessions.HasValue && request.ActualUnitPrice.HasValue &&
+            NormalizeUnitPrice(request.ActualUnitPrice.Value) != expectedUnitPrice)
+            throw new InvalidOperationException("Session price must match the individual package agreement.");
+        var actualUnitPrice = agreedUsedSessions.HasValue ? expectedUnitPrice : request.ActualUnitPrice.HasValue
             ? NormalizeUnitPrice(request.ActualUnitPrice.Value)
             : await ResolveActualUnitPriceAsync(clientPackage, participant.Session.LocationId, request.ActualBillingType);
         var balanceDifference = expectedUnitPrice - actualUnitPrice;

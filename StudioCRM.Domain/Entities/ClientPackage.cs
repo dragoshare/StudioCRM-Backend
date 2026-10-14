@@ -27,6 +27,8 @@ public class ClientPackage
     public decimal BalanceApplied { get; set; }
     public decimal AmountPaid { get; set; }
     public decimal ExpectedUnitPrice { get; set; }
+    // Individual cycle agreement; deliberately not copied from the catalogue on renewal.
+    public string? AgreedSessionTermsJson { get; set; }
     public string Currency { get; set; } = "PLN";
 
     public int? LocationId { get; set; }

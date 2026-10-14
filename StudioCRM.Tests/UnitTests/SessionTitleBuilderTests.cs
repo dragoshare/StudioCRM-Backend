@@ -30,13 +30,13 @@ public class SessionTitleBuilderTests
     }
 
     [Fact]
-    public void SemiPersonalOutlookSubjectStillIncludesParticipants()
+    public void SemiPersonalOutlookSubjectContainsOnlyShortParticipantNames()
     {
         var session = BuildSession(isPubliclyBookable: false, SessionBillingType.TwoToOne.ToString());
 
         var subject = SessionTitleBuilder.BuildOutlookSubject(session);
 
-        Assert.Equal("StudioCRM: Aldona W + Agata M - Aldona Wrona + Agata Mazur", subject);
+        Assert.Equal("Agata M + Aldona W", subject);
     }
 
     private static Session BuildSession(bool isPubliclyBookable, string? plannedSessionType)

@@ -701,6 +701,9 @@ namespace StudioCRM.Infrastructure.Migrations
                         .HasColumnType("integer")
                         .HasDefaultValue(1);
 
+                    b.Property<string>("AgreedSessionTermsJson")
+                        .HasColumnType("text");
+
                     b.Property<decimal>("AmountPaid")
                         .HasPrecision(18, 2)
                         .HasColumnType("numeric(18,2)");
