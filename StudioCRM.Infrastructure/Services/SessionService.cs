@@ -1013,22 +1013,20 @@ public class SessionService : ISessionService
 
         var previousCharged = isAlreadyCountedThisParticipant ? Math.Max(0, participant.SessionsCharged) : 0;
         var sessionsCharged = 1;
-        var newUsedSessions = usedSessions - previousCharged + sessionsCharged;
-        var agreedUsedSessions = await AgreedPackageAccounting.ValidateAsync(
+        // The stored counter also holds opening entries of an imported running package, so never rebuild it from participants alone.
+        var storedUsedSessions = clientPackage.UsedSessions - previousCharged;
+        var newUsedSessions = Math.Max(usedSessions - previousCharged, storedUsedSessions) + sessionsCharged;
+        await AgreedPackageAccounting.ValidateAsync(
             _context, clientPackage, request.ActualBillingType, participant.SessionId, sessionsCharged);
-        newUsedSessions = agreedUsedSessions ?? newUsedSessions;
 
         if (newUsedSessions > clientPackage.TotalSessions)
             throw new InvalidOperationException("Client package has no remaining sessions.");
 
         var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
-        if (agreedUsedSessions.HasValue && request.ActualUnitPrice.HasValue &&
-            NormalizeUnitPrice(request.ActualUnitPrice.Value) != expectedUnitPrice)
-            throw new InvalidOperationException("Session price must match the individual package agreement.");
-        var actualUnitPrice = agreedUsedSessions.HasValue ? expectedUnitPrice : request.ActualUnitPrice.HasValue
-            ? NormalizeUnitPrice(request.ActualUnitPrice.Value)
-            : await ResolveActualUnitPriceAsync(clientPackage, participant.Session.LocationId, request.ActualBillingType);
-        var balanceDifference = expectedUnitPrice - actualUnitPrice;
+        var balanceDifference = SessionBalancePolicy.PerSession(clientPackage, request.ActualBillingType);
+        var actualUnitPrice = expectedUnitPrice - balanceDifference;
+        if (request.ActualUnitPrice.HasValue && request.ActualUnitPrice.Value != actualUnitPrice)
+            throw new InvalidOperationException("Session price must follow the fixed training-type adjustment.");
 
         participant.ClientPackageId = clientPackage.Id;
         participant.CountsAgainstPackage = true;
@@ -1087,46 +1085,6 @@ public class SessionService : ISessionService
             await _subscriptionService.RenewAfterCompletedCycleAsync(clientPackage.Id);
 
         await _context.SaveChangesAsync();
-    }
-
-    private async Task<decimal> ResolveActualUnitPriceAsync(
-        ClientPackage clientPackage,
-        int sessionLocationId,
-        SessionBillingType actualBillingType)
-    {
-        var sessionsPerWeek = ResolveSessionsPerWeek(clientPackage);
-        var locationId = clientPackage.LocationId ?? sessionLocationId;
-
-        var pricePackage = await _context.Packages
-            .Where(p =>
-                p.IsActive &&
-                p.BillingType == actualBillingType &&
-                p.SessionsPerWeek == sessionsPerWeek &&
-                p.SessionsLimit == clientPackage.TotalSessions &&
-                (p.LocationId == locationId || p.LocationId == null))
-            .OrderByDescending(p => p.LocationId == locationId)
-            .FirstOrDefaultAsync();
-
-        pricePackage ??= await _context.Packages
-            .Where(p =>
-                p.IsActive &&
-                p.BillingType == actualBillingType &&
-                p.SessionsLimit == clientPackage.TotalSessions &&
-                (p.LocationId == locationId || p.LocationId == null))
-            .OrderByDescending(p => p.LocationId == locationId)
-            .ThenBy(p => Math.Abs(p.SessionsPerWeek - sessionsPerWeek))
-            .FirstOrDefaultAsync();
-
-        if (pricePackage is null)
-        {
-            throw new InvalidOperationException(
-                $"No price package found for {actualBillingType}, {clientPackage.TotalSessions} sessions and location {locationId}.");
-        }
-
-        if (pricePackage.SessionsLimit <= 0)
-            throw new InvalidOperationException("Matched price package sessions limit must be greater than zero.");
-
-        return NormalizeUnitPrice(pricePackage.Price / pricePackage.SessionsLimit);
     }
 
     private async Task EnsureSessionIsNotLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
@@ -1188,21 +1146,6 @@ public class SessionService : ISessionService
             throw new InvalidOperationException(
                 "Use session completion to change participants or package accounting for a completed session.");
         }
-    }
-
-    private static int ResolveSessionsPerWeek(ClientPackage clientPackage)
-    {
-        return clientPackage.SessionsPerWeek > 0
-            ? clientPackage.SessionsPerWeek
-            : Math.Max(1, (int)Math.Ceiling(clientPackage.TotalSessions / 4m));
-    }
-
-    private static decimal NormalizeUnitPrice(decimal amount)
-    {
-        if (amount <= 0)
-            throw new InvalidOperationException("Actual unit price must be greater than zero.");
-
-        return decimal.Round(amount, 2);
     }
 
     private IQueryable<Session> BaseQuery(bool includeDeleted = false)
@@ -2197,3 +2140,4 @@ public class SessionService : ISessionService
         public int ParticipantsCount { get; set; }
     }
 }
+

@@ -31,6 +31,29 @@ public class PackageFlowTests
         new(db, owner, null!, new PortalSecurityTests.NoSync(), NullLogger<SessionParticipantService>.Instance);
 
     [PostgresFact]
+    public async Task DiscountedSemiUsesFixedAdjustmentInBothAccountingPaths()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.PlannedSessionType = "TwoToOne"; catalog.BillingType = SessionBillingType.TwoToOne;
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId,
+            ExpectedBillingType = SessionBillingType.TwoToOne, TotalSessions = 8, ExpectedUnitPrice = 103.75m,
+            AgreedSessionTermsJson = "[{\"BillingType\":2,\"Limit\":8,\"OpeningUsed\":0}]" };
+        var participant = new SessionParticipant { Client = client, Session = session };
+        db.AddRange(pass, participant); await db.SaveChangesAsync();
+        await Participants(db, owner).CompleteSessionAsync(session.Id, new()
+        { ActualSessionType = "OneToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true, SessionsCharged = 2 }] });
+        Assert.Equal(-60m, participant.BalanceDifference);
+        Assert.Equal(133.75m, participant.ActualUnitPrice);
+        Assert.Equal(-60m, await db.ClientBalanceTransactions.SumAsync(t => t.Amount));
+        await PortalSecurityTests.Sessions(db, owner).CountSessionFromPackageAsync(new()
+        { SessionParticipantId = participant.Id, ClientPackageId = pass.Id, ActualBillingType = SessionBillingType.TwoToOne });
+        Assert.Equal(0m, participant.BalanceDifference);
+        Assert.Equal(103.75m, participant.ActualUnitPrice);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [PostgresFact]
     public async Task IndividualMixedAgreementPreservesOpeningUsageAndDoesNotCreateBalance()
     {
         await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
@@ -55,6 +78,38 @@ public class PackageFlowTests
         { SessionParticipantId = participant.Id, ClientPackageId = pass.Id, ActualBillingType = SessionBillingType.TwoToOne });
         Assert.Equal(2, pass.UsedSessions);
         Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [PostgresFact]
+    public Task ImportedRunningPackageKeepsOpeningEntries() => AssertOpeningEntriesKept(null);
+
+    [PostgresFact]
+    public Task ImportedAgreedPackageKeepsOpeningEntries() =>
+        AssertOpeningEntriesKept("[{\"BillingType\":2,\"Limit\":8,\"OpeningUsed\":0}]");
+
+    // Regression: "Wprowadź trwający pakiet" stores 4/8 without session participants; the next session must give 5/8, not 1/8.
+    private static async Task AssertOpeningEntriesKept(string? agreement)
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.PlannedSessionType = "TwoToOne"; catalog.BillingType = SessionBillingType.TwoToOne;
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId,
+            ExpectedBillingType = SessionBillingType.TwoToOne, TotalSessions = 8, UsedSessions = 4, ExpectedUnitPrice = 115m,
+            TotalPrice = 920m, AmountPaid = 920m, PaymentStatus = PaymentStatus.Paid, RenewalSource = "OpeningBalance",
+            AgreedSessionTermsJson = agreement };
+        var participant = new SessionParticipant { Client = client, Session = session };
+        db.AddRange(pass, participant); await db.SaveChangesAsync();
+        var request = new StudioCRM.Application.DTOs.SessionParticipants.CompleteSessionDto
+        { ActualSessionType = "TwoToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true }] };
+        await Participants(db, owner).CompleteSessionAsync(session.Id, request);
+        Assert.Equal(5, pass.UsedSessions);
+        // Completing again and recounting the same participant must neither lose opening entries nor double count.
+        await Participants(db, owner).CompleteSessionAsync(session.Id, request);
+        Assert.Equal(5, pass.UsedSessions);
+        await PortalSecurityTests.Sessions(db, owner).CountSessionFromPackageAsync(new()
+        { SessionParticipantId = participant.Id, ClientPackageId = pass.Id, ActualBillingType = SessionBillingType.TwoToOne });
+        Assert.Equal(5, pass.UsedSessions);
+        Assert.Equal(5, (await db.ClientPackages.AsNoTracking().SingleAsync(x => x.Id == pass.Id)).UsedSessions);
     }
 
     [PostgresFact]

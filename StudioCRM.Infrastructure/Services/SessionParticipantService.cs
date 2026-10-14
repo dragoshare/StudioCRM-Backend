@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Interfaces.Calendar;
@@ -324,20 +325,18 @@ public class SessionParticipantService : ISessionParticipantService
                         .SumAsync(p => p.SessionsCharged);
 
                     var sessionsCharged = requestedSessionsCharged;
-                    var newUsedSessions = usedSessions + sessionsCharged;
-                    var agreedUsedSessions = await AgreedPackageAccounting.ValidateAsync(
+                    // Previous accounting of this session was reverted above; the stored counter keeps opening entries of imported packages.
+                    var newUsedSessions = Math.Max(usedSessions, activeClientPackage.UsedSessions) + sessionsCharged;
+                    await AgreedPackageAccounting.ValidateAsync(
                         _context, activeClientPackage, actualBillingType, session.Id, sessionsCharged);
-                    newUsedSessions = agreedUsedSessions ?? newUsedSessions;
 
                     if (newUsedSessions > activeClientPackage.TotalSessions)
                         throw new InvalidOperationException("Client package has no remaining sessions.");
 
                     var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
-                    var actualUnitPrice = agreedUsedSessions.HasValue ? expectedUnitPrice : await ResolveActualUnitPriceAsync(
-                        activeClientPackage,
-                        session.LocationId,
-                        actualBillingType);
-                    var balanceDifference = (expectedUnitPrice - actualUnitPrice) * sessionsCharged;
+                    var perSessionDifference = SessionBalancePolicy.PerSession(activeClientPackage, actualBillingType);
+                    var actualUnitPrice = expectedUnitPrice - perSessionDifference;
+                    var balanceDifference = perSessionDifference * sessionsCharged;
 
                     participant.PackageId = activeClientPackage.PackageId;
                     participant.ClientPackageId = activeClientPackage.Id;
@@ -448,56 +447,6 @@ public class SessionParticipantService : ISessionParticipantService
         {
             _logger.LogWarning(ex, "Could not sync session {SessionId} participants to Outlook.", sessionId);
         }
-    }
-
-    private async Task<decimal> ResolveActualUnitPriceAsync(
-        ClientPackage clientPackage,
-        int sessionLocationId,
-        SessionBillingType actualBillingType)
-    {
-        var sessionsPerWeek = clientPackage.SessionsPerWeek > 0
-            ? clientPackage.SessionsPerWeek
-            : Math.Max(1, (int)Math.Ceiling(clientPackage.TotalSessions / 4m));
-        var locationId = clientPackage.LocationId ?? sessionLocationId;
-
-        var pricePackage = await _context.Packages
-            .Where(p =>
-                p.IsActive &&
-                p.BillingType == actualBillingType &&
-                p.SessionsPerWeek == sessionsPerWeek &&
-                p.SessionsLimit == clientPackage.TotalSessions &&
-                (p.LocationId == locationId || p.LocationId == null))
-            .OrderByDescending(p => p.LocationId == locationId)
-            .FirstOrDefaultAsync();
-
-        pricePackage ??= await _context.Packages
-            .Where(p =>
-                p.IsActive &&
-                p.BillingType == actualBillingType &&
-                p.SessionsLimit == clientPackage.TotalSessions &&
-                (p.LocationId == locationId || p.LocationId == null))
-            .OrderByDescending(p => p.LocationId == locationId)
-            .ThenBy(p => Math.Abs(p.SessionsPerWeek - sessionsPerWeek))
-            .FirstOrDefaultAsync();
-
-        if (pricePackage is null)
-        {
-            throw new InvalidOperationException(
-                $"No price package found for {actualBillingType}, {clientPackage.TotalSessions} sessions and location {locationId}.");
-        }
-
-        if (pricePackage.SessionsLimit <= 0)
-            throw new InvalidOperationException("Matched price package sessions limit must be greater than zero.");
-
-        return NormalizeUnitPrice(pricePackage.Price / pricePackage.SessionsLimit);
-    }
-
-    private static decimal NormalizeUnitPrice(decimal amount)
-    {
-        if (amount <= 0)
-            throw new InvalidOperationException("Actual unit price must be greater than zero.");
-
-        return decimal.Round(amount, 2);
     }
 
     private async Task EnsureSessionIsNotLockedByPaidSettlementAsync(int trainerId, DateTime startAt)
@@ -615,3 +564,4 @@ public class SessionParticipantService : ISessionParticipantService
             .FirstAsync();
     }
 }
+
