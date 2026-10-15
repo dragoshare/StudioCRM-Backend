@@ -14,6 +14,7 @@ using StudioCRM.Application.Interfaces.Mail;
 using StudioCRM.Application.Settings;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -304,7 +305,7 @@ public partial class AuthService : IAuthService
         await _context.RefreshTokens.AddAsync(new RefreshToken
         {
             UserId = user.Id,
-            Token = refreshToken,
+            Token = SecretTokens.Hash(refreshToken),
             OrganizationId = SessionOrganization(user),
             ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -413,7 +414,7 @@ public partial class AuthService : IAuthService
         await _context.RefreshTokens.AddAsync(new RefreshToken
         {
             UserId = user.Id,
-            Token = refreshToken,
+            Token = SecretTokens.Hash(refreshToken),
             OrganizationId = SessionOrganization(user),
             ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -482,9 +483,12 @@ public partial class AuthService : IAuthService
 
     public async Task<AuthResponseDto> RefreshAsync(RefreshTokenRequestDto request)
     {
+        // Tokens are stored hashed; plaintext rows from before the change still match until they expire.
+        var presentedHash = SecretTokens.Hash(request.RefreshToken);
+        var legacyAllowed = SecretTokens.CanBeLegacyPlaintext(request.RefreshToken);
         if (_organizationContexts != null)
         {
-            var stored = await _context.RefreshTokens.AsNoTracking().Where(t => t.Token == request.RefreshToken)
+            var stored = await _context.RefreshTokens.AsNoTracking().Where(t => t.Token == presentedHash || (legacyAllowed && t.Token == request.RefreshToken))
                 .Select(t => new { t.UserId, t.OrganizationId, t.ScopeVersion }).SingleOrDefaultAsync();
             if (stored != null)
             {
@@ -505,7 +509,7 @@ public partial class AuthService : IAuthService
             .Include(rt => rt.User)
                 .ThenInclude(u => u.UserRoles)
                     .ThenInclude(ur => ur.Role)
-            .FirstOrDefaultAsync(rt => rt.Token == request.RefreshToken);
+            .FirstOrDefaultAsync(rt => rt.Token == presentedHash || (legacyAllowed && rt.Token == request.RefreshToken));
 
         if (refreshToken is null || !refreshToken.IsActive || !refreshToken.User.IsActive ||
             await ClientAccountAccess.IsBlockedAsync(_context, refreshToken.UserId))
@@ -529,7 +533,7 @@ public partial class AuthService : IAuthService
         await _context.RefreshTokens.AddAsync(new RefreshToken
         {
             UserId = refreshToken.UserId,
-            Token = newRefreshToken,
+            Token = SecretTokens.Hash(newRefreshToken),
             OrganizationId = SessionOrganization(refreshToken.User),
             ScopeVersion = 1,
             ExpiresAt = DateTime.UtcNow.AddDays(7),
@@ -586,7 +590,7 @@ public partial class AuthService : IAuthService
         await _context.PasswordResetTokens.AddAsync(new PasswordResetToken
         {
             UserId = user.Id,
-            Token = token,
+            Token = SecretTokens.Hash(token),
             ExpiresAt = DateTime.UtcNow.AddHours(1),
             CreatedAt = DateTime.UtcNow,
             IsUsed = false
@@ -601,10 +605,12 @@ public partial class AuthService : IAuthService
 
     public async Task ResetPasswordAsync(ResetPasswordDto request)
     {
+        var presentedHash = SecretTokens.Hash(request.Token);
+        var legacyAllowed = SecretTokens.CanBeLegacyPlaintext(request.Token);
         var resetToken = await _context.PasswordResetTokens
             .Include(t => t.User)
             .FirstOrDefaultAsync(t =>
-                t.Token == request.Token &&
+                (t.Token == presentedHash || (legacyAllowed && t.Token == request.Token)) &&
                 !t.IsUsed &&
                 t.ExpiresAt > DateTime.UtcNow);
 

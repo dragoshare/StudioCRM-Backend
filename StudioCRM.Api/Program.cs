@@ -203,7 +203,13 @@ builder.Services.AddTransient<IResend, ResendClient>();
 
 builder.Services.AddScoped<IEmailService, EmailService>();
 
+// Encrypts Outlook OAuth tokens at rest; without the key they are stored as before (plaintext).
+StudioCRM.Infrastructure.Persistence.TokenProtector.Configure(builder.Configuration["Security:TokenEncryptionKey"]);
+
 var app = builder.Build();
+
+if (!StudioCRM.Infrastructure.Persistence.TokenProtector.IsConfigured && !app.Environment.IsDevelopment())
+    app.Logger.LogWarning("Security:TokenEncryptionKey is not set; Outlook tokens are stored unencrypted.");
 
 app.UseExceptionHandler(errorApp =>
 {

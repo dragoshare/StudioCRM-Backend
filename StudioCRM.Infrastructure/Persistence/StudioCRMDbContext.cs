@@ -1064,6 +1064,12 @@ public partial class StudioCRMDbContext : DbContext
             .HasIndex(ci => new { ci.UserId, ci.Provider })
             .IsUnique();
 
+        // Outlook OAuth tokens are encrypted at rest (see TokenProtector); the column type stays text.
+        modelBuilder.Entity<CalendarIntegration>().Property(ci => ci.AccessToken)
+            .HasConversion(v => TokenProtector.Protect(v), v => TokenProtector.Unprotect(v));
+        modelBuilder.Entity<CalendarIntegration>().Property(ci => ci.RefreshToken)
+            .HasConversion(v => TokenProtector.Protect(v), v => TokenProtector.Unprotect(v));
+
         modelBuilder.Entity<CalendarEventLink>()
             .HasOne(cel => cel.Session)
             .WithMany()

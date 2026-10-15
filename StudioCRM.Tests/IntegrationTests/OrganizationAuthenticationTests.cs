@@ -81,7 +81,7 @@ public class OrganizationAuthenticationTests
             if (valid)
             {
                 var response = await PortalSecurityTests.Auth(db).RefreshAsync(new() { RefreshToken = token.Token });
-                var rotated = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.RefreshTokens, x => x.Token == response.RefreshToken);
+                var rotated = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.SingleAsync(db.RefreshTokens, x => x.Token == StudioCRM.Application.Common.SecretTokens.Hash(response.RefreshToken));
                 Assert.Equal(1, rotated.ScopeVersion);
                 Assert.Equal(StudioCRMDbContext.LegacyOrganizationId, rotated.OrganizationId);
                 Assert.NotNull(token.RevokedAt);
