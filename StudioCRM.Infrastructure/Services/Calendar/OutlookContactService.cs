@@ -63,6 +63,24 @@ public class OutlookContactService : IOutlookContactService
         var trainer = await _context.Trainers
             .FirstOrDefaultAsync(t => t.UserId == _currentUser.UserId.Value);
 
+        // Owners already see every client in CRM, so their Outlook gets the whole client list with full details.
+        if (_currentUser.IsOwner)
+        {
+            var allClients = await _context.Clients
+                .Where(c => !c.IsDeleted && (_settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(c.Email)))
+                .OrderBy(c => c.Id)
+                .ToListAsync();
+            if (_settings.UseCalendarEmails)
+            {
+                foreach (var client in allClients)
+                    ClientCalendarAddress.Ensure(client, _settings.CalendarEmailDomain);
+                await _context.SaveChangesAsync();
+            }
+            foreach (var client in allClients)
+                await UpsertOutlookContactAsync(integration.AccessToken, client);
+            return;
+        }
+
         if (trainer == null)
             throw new InvalidOperationException("Current user is not a trainer.");
 
