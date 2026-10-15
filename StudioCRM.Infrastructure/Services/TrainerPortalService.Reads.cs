@@ -1,6 +1,10 @@
+using System.Linq.Expressions;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.TrainerPortal;
+using StudioCRM.Domain.Entities;
+using StudioCRM.Domain.Enums;
+using StudioCRM.Infrastructure.Persistence;
 namespace StudioCRM.Infrastructure.Services;
 
 public partial class TrainerPortalService
@@ -38,14 +42,9 @@ public partial class TrainerPortalService
             var term = filter.Search.Trim().ToLower();
             query = query.Where(c => (c.FirstName + " " + c.LastName).ToLower().Contains(term) || c.Email.ToLower().Contains(term));
         }
+        if (filter.HasActivePackage.HasValue) query = WhereHasActivePackage(_context, query, filter.HasActivePackage.Value);
         var count = await query.CountAsync();
-        var ordered = filter.Sort switch
-        {
-            "nameDesc" => query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName).ThenBy(c => c.Id),
-            "created" => query.OrderBy(c => c.CreatedAt).ThenBy(c => c.Id),
-            "createdDesc" => query.OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id),
-            _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id)
-        };
+        var ordered = OrderPortalClients(_context, query, filter.Sort);
         var items = await ordered.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(c => new TrainerPortalClientDto
             {
@@ -94,6 +93,39 @@ public partial class TrainerPortalService
             .Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(c => new GroupClientOptionDto { ClientId = c.Id, FullName = c.FirstName + " " + c.LastName }).ToListAsync();
         return ReadPage(items, count, filter);
+    }
+
+    // Same set as ClientListSummaryReader.ActivePackages.
+    internal static IQueryable<Client> WhereHasActivePackage(StudioCRMDbContext db, IQueryable<Client> query, bool hasActive) =>
+        query.Where(c => db.ClientPackages.Any(p => p.ClientId == c.Id && p.IsActive && p.ClosureDisposition == null) == hasActive);
+
+    // Balance and usage mirror ClientListSummaryReader: settlement balance without payment credit/reversal,
+    // and UsedSessions/TotalSessions of the personal/semi package shown in the flat ActivePackage* fields.
+    internal static IOrderedQueryable<Client> OrderPortalClients(StudioCRMDbContext db, IQueryable<Client> query, string sort)
+    {
+        Expression<Func<Client, decimal>> balance = c => db.ClientBalanceTransactions
+            .Where(t => t.ClientId == c.Id && t.Type != BalanceTransactionType.PaymentCredit && t.Type != BalanceTransactionType.PaymentReversal)
+            .Sum(t => (decimal?)t.Amount) ?? 0;
+        Expression<Func<Client, bool>> hasPersonal = c => db.ClientPackages.Any(p => p.ClientId == c.Id && p.IsActive &&
+            p.ClosureDisposition == null && p.BillingMode == PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group);
+        Expression<Func<Client, decimal?>> usage = c => db.ClientPackages
+            .Where(p => p.ClientId == c.Id && p.IsActive && p.ClosureDisposition == null &&
+                p.BillingMode == PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group)
+            .OrderByDescending(p => p.ActivatedAt ?? p.PurchaseDate).ThenByDescending(p => p.Id)
+            .Select(p => (decimal?)(p.TotalSessions > 0 ? (decimal)p.UsedSessions / p.TotalSessions : 0m))
+            .FirstOrDefault();
+        return sort switch
+        {
+            "nameDesc" => query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName).ThenBy(c => c.Id),
+            "created" => query.OrderBy(c => c.CreatedAt).ThenBy(c => c.Id),
+            "createdDesc" => query.OrderByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id),
+            "balance" => query.OrderBy(balance).ThenBy(c => c.Id),
+            "balanceDesc" => query.OrderByDescending(balance).ThenBy(c => c.Id),
+            // Clients without a personal/semi package go last in both directions.
+            "packageUsage" => query.OrderByDescending(hasPersonal).ThenBy(usage).ThenBy(c => c.Id),
+            "packageUsageDesc" => query.OrderByDescending(hasPersonal).ThenByDescending(usage).ThenBy(c => c.Id),
+            _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id)
+        };
     }
 
     private static PagedResultDto<T> ReadPage<T>(List<T> items, int total, PortalPageFilter filter) => new()

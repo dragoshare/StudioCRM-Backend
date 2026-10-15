@@ -1060,6 +1060,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         ClientPaymentFilterDto filter)
     {
         if (filter.Search?.Length > 100) throw new InvalidOperationException("Search is limited to 100 characters.");
+        filter.Validate();
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
             var term = filter.Search.Trim().ToLower();
@@ -1082,6 +1083,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         if (filter.ReceiptStatus.HasValue)
             query = query.Where(p => p.ReceiptStatus == filter.ReceiptStatus.Value);
+
+        if (filter.Method.HasValue)
+            query = query.Where(p => p.Method == filter.Method.Value);
 
         if (!string.IsNullOrWhiteSpace(filter.PaymentProvider))
         {
@@ -1117,6 +1121,15 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         return query;
     }
 
+    // Date sorts use PaymentDate (business date of the payment), never CreatedAt.
+    internal static IOrderedQueryable<ClientPayment> OrderPayments(IQueryable<ClientPayment> query, string? sort) => sort switch
+    {
+        "paymentDate" => query.OrderBy(p => p.PaymentDate).ThenBy(p => p.Id),
+        "amount" => query.OrderBy(p => p.Amount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        "amountDesc" => query.OrderByDescending(p => p.Amount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        _ => query.OrderByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id)
+    };
+
     private async Task<PagedResultDto<ClientPaymentDto>> ToPagedPaymentResultAsync(
         IQueryable<ClientPayment> query,
         ClientPaymentFilterDto filter)
@@ -1125,9 +1138,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var pageSize = NormalizePageSize(filter.PageSize);
 
         var totalCount = await query.CountAsync();
-        var payments = await query
-            .OrderByDescending(p => p.PaymentDate)
-            .ThenByDescending(p => p.Id)
+        var payments = await OrderPayments(query, filter.Sort)
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();

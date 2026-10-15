@@ -5,7 +5,7 @@ Owner/Trainer bearer authorization; portal personal lists use the logged-in trai
 | GET route | Parameters / result |
 | --- | --- |
 | /api/trainer-portal/sessions | from/to optional together, positive range <=93 days, overlap [from,to); legacy session DTO list |
-| /api/trainer-portal/clients/page | page=1, pageSize=25, search<=100, locationId, status<=30, sort=name/nameDesc/created/createdDesc; PagedResultDto<TrainerPortalClientDto> |
+| /api/trainer-portal/clients/page | page=1, pageSize=25, search<=100, locationId, status<=30, hasActivePackage, sort=name/nameDesc/created/createdDesc/balance/balanceDesc/packageUsage/packageUsageDesc; PagedResultDto<TrainerPortalClientDto>; details: FRONT-listy-klientow-i-wplat.md |
 | /api/trainer-portal/group-clients | locationId required, page/pageSize/search/status; name order; GroupAccessEnabled membership and trainer location required; PagedResultDto<GroupClientOptionDto> |
 | /api/trainer-portal/clients/{id}/sessions/recent | latest 3 completed sessions, totalCount; PagedResultDto<ClientSessionHistoryDto> |
 | /api/trainer-portal/clients/{id}/payments | ClientPaymentFilterDto; PagedResultDto<ClientPaymentDto> |

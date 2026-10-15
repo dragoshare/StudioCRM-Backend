@@ -128,6 +128,8 @@ builder.Services.AddSwaggerGen(c =>
         Title = "StudioCRM.Api",
         Version = "v1"
     });
+    c.SchemaFilter<StudioCRM.Api.Swagger.EnumDescriptionSchemaFilter>();
+    c.OperationFilter<StudioCRM.Api.Swagger.ListEndpointsOperationFilter>();
 
     c.AddSecurityDefinition("Bearer", new Microsoft.OpenApi.Models.OpenApiSecurityScheme
     {
