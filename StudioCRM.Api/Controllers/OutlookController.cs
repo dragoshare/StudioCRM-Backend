@@ -147,10 +147,14 @@ public class OutlookController : ControllerBase
     [HttpPost("webhook")]
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
-    public async Task<IActionResult> Webhook()
+    public async Task<IActionResult> Webhook([FromServices] StudioCRM.Api.BackgroundServices.OutlookWebhookQueue queue)
     {
         if (Request.Query.TryGetValue("validationToken", out var token))
             return Content(token.ToString(), "text/plain");
+
+        // Graph notifications are small; anything larger is not a genuine notification batch.
+        if (Request.ContentLength > 1_000_000)
+            return StatusCode(StatusCodes.Status413PayloadTooLarge);
 
         using var reader = new StreamReader(Request.Body);
         var body = await reader.ReadToEndAsync();
@@ -158,9 +162,9 @@ public class OutlookController : ControllerBase
         if (string.IsNullOrWhiteSpace(body))
             return Ok();
 
-        await _webhookService.HandleNotificationAsync(body);
-
-        return Ok();
+        // Answer immediately; the subscription and clientState are verified when the queued body is processed.
+        // A full queue returns 503 so Graph retries the delivery later.
+        return queue.TryEnqueue(body) ? Accepted() : StatusCode(StatusCodes.Status503ServiceUnavailable);
     }
 
     [HttpPost("reconcile")]

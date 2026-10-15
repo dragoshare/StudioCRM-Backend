@@ -188,6 +188,8 @@ builder.Services.AddHttpClient<IOutlookWebhookService, OutlookWebhookService>();
 builder.Services.AddHttpClient<IOutlookTokenService, OutlookTokenService>();
 
 builder.Services.AddHostedService<OutlookSubscriptionRenewalWorker>();
+builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookWebhookQueue>();
+builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookWebhookWorker>();
 builder.Services.AddHostedService<SessionAutoCompletionWorker>();
 builder.Services.AddScoped<PeriodPackageService>();
 builder.Services.AddSingleton(TimeProvider.System);
