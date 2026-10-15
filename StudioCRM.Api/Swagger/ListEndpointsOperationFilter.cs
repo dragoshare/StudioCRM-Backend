@@ -36,6 +36,9 @@ public class ListEndpointsOperationFilter : IOperationFilter
         ["To"] = "Data wpłaty (PaymentDate) do, włącznie. ISO 8601; bez strefy traktowane jako UTC.",
         ["AmountMin"] = "Kwota brutto (Amount) od, włącznie, >= 0. Musi być <= AmountMax.",
         ["AmountMax"] = "Kwota brutto (Amount) do, włącznie, >= 0.",
+        ["Overpayment"] = "Alias HasOverpayment (nadpłata = BalanceCreditAmount > 0). Gdy podane oba, wygrywa HasOverpayment.",
+        ["LocationMatch"] = "payment (domyślnie): LocationId wpłaty. effective: LocationId wpłaty, a gdy go brak - główna lokalizacja klienta.",
+        ["Order"] = "asc lub desc; nadpisuje kierunek z Sort (np. sort=amount&order=desc = amountDesc).",
         ["Sort"] = "Dozwolone: " + ClientPaymentFilterDto.SortValues.Replace("|", ", ") +
             ". Domyślnie paymentDateDesc. Daty wg PaymentDate (nie CreatedAt); kwota z dogrywką PaymentDate malejąco, potem Id."
     };

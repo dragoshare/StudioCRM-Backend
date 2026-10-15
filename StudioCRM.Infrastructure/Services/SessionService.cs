@@ -917,6 +917,41 @@ public class SessionService : ISessionService
 
     public async Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter)
     {
+        var sessions = await (await BuildFilteredQueryAsync(filter))
+            .OrderBy(s => s.StartAt)
+            .ToListAsync();
+
+        return await MapSessionDtosAsync(sessions);
+    }
+
+    public async Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<SessionDto>> GetFilteredPageAsync(SessionFilterDto filter)
+    {
+        var page = filter.Page ?? 1;
+        var pageSize = filter.PageSize ?? 25;
+        if (page < 1 || page > 100000 || pageSize < 1 || pageSize > 100)
+            throw new InvalidOperationException("Page must be 1..100000 and PageSize 1..100.");
+        if (filter.Order is not null && filter.Order != "asc" && filter.Order != "desc")
+            throw new InvalidOperationException("Order must be asc or desc.");
+
+        var query = await BuildFilteredQueryAsync(filter);
+        var totalCount = await query.CountAsync();
+        var ordered = filter.Order == "asc"
+            ? query.OrderBy(s => s.StartAt).ThenBy(s => s.Id)
+            : query.OrderByDescending(s => s.StartAt).ThenByDescending(s => s.Id);
+        var sessions = await ordered.Skip((page - 1) * pageSize).Take(pageSize).ToListAsync();
+
+        return new StudioCRM.Application.DTOs.Billing.PagedResultDto<SessionDto>
+        {
+            Page = page,
+            PageSize = pageSize,
+            TotalCount = totalCount,
+            TotalPages = totalCount == 0 ? 0 : (int)Math.Ceiling(totalCount / (decimal)pageSize),
+            Items = await MapSessionDtosAsync(sessions)
+        };
+    }
+
+    private async Task<IQueryable<Session>> BuildFilteredQueryAsync(SessionFilterDto filter)
+    {
         var query = await ApplySessionVisibilityAsync(BaseQuery());
 
         if (filter.TrainerId.HasValue)
@@ -943,11 +978,7 @@ public class SessionService : ISessionService
             query = query.Where(s => s.StartAt <= to);
         }
 
-        var sessions = await query
-            .OrderBy(s => s.StartAt)
-            .ToListAsync();
-
-        return await MapSessionDtosAsync(sessions);
+        return query;
     }
 
     public async Task CountSessionFromPackageAsync(CountSessionFromPackageRequest request)

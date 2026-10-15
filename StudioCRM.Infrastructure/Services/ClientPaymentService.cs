@@ -988,6 +988,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
 
         var paymentEntities = await _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
+            .Include(p => p.Client).ThenInclude(c => c.Location)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1048,6 +1049,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     {
         return _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
+            .Include(p => p.Client).ThenInclude(c => c.Location)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1070,7 +1072,12 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             query = query.Where(p => p.ClientId == filter.ClientId.Value);
 
         if (filter.LocationId.HasValue)
-            query = query.Where(p => p.LocationId == filter.LocationId.Value);
+        {
+            var locationId = filter.LocationId.Value;
+            query = filter.LocationMatch == "effective"
+                ? query.Where(p => p.LocationId == locationId || (p.LocationId == null && p.Client.LocationId == locationId))
+                : query.Where(p => p.LocationId == locationId);
+        }
 
         if (filter.LegalEntityId.HasValue)
             query = query.Where(p => p.LegalEntityId == filter.LegalEntityId.Value);
@@ -1111,9 +1118,10 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (filter.AmountMax.HasValue)
             query = query.Where(p => p.Amount <= filter.AmountMax.Value);
 
-        if (filter.HasOverpayment.HasValue)
+        var hasOverpayment = filter.HasOverpayment ?? filter.Overpayment;
+        if (hasOverpayment.HasValue)
         {
-            query = filter.HasOverpayment.Value
+            query = hasOverpayment.Value
                 ? query.Where(p => p.BalanceCreditAmount > 0)
                 : query.Where(p => p.BalanceCreditAmount <= 0);
         }
@@ -1138,7 +1146,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         var pageSize = NormalizePageSize(filter.PageSize);
 
         var totalCount = await query.CountAsync();
-        var payments = await OrderPayments(query, filter.Sort)
+        var payments = await OrderPayments(query, filter.ResolveSort())
             .Skip((page - 1) * pageSize)
             .Take(pageSize)
             .ToListAsync();
@@ -1199,6 +1207,7 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
     {
         var payment = await _context.ClientPayments.IncludingOrganizationArchive(_context.OrganizationId)
             .Include(p => p.Client).ThenInclude(c => c.Trainer)
+            .Include(p => p.Client).ThenInclude(c => c.Location)
             .Include(p => p.ClientPackage)
             .Include(p => p.Location)
             .Include(p => p.LegalEntity)
@@ -1223,6 +1232,9 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             PackageName = payment.ClientPackage != null ? payment.ClientPackage.Name : null,
             LocationId = payment.LocationId,
             LocationName = payment.Location?.Name,
+            EffectiveLocationId = payment.LocationId ?? payment.Client.LocationId,
+            EffectiveLocationName = payment.LocationId.HasValue ? payment.Location?.Name : payment.Client.Location?.Name,
+            EffectiveLocationSource = payment.LocationId.HasValue ? "Payment" : "ClientHome",
             LegalEntityId = payment.LegalEntityId,
             LegalEntityName = payment.LegalEntity?.Name,
             PaymentProviderAccountId = payment.PaymentProviderAccountId,
@@ -1230,6 +1242,12 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
             Amount = payment.Amount,
             AppliedToPackageAmount = payment.AppliedToPackageAmount,
             BalanceCreditAmount = payment.BalanceCreditAmount,
+            OverpaymentAmount = payment.BalanceCreditAmount,
+            HasOverpayment = payment.BalanceCreditAmount > 0,
+            PackageTotalPrice = payment.ClientPackage?.TotalPrice,
+            PackageAmountPaid = payment.ClientPackage?.AmountPaid,
+            PackageAmountDue = payment.ClientPackage == null ? null : Math.Max(0, payment.ClientPackage.TotalPrice - payment.ClientPackage.AmountPaid),
+            PackagePaymentStatus = payment.ClientPackage?.PaymentStatus.ToString(),
             Currency = payment.Currency,
             Method = payment.Method,
             Status = payment.Status,

@@ -7,6 +7,7 @@ public interface ISessionService
     Task<List<SessionDto>> GetAllAsync();
 
     Task<List<SessionDto>> GetFilteredAsync(SessionFilterDto filter);
+    Task<StudioCRM.Application.DTOs.Billing.PagedResultDto<SessionDto>> GetFilteredPageAsync(SessionFilterDto filter);
 
     Task<SessionDto?> GetByIdAsync(int id);
 

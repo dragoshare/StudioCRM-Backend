@@ -94,10 +94,21 @@ public class BillingController : ControllerBase
     }
 
     [HttpPost("payments")]
-    public async Task<ActionResult<ClientPaymentDto>> CreateStaffPayment(CreateClientPaymentRequest request)
+    public async Task<ActionResult<ClientPaymentDto>> CreateStaffPayment(
+        CreateClientPaymentRequest request,
+        [FromHeader(Name = "Idempotency-Key")] string? idempotencyKey = null)
     {
         return await HandleAsync<ClientPaymentDto>(async () =>
         {
+            // Header and body field are equivalent; when both are sent they must match.
+            if (!string.IsNullOrWhiteSpace(idempotencyKey))
+            {
+                if (!Guid.TryParse(idempotencyKey, out var headerKey) || headerKey == Guid.Empty)
+                    throw new InvalidOperationException("Idempotency-Key must be a non-empty UUID.");
+                if (request.IdempotencyKey.HasValue && request.IdempotencyKey != headerKey)
+                    throw new InvalidOperationException("Idempotency-Key header and body idempotencyKey differ.");
+                request.IdempotencyKey = headerKey;
+            }
             var payment = await _clientPaymentService.CreatePaymentAsStaffAsync(request);
             return CreatedAtAction(nameof(GetClientBilling), new { clientId = payment.ClientId }, payment);
         });

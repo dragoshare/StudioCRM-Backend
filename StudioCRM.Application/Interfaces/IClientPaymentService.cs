@@ -17,6 +17,7 @@ public interface IClientPaymentService
     Task<List<ClientPaymentDto>> GetPendingReceiptsAsync();
     Task<ClientPaymentDto> RequestPaymentAsClientAsync(CreateClientPaymentRequest request);
     Task<ClientPaymentDto> CreatePaymentAsStaffAsync(CreateClientPaymentRequest request);
+    Task<PaymentOperationStatusDto?> GetStaffPaymentOperationAsync(Guid key);
     Task<ClientPaymentDto> UpdatePaymentDateAsync(int paymentId, UpdatePaymentDateRequest request);
     Task<ClientPaymentDto> ConfirmAsync(int paymentId);
     Task<ClientPaymentDto> UpdateProviderSettlementAsync(int paymentId, UpdatePaymentProviderSettlementRequest request);

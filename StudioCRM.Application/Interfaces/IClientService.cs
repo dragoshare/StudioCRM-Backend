@@ -24,6 +24,8 @@ public interface IClientService
     Task<bool> DeletePermanentlyAsync(int id);
     Task<bool> AssignTrainerAsync(int id, SetClientTrainerRequest request);
     Task<List<ClientDto>> GetFilteredAsync(ClientFilterDto filter);
+    Task<ClientPageDto> GetPageAsync(ClientPageFilter filter);
+    Task<OwnerFilterOptionsDto> GetFilterOptionsAsync(OwnerFilterOptionsQuery request);
     Task<bool> RestoreAsync(int id);
     Task<List<ClientDto>> GetDeletedAsync();
     Task<List<ClientLegalConsentDto>> GetLegalConsentsAsync(int clientId);

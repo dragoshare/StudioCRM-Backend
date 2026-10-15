@@ -42,10 +42,14 @@ public class SessionsController : ControllerBase
     }
 
     [HttpGet("filter")]
-    public async Task<ActionResult<List<SessionDto>>> Filter([FromQuery] SessionFilterDto filter)
+    [ProducesResponseType(typeof(List<SessionDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(StudioCRM.Application.DTOs.Billing.PagedResultDto<SessionDto>), StatusCodes.Status200OK)]
+    public async Task<ActionResult<object>> Filter([FromQuery] SessionFilterDto filter)
     {
-        return await HandleAsync<List<SessionDto>>(async () =>
-            Ok(await _sessionService.GetFilteredAsync(filter)));
+        // Page/PageSize switch to the paged history envelope; without them the schedule list stays unchanged.
+        return await HandleAsync<object>(async () => filter.IsPaged
+            ? Ok(await _sessionService.GetFilteredPageAsync(filter))
+            : Ok(await _sessionService.GetFilteredAsync(filter)));
     }
 
     [HttpPost]

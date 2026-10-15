@@ -14,6 +14,12 @@ public class ClientPaymentDto
 
     public int? LocationId { get; set; }
     public string? LocationName { get; set; }
+    // Payment location, or the client's home location when the payment has none (legacy/imported rows).
+    public int? EffectiveLocationId { get; set; }
+    public string? EffectiveLocationName { get; set; }
+    // Payment | ClientHome
+    public string EffectiveLocationSource { get; set; } = "Payment";
+
     public int? LegalEntityId { get; set; }
     public string? LegalEntityName { get; set; }
     public int? PaymentProviderAccountId { get; set; }
@@ -23,6 +29,15 @@ public class ClientPaymentDto
     public decimal AppliedToPackageAmount { get; set; }
     public decimal BalanceCreditAmount { get; set; }
     public string Currency { get; set; } = "PLN";
+    // Same value as BalanceCreditAmount (part of the payment credited to the client's balance).
+    public decimal OverpaymentAmount { get; set; }
+    public bool HasOverpayment { get; set; }
+
+    // Current state of the linked client package (null when the payment has no package).
+    public decimal? PackageTotalPrice { get; set; }
+    public decimal? PackageAmountPaid { get; set; }
+    public decimal? PackageAmountDue { get; set; }
+    public string? PackagePaymentStatus { get; set; }
 
     public PaymentMethod Method { get; set; }
     public ClientPaymentStatus Status { get; set; }

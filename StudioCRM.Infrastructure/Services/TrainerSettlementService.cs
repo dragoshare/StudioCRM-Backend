@@ -50,22 +50,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 s.Year == year &&
                 s.Month == month);
 
-        var sessions = await _context.Sessions
-            .AsNoTracking()
-            .Where(s =>
-                s.TrainerId == trainerId &&
-                s.Status == "Completed" &&
-                (!locationId.HasValue || s.LocationId == locationId.Value) &&
-                s.StartAt >= from &&
-                s.StartAt < to)
-            .OrderBy(s => s.StartAt)
-            .Select(s => new Session { Id = s.Id, Title = s.Title, TrainerId = s.TrainerId,
-                StartAt = s.StartAt, EndAt = s.EndAt, LocationId = s.LocationId,
-                Location = new Location { Id = s.LocationId, Name = s.Location.Name },
-                ActualSessionType = s.ActualSessionType, PlannedSessionType = s.PlannedSessionType,
-                ActualParticipantsCount = s.ActualParticipantsCount ?? s.Participants.Count,
-                IsPubliclyBookable = s.IsPubliclyBookable })
-            .ToListAsync();
+        var sessions = await LoadCompletedSessionsAsync([trainerId], from, to, locationId);
 
         var rates = await _context.TrainerRates
             .Where(r => r.TrainerId == trainerId)
@@ -102,6 +87,112 @@ public class TrainerSettlementService : ITrainerSettlementService
             Items = contractedItems,
             NonContractedItems = nonContractedItems
         };
+    }
+
+    public async Task<TrainerSettlementListDto> GetMonthlySettlementsAsync(TrainerSettlementListFilter filter)
+    {
+        if (!_currentUser.IsOwner)
+            throw new UnauthorizedAccessException("Only owner can list trainer settlements.");
+        filter.Validate();
+
+        var (year, month) = (filter.Year, filter.Month);
+        var from = GetStudioMonthStartUtc(year, month);
+        var to = GetStudioMonthStartUtc(month == 12 ? year + 1 : year, month == 12 ? 1 : month + 1);
+        var locationId = filter.LocationId;
+
+        var trainersQuery = _context.Trainers.AsNoTracking();
+        if (locationId.HasValue)
+            trainersQuery = trainersQuery.Where(t =>
+                t.TrainerLocations.Any(l => l.LocationId == locationId.Value) ||
+                t.Sessions.Any(s => s.Status == "Completed" && s.LocationId == locationId.Value && s.StartAt >= from && s.StartAt < to));
+        if (!string.IsNullOrWhiteSpace(filter.Search))
+        {
+            var term = filter.Search.Trim().ToLower();
+            trainersQuery = trainersQuery.Where(t =>
+                (t.User.FirstName + " " + t.User.LastName).ToLower().Contains(term) || t.User.Email.ToLower().Contains(term));
+        }
+
+        var trainers = await trainersQuery
+            .OrderBy(t => t.User.LastName).ThenBy(t => t.User.FirstName).ThenBy(t => t.Id)
+            .Select(t => new { t.Id, t.User.FirstName, t.User.LastName })
+            .ToListAsync();
+        var ids = trainers.Select(t => t.Id).ToArray();
+
+        // One query per data set for the whole filtered list; totals reuse the single-trainer rules.
+        var sessions = (await LoadCompletedSessionsAsync(ids, from, to, locationId)).ToLookup(s => s.TrainerId);
+        var rates = (await _context.TrainerRates.AsNoTracking().Where(r => ids.Contains(r.TrainerId)).ToListAsync()).ToLookup(r => r.TrainerId);
+        var contracts = (await _context.TrainerContracts.AsNoTracking()
+            .Include(c => c.ContractLocations).ThenInclude(cl => cl.Location)
+            .Where(c => ids.Contains(c.TrainerId) && c.IsActive && c.ValidFrom < to && (c.ValidTo == null || c.ValidTo >= from))
+            .OrderByDescending(c => c.ValidFrom).ThenByDescending(c => c.Id)
+            .ToListAsync()).ToLookup(c => c.TrainerId);
+        var settlements = await _context.TrainerMonthlySettlements.AsNoTracking()
+            .Where(s => ids.Contains(s.TrainerId) && s.Year == year && s.Month == month)
+            .ToDictionaryAsync(s => s.TrainerId);
+
+        var items = trainers.Select(t =>
+        {
+            var built = BuildSettlementItems(sessions[t.Id].ToList(), rates[t.Id].ToList(), contracts[t.Id].ToList());
+            var contracted = built.Where(i => i.IsCoveredByContract).ToList();
+            var nonContracted = built.Where(i => !i.IsCoveredByContract).ToList();
+            var saved = settlements.GetValueOrDefault(t.Id);
+            return new TrainerSettlementListItemDto
+            {
+                TrainerId = t.Id,
+                TrainerFullName = $"{t.FirstName} {t.LastName}",
+                TotalHours = contracted.Sum(i => i.Hours),
+                TotalSessions = contracted.Count,
+                TotalAmount = contracted.Sum(i => i.Amount),
+                NonContractedTotalHours = nonContracted.Sum(i => i.Hours),
+                NonContractedTotalSessions = nonContracted.Count,
+                IsPaid = saved?.IsPaid ?? false,
+                PaidAt = saved?.PaidAt.HasValue == true ? ToStudioDisplayDateTime(saved.PaidAt.Value) : null
+            };
+        }).ToList();
+
+        var totalAmount = items.Sum(i => i.TotalAmount);
+        var paidAmount = items.Where(i => i.IsPaid).Sum(i => i.TotalAmount);
+        return new TrainerSettlementListDto
+        {
+            Year = year,
+            Month = month,
+            LocationId = locationId,
+            Items = items.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize).ToList(),
+            Page = filter.Page,
+            PageSize = filter.PageSize,
+            TotalCount = items.Count,
+            TotalPages = items.Count == 0 ? 0 : (int)Math.Ceiling(items.Count / (decimal)filter.PageSize),
+            Summary = new TrainerSettlementListSummaryDto
+            {
+                TotalAmount = totalAmount,
+                PaidAmount = paidAmount,
+                UnpaidAmount = totalAmount - paidAmount,
+                TrainersCount = items.Count,
+                PaidTrainersCount = items.Count(i => i.IsPaid)
+            },
+            AsOf = DateTime.UtcNow,
+            TimeZone = "Europe/Warsaw"
+        };
+    }
+
+    private async Task<List<Session>> LoadCompletedSessionsAsync(int[] trainerIds, DateTime from, DateTime to, int? locationId)
+    {
+        return await _context.Sessions
+            .AsNoTracking()
+            .Where(s =>
+                trainerIds.Contains(s.TrainerId) &&
+                s.Status == "Completed" &&
+                (!locationId.HasValue || s.LocationId == locationId.Value) &&
+                s.StartAt >= from &&
+                s.StartAt < to)
+            .OrderBy(s => s.StartAt)
+            .Select(s => new Session { Id = s.Id, Title = s.Title, TrainerId = s.TrainerId,
+                StartAt = s.StartAt, EndAt = s.EndAt, LocationId = s.LocationId,
+                Location = new Location { Id = s.LocationId, Name = s.Location.Name },
+                ActualSessionType = s.ActualSessionType, PlannedSessionType = s.PlannedSessionType,
+                ActualParticipantsCount = s.ActualParticipantsCount ?? s.Participants.Count,
+                IsPubliclyBookable = s.IsPubliclyBookable })
+            .ToListAsync();
     }
 
     public async Task<TrainerMonthlySettlementDto?> MarkAsPaidAsync(

@@ -79,13 +79,41 @@ public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserS
             .Select(e => new { e.Id, e.SessionId, e.ClientId, e.ClientPackageId, e.Session.Status, e.Session.StartAt,
                 e.ClientPackage.ClosureDisposition, e.ClientPackage.ValidUntil, e.ClientPackage.PaymentStatus,
                 Due = Math.Max(0, e.ClientPackage.TotalPrice - e.ClientPackage.AmountPaid),
-                Booked = db.SessionParticipants.Any(p => p.SessionId == e.SessionId && p.ClientId == e.ClientId && p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate") }).ToListAsync();
+                Booked = db.SessionParticipants.Any(p => p.SessionId == e.SessionId && p.ClientId == e.ClientId && p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"),
+                PackageName = e.ClientPackage.Name, e.ClientPackage.TotalPrice, e.ClientPackage.AmountPaid, PackageActive = e.ClientPackage.IsActive,
+                e.ClientPackage.TotalSessions, e.ClientPackage.UsedSessions,
+                Participant = db.SessionParticipants.Where(p => p.SessionId == e.SessionId && p.ClientId == e.ClientId)
+                    .OrderByDescending(p => p.Id).Select(p => new { p.Id, p.AttendanceStatus }).FirstOrDefault() }).ToListAsync();
+        // Separate read so archived clients keep their rows (Client has a soft-delete query filter).
+        var clientIds = rows.Select(r => r.ClientId).Distinct().ToArray();
+        var clients = await db.Clients.IncludingOrganizationArchive(db.OrganizationId).AsNoTracking().Where(c => clientIds.Contains(c.Id))
+            .Select(c => new { c.Id, Name = c.FirstName + " " + c.LastName, c.Email, c.PhoneNumber, c.IsDeleted }).ToDictionaryAsync(c => c.Id);
         return new() { Page = page, PageSize = pageSize, TotalCount = count, TotalPages = (int)Math.Ceiling(count / (double)pageSize),
-            Items = rows.Select(e => new GroupEnrollmentDto(e.Id, e.SessionId, e.ClientId, e.ClientPackageId,
-                e.Booked ? "Booked" : e.Status != "Planned" || e.StartAt <= DateTime.UtcNow ? "Unavailable" :
-                e.ClosureDisposition != null || e.ValidUntil < e.StartAt ? "PackageUnavailable" :
-                e.PaymentStatus != PaymentStatus.Paid ? "AwaitingPayment" : "ReadyToBook", e.Due, e.Booked)).ToList() };
+            Items = rows.Select(e =>
+            {
+                var status = e.Booked ? "Booked" : e.Status != "Planned" || e.StartAt <= DateTime.UtcNow ? "Unavailable" :
+                    e.ClosureDisposition != null || e.ValidUntil < e.StartAt ? "PackageUnavailable" :
+                    e.PaymentStatus != PaymentStatus.Paid ? "AwaitingPayment" : "ReadyToBook";
+                return new GroupEnrollmentDto(e.Id, e.SessionId, e.ClientId, e.ClientPackageId, status, e.Due, e.Booked)
+                {
+                    ClientName = clients.GetValueOrDefault(e.ClientId)?.Name, ClientEmail = clients.GetValueOrDefault(e.ClientId)?.Email,
+                    ClientPhone = clients.GetValueOrDefault(e.ClientId)?.PhoneNumber, ClientIsArchived = clients.GetValueOrDefault(e.ClientId)?.IsDeleted,
+                    PackageName = e.PackageName, PackageTotalPrice = e.TotalPrice, PackageAmountPaid = e.AmountPaid,
+                    PackagePaymentStatus = e.PaymentStatus.ToString(), PackageValidUntil = e.ValidUntil, PackageIsActive = e.PackageActive,
+                    PackageTotalEntries = e.TotalSessions, PackageUsedEntries = e.UsedSessions,
+                    SessionParticipantId = e.Participant?.Id, AttendanceStatus = e.Participant?.AttendanceStatus,
+                    AllowedActions = AllowedActions(status, e.Due, clients.GetValueOrDefault(e.ClientId)?.IsDeleted ?? true)
+                };
+            }).ToList() };
     }
+
+    // Mirrors ConfirmAsync (only ReadyToBook can be confirmed); a payment is recorded through the billing endpoint.
+    private static List<string> AllowedActions(string status, decimal due, bool clientArchived) => clientArchived ? [] : status switch
+    {
+        "ReadyToBook" => ["Confirm"],
+        "AwaitingPayment" when due > 0 => ["RecordPayment"],
+        _ => []
+    };
 
     private async Task<GroupEnrollmentRequest> AccessibleAsync(int id)
     {

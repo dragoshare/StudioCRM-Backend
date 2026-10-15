@@ -25,11 +25,27 @@ public class ClientPaymentFilterDto : IValidatableObject
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? AmountMax { get; set; }
     public bool? HasOverpayment { get; set; }
+    // Alias of HasOverpayment for the Owner panel; HasOverpayment wins when both are sent.
+    public bool? Overpayment { get; set; }
+    // payment (default): ClientPayment.LocationId only. effective: payment location, or client's home location when the payment has none.
+    [RegularExpression("^(payment|effective)$")]
+    public string? LocationMatch { get; set; }
+    // Optional direction for Sort (asc|desc); Sort alone keeps its documented meaning.
+    [RegularExpression("^(asc|desc)$")]
+    public string? Order { get; set; }
     [RegularExpression("^(" + SortValues + ")$")]
     public string? Sort { get; set; }
     // Out-of-range values are clamped by the service (Page 1..100000, PageSize 1..100).
     public int Page { get; set; } = 1;
     public int PageSize { get; set; } = 25;
+
+    public string ResolveSort()
+    {
+        var sort = Sort ?? "paymentDateDesc";
+        if (Order is null) return sort;
+        var field = sort.EndsWith("Desc") ? sort[..^4] : sort;
+        return Order == "desc" ? field + "Desc" : field;
+    }
 
     public void Validate() => Validator.ValidateObject(this, new ValidationContext(this), true);
 

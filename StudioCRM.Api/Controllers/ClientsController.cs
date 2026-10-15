@@ -32,9 +32,14 @@ public class ClientsController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<ClientDto>>> GetAll()
+    [ProducesResponseType(typeof(List<ClientDto>), StatusCodes.Status200OK)]
+    [ProducesResponseType(typeof(ClientPageDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetAll([FromQuery] ClientPageFilter filter)
     {
-        return Ok(await _clientService.GetAllAsync());
+        // Without page/pageSize the legacy full array is returned unchanged; with them, the paged envelope.
+        if (!Request.Query.ContainsKey("page") && !Request.Query.ContainsKey("pageSize"))
+            return Ok(await _clientService.GetAllAsync());
+        return Ok(await _clientService.GetPageAsync(filter));
     }
 
     [HttpGet("{id:int}")]

@@ -23,10 +23,17 @@ public partial class GroupEnrollmentService
         var catalog = await db.Packages.AsNoTracking().Where(p => p.IsActive && p.BillingType == SessionBillingType.Group &&
             (p.LocationId == null || p.LocationId == session.LocationId) && p.SessionsLimit > 0 && p.Price >= 0 && p.DurationDays > 0)
             .OrderBy(p => p.Name).ThenBy(p => p.Id)
-            .Select(p => new { p.Id, p.Name, p.Price, p.Currency, p.SessionsLimit, p.DurationDays }).ToListAsync();
+            .Select(p => new { p.Id, p.Name, p.Price, p.Currency, p.SessionsLimit, p.DurationDays,
+                p.Description, p.SessionsPerWeek, p.ParticipantsCount, p.LocationId, LocationName = p.Location != null ? p.Location.Name : null,
+                p.IsPubliclyAvailable }).ToListAsync();
         var offers = catalog.Select(p => new GroupPackageOfferDto(p.Id, p.Name, p.Price, p.Currency, p.SessionsLimit, p.DurationDays,
             (session.StartAt - (p.Price == 0 ? now : now.Date)).TotalDays <= p.DurationDays,
-            (session.StartAt - (p.Price == 0 ? now : now.Date)).TotalDays <= p.DurationDays ? [] : ["ValidityTooShortFromToday"])).ToList();
+            (session.StartAt - (p.Price == 0 ? now : now.Date)).TotalDays <= p.DurationDays ? [] : ["ValidityTooShortFromToday"])
+        {
+            Description = p.Description, SessionsPerWeek = p.SessionsPerWeek, ParticipantsCount = p.ParticipantsCount,
+            LocationId = p.LocationId, LocationName = p.LocationName, IsPubliclyAvailable = p.IsPubliclyAvailable,
+            UnitPrice = decimal.Round(p.Price / p.SessionsLimit, 2)
+        }).ToList();
         var owned = await db.ClientPackages.AsNoTracking().Where(p => p.ClientId == clientId && p.ExpectedBillingType == SessionBillingType.Group)
             .OrderBy(p => p.ValidUntil).ThenBy(p => p.Id)
             .Select(p => new { Package = p, Reserved = db.SessionParticipants.Where(x => x.ClientPackageId == p.Id &&
