@@ -28,7 +28,22 @@ public sealed class RequestTimingMiddleware
         await _next(context);
 
         var elapsed = stopwatch.ElapsedMilliseconds;
-        if (elapsed >= SlowRequestMs && context.Request.Path.StartsWithSegments("/api"))
+        if (!context.Request.Path.StartsWithSegments("/api"))
+            return;
+
+        // A browser that gave up waiting (frontend timeout, closed tab) still lets the server finish the save,
+        // so "failed" in the UI can mean the record was created anyway.
+        if (context.RequestAborted.IsCancellationRequested)
+        {
+            _logger.LogWarning("Client disconnected before response {Method} {Path} -> {StatusCode} after {ElapsedMs} ms",
+                context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, elapsed);
+        }
+        else if (context.Response.StatusCode >= 400 && !HttpMethods.IsGet(context.Request.Method))
+        {
+            _logger.LogWarning("Failed request {Method} {Path} -> {StatusCode} in {ElapsedMs} ms",
+                context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, elapsed);
+        }
+        else if (elapsed >= SlowRequestMs)
         {
             _logger.LogWarning("Slow request {Method} {Path} -> {StatusCode} in {ElapsedMs} ms",
                 context.Request.Method, context.Request.Path.Value, context.Response.StatusCode, elapsed);

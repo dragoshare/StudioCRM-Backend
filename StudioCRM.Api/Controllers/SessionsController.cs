@@ -11,10 +11,12 @@ namespace StudioCRM.Api.Controllers;
 public class SessionsController : ControllerBase
 {
     private readonly ISessionService _sessionService;
+    private readonly ILogger<SessionsController>? _logger;
 
-    public SessionsController(ISessionService sessionService)
+    public SessionsController(ISessionService sessionService, ILogger<SessionsController>? logger = null)
     {
         _sessionService = sessionService;
+        _logger = logger;
     }
 
     [HttpGet]
@@ -156,6 +158,8 @@ public class SessionsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            _logger?.LogWarning("Session request {Method} {Path} rejected: {Message}",
+                Request.Method, Request.Path.Value, ex.Message);
             return BadRequest(new { message = ex.Message });
         }
     }
@@ -168,6 +172,8 @@ public class SessionsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
+            _logger?.LogWarning("Session request {Method} {Path} rejected: {Message}",
+                Request.Method, Request.Path.Value, ex.Message);
             return BadRequest(new { message = ex.Message });
         }
     }
