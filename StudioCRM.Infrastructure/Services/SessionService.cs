@@ -1214,7 +1214,11 @@ public class SessionService : ISessionService
         var isGroupSession = isPubliclyBookable || IsGroupSessionType(plannedSessionType);
         var normalizedPublicCapacity = NormalizePublicCapacity(isPubliclyBookable, publicCapacity);
 
-        if (!isGroupSession && !participants.Any())
+        var isConsultation = ConsultationSessions.IsConsultation(plannedSessionType);
+        if (isConsultation && (isPubliclyBookable || participants.Any()))
+            throw new InvalidOperationException("A consultation has no participants and cannot be publicly bookable.");
+
+        if (!isGroupSession && !isConsultation && !participants.Any())
             throw new InvalidOperationException("At least one participant is required.");
 
         var clientIds = participants.Select(p => p.ClientId).ToList();
@@ -1417,6 +1421,9 @@ public class SessionService : ISessionService
 
     private static CompleteSessionDto BuildCompletionRequest(CreateSessionDto request)
     {
+        if (ConsultationSessions.IsConsultation(request.PlannedSessionType))
+            return new CompleteSessionDto { ActualSessionType = ConsultationSessions.SessionType };
+
         var actualSessionType = ResolveActualSessionTypeForCompletion(request);
 
         return new CompleteSessionDto
@@ -1561,6 +1568,9 @@ public class SessionService : ISessionService
     {
         if (!string.IsNullOrWhiteSpace(requestedTitle))
             return requestedTitle.Trim();
+
+        if (ConsultationSessions.IsConsultation(plannedSessionType))
+            return string.IsNullOrWhiteSpace(currentTitle) ? ConsultationSessions.DefaultTitle : currentTitle;
 
         if (!SessionTitleBuilder.ShouldDeriveFromParticipants(isPubliclyBookable, plannedSessionType))
         {

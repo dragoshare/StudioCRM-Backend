@@ -5,6 +5,7 @@ using StudioCRM.Application.Interfaces;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Common;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -89,6 +90,9 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
 
         if (session is null || FinishedStatuses.Contains(session.Status))
             return null;
+
+        if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
+            return new CompleteSessionDto { ActualSessionType = ConsultationSessions.SessionType };
 
         var billableParticipants = session.Participants
             .Where(IsAutoCompletableParticipant)

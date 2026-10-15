@@ -228,6 +228,23 @@ public class SessionParticipantService : ISessionParticipantService
 
         // The automatic worker must not turn a concurrently completed session into a correction.
         if (skipUserAccessCheck && session.Status == "Completed") return true;
+
+        if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
+        {
+            // Trainer work time only: no clients, entries or balance; the settlement pays it at the hourly rate.
+            if (request.Participants.Count > 0 || session.Participants.Count > 0)
+                throw new InvalidOperationException("A consultation has no participants.");
+            if (session.Status == "Cancelled")
+                throw new InvalidOperationException("Cancelled session cannot be completed.");
+            await EnsureSessionIsNotLockedByPaidSettlementAsync(session.TrainerId, session.StartAt);
+            session.Status = "Completed";
+            session.ActualSessionType = ConsultationSessions.SessionType;
+            session.ActualParticipantsCount = 0;
+            session.CompletedAt ??= DateTime.UtcNow;
+            session.UpdatedAt = DateTime.UtcNow;
+            await _context.SaveChangesAsync();
+            return true;
+        }
         if (request.Participants.Select(p => p.ClientId).Distinct().Count() != request.Participants.Count)
             throw new InvalidOperationException("Duplicate participants are not allowed.");
         if (!skipUserAccessCheck)

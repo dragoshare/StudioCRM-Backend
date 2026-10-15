@@ -454,7 +454,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
 
         // Public reservations are managed by the booking API, not the Outlook attendee list.
-        if (!session.IsPubliclyBookable) await SyncSessionParticipantsFromOutlookAsync(session, evt);
+        if (!session.IsPubliclyBookable && !ConsultationSessions.IsConsultation(session.PlannedSessionType))
+            await SyncSessionParticipantsFromOutlookAsync(session, evt);
 
         var newTitle = session.Title;
         if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(

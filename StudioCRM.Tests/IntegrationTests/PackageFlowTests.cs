@@ -81,6 +81,28 @@ public class PackageFlowTests
     }
 
     [PostgresFact]
+    public async Task ConsultationIsTrainerTimeWithoutClientsAndCompletesAutomatically()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (_, session, _, owner) = await Seed(db);
+        session.PlannedSessionType = StudioCRM.Application.Common.ConsultationSessions.SessionType;
+        session.Title = "Magdalena M";
+        session.StartAt = DateTime.UtcNow.AddHours(-2); session.EndAt = DateTime.UtcNow.AddHours(-1);
+        await db.SaveChangesAsync();
+
+        var worker = new SessionAutoCompletionService(db, Participants(db, owner), NullLogger<SessionAutoCompletionService>.Instance);
+        var result = await worker.CompleteFinishedSessionsAsync();
+
+        Assert.Equal(1, result.CompletedCount);
+        var saved = await db.Sessions.AsNoTracking().SingleAsync(s => s.Id == session.Id);
+        Assert.Equal("Completed", saved.Status);
+        Assert.Equal("Consultation", saved.ActualSessionType);
+        Assert.Equal("Magdalena M", saved.Title);
+        Assert.Empty(await db.SessionParticipants.ToListAsync());
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+    }
+
+    [PostgresFact]
     public Task ImportedRunningPackageKeepsOpeningEntries() => AssertOpeningEntriesKept(null);
 
     [PostgresFact]

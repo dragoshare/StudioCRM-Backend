@@ -90,8 +90,10 @@ public class OutlookEventMapperService
             return (null, warnings);
         }
         var ownerCalendar = await OutlookImportAccess.IsOwnerAsync(_context, calendarIntegration.UserId);
+        // Trainer category + "Konsultacja": trainer work time without a client record (also when an owner books it).
+        var consultation = StudioCRM.Application.Common.ConsultationSessions.HasOutlookCategory(evt.CategoriesJson);
 
-        var attendeeEmails = ReadAttendeeEmails(evt.AttendeesJson)
+        var attendeeEmails = consultation ? new List<string>() : ReadAttendeeEmails(evt.AttendeesJson)
             .Select(NormalizeEmail)
             .Where(e =>
                 !string.IsNullOrWhiteSpace(e) &&
@@ -132,6 +134,9 @@ public class OutlookEventMapperService
 
             return (existingLink?.Session ?? evt.Session, warnings);
         }
+
+        if (consultation)
+            return await CreateConsultationAsync(evt, trainer, location, warnings);
 
         var matchingSession = await FindMatchingSessionAsync(evt, trainer, location, clients);
 
@@ -488,6 +493,52 @@ public class OutlookEventMapperService
     private static string NormalizeText(string? value)
     {
         return (value ?? string.Empty).Trim().ToLowerInvariant();
+    }
+
+    private async Task<(Session? Session, List<string> Warnings)> CreateConsultationAsync(
+        ExternalCalendarEvent evt, Trainer trainer, Location location, List<string> warnings)
+    {
+        var overlappingSession = await FindOverlappingSessionAsync(evt, trainer, location);
+        if (overlappingSession is not null)
+        {
+            warnings.Add($"Konsultacja nakłada się z sesją CRM #{overlappingSession.Id} tego trenera. Pominięto automatyczne tworzenie.");
+            await SaveWarningsAsync(evt, warnings);
+            return (null, warnings);
+        }
+
+        var session = new Session
+        {
+            Title = string.IsNullOrWhiteSpace(evt.Subject) ? StudioCRM.Application.Common.ConsultationSessions.DefaultTitle : evt.Subject.Trim(),
+            Note = evt.BodyPreview,
+            StartAt = evt.StartAt,
+            EndAt = evt.EndAt,
+            TrainerId = trainer.Id,
+            LocationId = location.Id,
+            Status = "Planned",
+            PlannedSessionType = StudioCRM.Application.Common.ConsultationSessions.SessionType,
+            OutlookCategoriesJson = evt.CategoriesJson,
+            OutlookCategoryColorsJson = evt.CategoryColorsJson,
+            PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson),
+            CreatedAt = DateTime.UtcNow,
+            UpdatedAt = DateTime.UtcNow,
+            CreatedBy = trainer.UserId
+        };
+        await _context.Sessions.AddAsync(session);
+        await _context.SaveChangesAsync();
+
+        await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
+        {
+            SessionId = session.Id,
+            CalendarIntegrationId = evt.CalendarIntegrationId,
+            Provider = evt.Provider,
+            ExternalEventId = evt.ExternalEventId,
+            SyncedAt = DateTime.UtcNow
+        });
+        evt.IsConvertedToSession = true;
+        evt.SessionId = session.Id;
+        await _context.SaveChangesAsync();
+        await SaveWarningsAsync(evt, warnings);
+        return (session, warnings);
     }
 
     private static string BuildSessionTitle(List<Client> clients)

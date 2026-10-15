@@ -11,6 +11,7 @@ public static class SessionTitleBuilder
         string? plannedSessionType)
     {
         return !isPubliclyBookable &&
+            !ConsultationSessions.IsConsultation(plannedSessionType) &&
             !string.Equals(
                 plannedSessionType,
                 nameof(StudioCRM.Domain.Enums.SessionBillingType.Group),
@@ -32,6 +33,10 @@ public static class SessionTitleBuilder
 
     public static string BuildOutlookSubject(Session session)
     {
+        // A consultation keeps the title written in Outlook (usually the prospect's name).
+        if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
+            return session.Title;
+
         if (!ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
             return $"ZAJĘCIA GRUPOWE: {session.Title} | {session.Location.Name}";
 
