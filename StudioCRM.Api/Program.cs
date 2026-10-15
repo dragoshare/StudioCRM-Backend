@@ -167,6 +167,8 @@ builder.Services.AddOptions();
 
 builder.Services.AddHttpClient<ResendClient>();
 
+builder.Services.Configure<SessionBalanceSettings>(builder.Configuration.GetSection("SessionBalance"));
+
 builder.Services.AddOptions<OutlookSettings>()
     .Bind(builder.Configuration.GetSection("Outlook"))
     .Validate(settings => !settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(settings.CalendarEmailDomain),

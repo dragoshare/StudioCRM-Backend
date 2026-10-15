@@ -7,6 +7,8 @@ using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
+using StudioCRM.Application.Settings;
+using Microsoft.Extensions.Options;
 
 namespace StudioCRM.Infrastructure.Services;
 
@@ -18,13 +20,17 @@ public class SessionParticipantService : ISessionParticipantService
     private readonly IOutlookCalendarSyncService _outlookCalendarSyncService;
     private readonly ILogger<SessionParticipantService> _logger;
 
+    private readonly SessionBalanceSettings _balanceSettings;
+
     public SessionParticipantService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         ISubscriptionService subscriptionService,
         IOutlookCalendarSyncService outlookCalendarSyncService,
-        ILogger<SessionParticipantService> logger)
+        ILogger<SessionParticipantService> logger,
+        IOptions<SessionBalanceSettings>? balanceSettings = null)
     {
+        _balanceSettings = balanceSettings?.Value ?? new SessionBalanceSettings();
         _context = context;
         _currentUser = currentUser;
         _subscriptionService = subscriptionService;
@@ -334,7 +340,8 @@ public class SessionParticipantService : ISessionParticipantService
                         throw new InvalidOperationException("Client package has no remaining sessions.");
 
                     var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
-                    var perSessionDifference = SessionBalancePolicy.PerSession(activeClientPackage, actualBillingType);
+                    var perSessionDifference = SessionBalancePolicy.PerSession(activeClientPackage, actualBillingType,
+                        _balanceSettings.OneToOneLevel(activeClientPackage.LocationId ?? session.LocationId));
                     var actualUnitPrice = expectedUnitPrice - perSessionDifference;
                     var balanceDifference = perSessionDifference * sessionsCharged;
 

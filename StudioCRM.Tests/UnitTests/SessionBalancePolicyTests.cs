@@ -31,6 +31,23 @@ public class SessionBalancePolicyTests
         Assert.Equal(0m, SessionBalancePolicy.PerSession(package, SessionBillingType.TwoToOne));
     }
 
+    [Theory]
+    // Niepołomice: 1:1 is 35 PLN above 1:2, the semi steps stay at 10 PLN.
+    [InlineData(1, 2, 35)] [InlineData(1, 3, 45)] [InlineData(1, 4, 55)]
+    [InlineData(2, 1, -35)] [InlineData(2, 3, 10)] [InlineData(4, 1, -55)]
+    public void LocationSpecificPersonalLevelChangesOnlyThePersonalGap(int planned, int actual, int amount)
+        => Assert.Equal(amount, SessionBalancePolicy.PerSession((SessionBillingType)planned, (SessionBillingType)actual, 55m));
+
+    [Fact]
+    public void SettingsFallBackToDefaultLevelForOtherLocations()
+    {
+        var settings = new StudioCRM.Application.Settings.SessionBalanceSettings
+        { OneToOneLevelByLocation = new() { ["3"] = 55m } };
+        Assert.Equal(55m, settings.OneToOneLevel(3));
+        Assert.Equal(SessionBalancePolicy.DefaultOneToOneLevel, settings.OneToOneLevel(4));
+        Assert.Equal(SessionBalancePolicy.DefaultOneToOneLevel, settings.OneToOneLevel(null));
+    }
+
     [Fact]
     public void GroupSessionsCannotBeExchangedForPersonalSessions()
         => Assert.Throws<InvalidOperationException>(() => SessionBalancePolicy.PerSession(SessionBillingType.Group, SessionBillingType.OneToOne));

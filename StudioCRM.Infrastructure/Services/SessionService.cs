@@ -10,6 +10,8 @@ using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
 using StudioCRM.Application.Common;
+using StudioCRM.Application.Settings;
+using Microsoft.Extensions.Options;
 namespace StudioCRM.Infrastructure.Services;
 
 public class SessionService : ISessionService
@@ -28,6 +30,8 @@ public class SessionService : ISessionService
     private readonly IStudioSettingsService _settingsService;
     private readonly ILogger<SessionService> _logger;
 
+    private readonly SessionBalanceSettings _balanceSettings;
+
     public SessionService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
@@ -35,8 +39,10 @@ public class SessionService : ISessionService
         ISessionParticipantService sessionParticipantService,
         IOutlookCalendarSyncService outlookCalendarSyncService,
         IStudioSettingsService settingsService,
-        ILogger<SessionService> logger)
+        ILogger<SessionService> logger,
+        IOptions<SessionBalanceSettings>? balanceSettings = null)
     {
+        _balanceSettings = balanceSettings?.Value ?? new SessionBalanceSettings();
         _context = context;
         _currentUser = currentUser;
         _subscriptionService = subscriptionService;
@@ -1023,7 +1029,8 @@ public class SessionService : ISessionService
             throw new InvalidOperationException("Client package has no remaining sessions.");
 
         var expectedUnitPrice = clientPackage.ExpectedUnitPrice;
-        var balanceDifference = SessionBalancePolicy.PerSession(clientPackage, request.ActualBillingType);
+        var balanceDifference = SessionBalancePolicy.PerSession(clientPackage, request.ActualBillingType,
+            _balanceSettings.OneToOneLevel(clientPackage.LocationId ?? participant.Session.LocationId));
         var actualUnitPrice = expectedUnitPrice - balanceDifference;
         if (request.ActualUnitPrice.HasValue && request.ActualUnitPrice.Value != actualUnitPrice)
             throw new InvalidOperationException("Session price must follow the fixed training-type adjustment.");
