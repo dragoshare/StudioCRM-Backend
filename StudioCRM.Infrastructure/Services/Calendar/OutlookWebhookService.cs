@@ -353,7 +353,8 @@ public class OutlookWebhookService : IOutlookWebhookService
                 externalEventId,
                 subjectValue);
         }
-        else if (!existing.IsConvertedToSession)
+        else if (!existing.IsConvertedToSession &&
+            !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]))
         {
             var mapper = new OutlookEventMapperService(_context);
             var (session, _) = await mapper.MapToSessionAsync(existing);
