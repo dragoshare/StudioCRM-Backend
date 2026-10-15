@@ -71,9 +71,8 @@ public class TrainerSettlementService : ITrainerSettlementService
             .Where(r => r.TrainerId == trainerId)
             .ToListAsync();
 
-        var contractCoverage = BuildContractLocationCoverage(
-            await GetContractsForPeriodAsync(trainerId, from, to));
-        var items = BuildSettlementItems(sessions, rates, contractCoverage);
+        var contracts = await GetContractsForPeriodAsync(trainerId, from, to);
+        var items = BuildSettlementItems(sessions, rates, contracts);
         var contractedItems = items
             .Where(i => i.IsCoveredByContract)
             .ToList();
@@ -229,11 +228,10 @@ public class TrainerSettlementService : ITrainerSettlementService
         var contracts = await GetContractsForPeriodAsync(trainerId, from, to);
         if (locationId.HasValue)
             contracts = contracts.Where(c => c.ContractLocations.Any(l => l.LocationId == locationId.Value)).ToList();
-        var contractCoverage = BuildContractLocationCoverage(contracts);
         var contractedSessions = sessions
-            .Where(s => contractCoverage.ContainsKey(s.LocationId))
+            .Where(s => ResolveCoveringContract(contracts, s) != null)
             .ToList();
-        var contract = ResolveDocumentContract(contracts, contractedSessions, contractCoverage);
+        var contract = ResolveDocumentContract(contracts, contractedSessions);
         var hourlyRate = ResolveHourlyRate(rates, from);
 
         if (hourlyRate <= 0 && contractedSessions.Count > 0)
@@ -299,8 +297,7 @@ public class TrainerSettlementService : ITrainerSettlementService
 
     private static TrainerContract ResolveDocumentContract(
         List<TrainerContract> contracts,
-        List<Session> contractedSessions,
-        Dictionary<int, TrainerContract> contractCoverage)
+        List<Session> contractedSessions)
     {
         if (contracts.Count == 0)
         {
@@ -314,7 +311,7 @@ public class TrainerSettlementService : ITrainerSettlementService
         }
 
         var contractsUsed = contractedSessions
-            .Select(s => contractCoverage[s.LocationId])
+            .Select(s => ResolveCoveringContract(contracts, s)!)
             .DistinctBy(c => c.Id)
             .ToList();
 
@@ -327,26 +324,21 @@ public class TrainerSettlementService : ITrainerSettlementService
         return contractsUsed[0];
     }
 
-    private static Dictionary<int, TrainerContract> BuildContractLocationCoverage(
-        List<TrainerContract> contracts)
+    // A session is contracted only when its studio date falls within the contract period (both ends inclusive)
+    // and its location is one of the contract locations. Contracts are ordered newest first.
+    internal static TrainerContract? ResolveCoveringContract(IEnumerable<TrainerContract> contracts, Session session)
     {
-        var result = new Dictionary<int, TrainerContract>();
-
-        foreach (var contract in contracts)
-        {
-            foreach (var contractLocation in contract.ContractLocations)
-            {
-                result.TryAdd(contractLocation.LocationId, contract);
-            }
-        }
-
-        return result;
+        var sessionDate = ToStudioDisplayDateTime(session.StartAt).Date;
+        return contracts.FirstOrDefault(c =>
+            c.ContractLocations.Any(l => l.LocationId == session.LocationId) &&
+            ToStudioDisplayDateTime(c.ValidFrom).Date <= sessionDate &&
+            (!c.ValidTo.HasValue || sessionDate <= ToStudioDisplayDateTime(c.ValidTo.Value).Date));
     }
 
     internal static List<TrainerSettlementItemDto> BuildSettlementItems(
         List<Session> sessions,
         List<TrainerRate> rates,
-        Dictionary<int, TrainerContract> contractCoverage)
+        List<TrainerContract> contracts)
     {
         var items = new List<TrainerSettlementItemDto>();
 
@@ -357,7 +349,8 @@ public class TrainerSettlementService : ITrainerSettlementService
             var groupRate = TrainerGroupRate.Resolve(session, sessionType, rates);
             var rate = groupRate ?? ResolveHourlyRate(rates, session.StartAt);
             var amount = groupRate ?? hours * rate;
-            var isCovered = contractCoverage.TryGetValue(session.LocationId, out var contract);
+            var contract = ResolveCoveringContract(contracts, session);
+            var isCovered = contract != null;
 
             items.Add(new TrainerSettlementItemDto
             {
