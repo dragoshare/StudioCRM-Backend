@@ -1,6 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.Alerts;
 using StudioCRM.Application.DTOs.Notifications;
@@ -15,15 +16,22 @@ public class NotificationService : INotificationService
     private readonly StudioCRMDbContext _context;
     private readonly ICurrentUserService _currentUser;
     private readonly IOperationalAlertService _operationalAlertService;
+    private readonly IMemoryCache? _cache;
+
+    // The unread badge is polled often and rebuilding operational alerts costs ~20 queries,
+    // so the badge refreshes them at most this often per user. Opening the list always refreshes.
+    internal static readonly TimeSpan UnreadCountSyncInterval = TimeSpan.FromMinutes(2);
 
     public NotificationService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
-        IOperationalAlertService operationalAlertService)
+        IOperationalAlertService operationalAlertService,
+        IMemoryCache? cache = null)
     {
         _context = context;
         _currentUser = currentUser;
         _operationalAlertService = operationalAlertService;
+        _cache = cache;
     }
 
     public async Task<List<NotificationDto>> GetCurrentUserNotificationsAsync(int limit, string? category = null, bool? isRead = null)
@@ -52,8 +60,13 @@ public class NotificationService : INotificationService
         var userId = GetRequiredUserId();
         var query = FilterCategory(_context.Notifications.Where(n => n.UserId == userId && !n.IsRead), category);
 
-        await SyncClientGroupClassRemindersAsync(userId);
-        await SyncOperationalNotificationsAsync(userId);
+        var syncKey = $"notifications-sync:{_context.OrganizationId}:{userId}";
+        if (_cache is null || !_cache.TryGetValue(syncKey, out _))
+        {
+            await SyncClientGroupClassRemindersAsync(userId);
+            await SyncOperationalNotificationsAsync(userId);
+            _cache?.Set(syncKey, true, UnreadCountSyncInterval);
+        }
 
         var counts = await query.GroupBy(n => n.Type)
             .Select(g => new { Type = g.Key, Count = g.Count() }).ToListAsync();
