@@ -36,4 +36,13 @@ public class TrainerPortalSessionDto
     public string LocationName { get; set; } = string.Empty;
 
     public string Status { get; set; } = string.Empty;
+
+    // Same category fields as the owner SessionDto, used to colour the schedule.
+    public List<string> OutlookCategories { get; set; } = new();
+
+    public List<StudioCRM.Application.DTOs.Calendar.OutlookCategoryDto> OutlookCategoryColors { get; set; } = new();
+
+    public string? PrimaryOutlookCategory { get; set; }
+
+    public string? PrimaryOutlookCategoryColor { get; set; }
 }

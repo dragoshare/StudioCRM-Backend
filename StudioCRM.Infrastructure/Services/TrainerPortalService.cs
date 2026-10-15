@@ -333,8 +333,13 @@ public partial class TrainerPortalService : ITrainerPortalService
 
     private static TrainerPortalSessionDto MapTrainerSession(StudioCRM.Domain.Entities.Session s, string trainerFullName, bool canEdit)
     {
+        var categories = StudioCRM.Infrastructure.Services.Calendar.OutlookCategoryPresentation.Read(s);
         return new TrainerPortalSessionDto
         {
+            OutlookCategories = categories.Categories,
+            OutlookCategoryColors = categories.Colors,
+            PrimaryOutlookCategory = categories.Primary,
+            PrimaryOutlookCategoryColor = categories.PrimaryColor,
             EventRules = s.EventRules,
             BookingRules = GroupBookingPolicy.Describe(s),
             IsGroupSession = GroupBookingPolicy.IsGroup(s),
