@@ -511,7 +511,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         var group = session.PlannedSessionType == "Group";
         var clients = await _context.Clients
             .Where(c =>
-                !c.IsDeleted && (ownerCalendar || c.TrainerId == session.TrainerId || group && c.LocationMemberships.Any(m => m.LocationId == session.LocationId && m.GroupAccessEnabled)) &&
+                !c.IsDeleted && (ownerCalendar || c.TrainerId == session.TrainerId ||
+                    group && c.LocationMemberships.Any(m => m.LocationId == session.LocationId && m.GroupAccessEnabled) ||
+                    // Substitution: a personal session may include any client of the session's location.
+                    !group && (c.LocationId == session.LocationId || c.LocationMemberships.Any(m => m.LocationId == session.LocationId))) &&
                 ((c.CalendarEmail != null && attendeeEmails.Contains(c.CalendarEmail.ToLower())) ||
                  attendeeEmails.Contains(c.Email.ToLower())))
             .ToListAsync();

@@ -66,11 +66,22 @@ public class OutlookContactService : IOutlookContactService
         if (trainer == null)
             throw new InvalidOperationException("Current user is not a trainer.");
 
+        // Own clients plus every client of the trainer's locations, so a substitute can invite them to an event.
+        // Other trainers' clients are shared only through technical calendar addresses and without phone numbers.
+        var locationIds = await _context.TrainerLocations
+            .Where(l => l.TrainerId == trainer.Id)
+            .Select(l => l.LocationId)
+            .ToListAsync();
+
         var clients = await _context.Clients
             .Where(c =>
                 !c.IsDeleted &&
-                c.TrainerId == trainer.Id &&
-                (_settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(c.Email)))
+                (c.TrainerId == trainer.Id
+                    ? _settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(c.Email)
+                    : _settings.UseCalendarEmails &&
+                        (locationIds.Contains(c.LocationId) ||
+                         c.LocationMemberships.Any(m => locationIds.Contains(m.LocationId)))))
+            .OrderBy(c => c.Id)
             .ToListAsync();
 
         if (_settings.UseCalendarEmails)
@@ -82,7 +93,14 @@ public class OutlookContactService : IOutlookContactService
 
         foreach (var client in clients)
         {
-            await UpsertOutlookContactAsync(integration.AccessToken, client);
+            var contact = client.TrainerId == trainer.Id
+                ? client
+                : new Client
+                {
+                    Id = client.Id, FirstName = client.FirstName, LastName = client.LastName,
+                    Email = client.Email, CalendarEmail = client.CalendarEmail
+                };
+            await UpsertOutlookContactAsync(integration.AccessToken, contact);
         }
     }
 

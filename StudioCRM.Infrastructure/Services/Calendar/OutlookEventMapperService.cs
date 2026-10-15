@@ -104,13 +104,20 @@ public class OutlookEventMapperService
             .ToList();
 
         var clients = new List<Client>();
+        // Substitutions: a trainer may run a session for any client of the locations they work in.
+        var trainerLocationIds = await _context.TrainerLocations
+            .Where(l => l.TrainerId == trainer.Id)
+            .Select(l => l.LocationId)
+            .ToListAsync();
 
         foreach (var email in attendeeEmails)
         {
             var client = await _context.Clients
                 .FirstOrDefaultAsync(c =>
                     ((c.CalendarEmail != null && c.CalendarEmail.ToLower() == email) || c.Email.ToLower() == email) &&
-                    !c.IsDeleted && (ownerCalendar || c.TrainerId == trainer.Id));
+                    !c.IsDeleted && (ownerCalendar || c.TrainerId == trainer.Id ||
+                        trainerLocationIds.Contains(c.LocationId) ||
+                        c.LocationMemberships.Any(m => trainerLocationIds.Contains(m.LocationId))));
 
             if (client == null)
             {
