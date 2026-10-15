@@ -703,6 +703,7 @@ public class SessionService : ISessionService
         }
 
         var createdSessions = new List<SessionDto>();
+        var databaseStopwatch = System.Diagnostics.Stopwatch.StartNew();
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
         {
@@ -723,6 +724,8 @@ public class SessionService : ISessionService
             throw;
         }
 
+        _logger.LogInformation("Series {SeriesId}: {Count} sessions saved in {ElapsedMs} ms.",
+            recurringGroupId, createdSessions.Count, databaseStopwatch.ElapsedMilliseconds);
         var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, request.Recurrence);
 
         if (!outlookSync.IsSynced)
@@ -1560,9 +1563,11 @@ public class SessionService : ISessionService
 
     private async Task TrySyncSessionToOutlookAsync(int sessionId)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             await _outlookCalendarSyncService.SyncSessionAsync(sessionId);
+            _logger.LogInformation("Outlook sync of session {SessionId} took {ElapsedMs} ms.", sessionId, stopwatch.ElapsedMilliseconds);
         }
         catch (Exception ex)
         {
@@ -1574,9 +1579,11 @@ public class SessionService : ISessionService
         string recurringGroupId,
         SessionRecurrenceDto recurrence)
     {
+        var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
             await _outlookCalendarSyncService.SyncSessionSeriesAsync(recurringGroupId, recurrence);
+            _logger.LogInformation("Outlook sync of series {SeriesId} took {ElapsedMs} ms.", recurringGroupId, stopwatch.ElapsedMilliseconds);
             return (true, null);
         }
         catch (Exception ex)

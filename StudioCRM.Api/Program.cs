@@ -211,6 +211,8 @@ var app = builder.Build();
 if (!StudioCRM.Infrastructure.Persistence.TokenProtector.IsConfigured && !app.Environment.IsDevelopment())
     app.Logger.LogWarning("Security:TokenEncryptionKey is not set; Outlook tokens are stored unencrypted.");
 
+app.UseMiddleware<StudioCRM.Api.Diagnostics.RequestTimingMiddleware>();
+
 app.UseExceptionHandler(errorApp =>
 {
     errorApp.Run(async context =>
@@ -341,5 +343,16 @@ using (var scope = app.Services.CreateScope())
                        builder.Configuration["Seed:DemoDataConfirmation"] == "ALLOW_DEMO_SEED";
 
     await DataSeeder.SeedAsync(dbContext, seedDemoData);
+
+    // Database round-trip from this host (one simple query after the connection is warm).
+    var roundTrips = new List<double>();
+    for (var i = 0; i < 5; i++)
+    {
+        var probe = System.Diagnostics.Stopwatch.StartNew();
+        await dbContext.Database.ExecuteSqlRawAsync("SELECT 1");
+        roundTrips.Add(probe.Elapsed.TotalMilliseconds);
+    }
+    app.Logger.LogInformation("Database round-trip: first {FirstMs:0} ms, then min {MinMs:0} ms / avg {AvgMs:0} ms",
+        roundTrips[0], roundTrips.Skip(1).Min(), roundTrips.Skip(1).Average());
 }
 app.Run();
