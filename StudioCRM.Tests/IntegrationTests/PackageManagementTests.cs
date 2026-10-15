@@ -106,6 +106,56 @@ public class PackageManagementTests
         Assert.Empty(await db.ClientAuditEntries.ToListAsync());
     }
 
+    [PostgresFact]
+    public async Task PriceCorrectionBelowPaidMovesSurplusThroughThePayment()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "surplus-owner@example.test" };
+        var client = new Client { FirstName = "Teresa", Location = new Location { Name = "Studio" } };
+        var template = new Package { Name = "4 personalne", Price = 680, SessionsLimit = 4, BillingType = SessionBillingType.OneToOne };
+        var pass = new ClientPackage { Client = client, Package = template, TotalSessions = 4, TotalPrice = 680, OriginalPrice = 680,
+            AmountPaid = 680, ExpectedUnitPrice = 170, PaymentStatus = PaymentStatus.Paid, IsActive = true };
+        var payment = new ClientPayment { Client = client, ClientPackage = pass, Amount = 680, AppliedToPackageAmount = 680,
+            Status = ClientPaymentStatus.Confirmed, Method = PaymentMethod.BankTransfer };
+        db.AddRange(owner, payment); await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CorrectAsync(client.Id, pass.Id,
+            new PackageChangeRequest { ExpectedVersion = preview.Version, Reason = "Cena semi", TotalPrice = 540 }));
+        var result = await service.CorrectAsync(client.Id, pass.Id, new PackageChangeRequest
+        { ExpectedVersion = preview.Version, Reason = "Cena semi", TotalPrice = 540, SurplusDisposition = "ToBalance" });
+
+        Assert.Equal(140m, result.Surplus);
+        Assert.Equal(540m, pass.AmountPaid); Assert.Equal(PaymentStatus.Paid, pass.PaymentStatus);
+        Assert.Equal(540m, payment.AppliedToPackageAmount); Assert.Equal(140m, payment.BalanceCreditAmount);
+        Assert.Equal(140m, await db.ClientBalanceTransactions.Where(t => t.Type == BalanceTransactionType.PaymentOverpayment).SumAsync(t => t.Amount));
+        Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageSurplusToBalance"));
+    }
+
+    [PostgresFact]
+    public async Task StudioCanKeepSurplusOfImportedPaidPackageWithoutTouchingBalance()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "keep-owner@example.test" };
+        var client = new Client { FirstName = "Anna", Location = new Location { Name = "Studio" } };
+        var template = new Package { Name = "4 personalne", Price = 680, SessionsLimit = 4, BillingType = SessionBillingType.OneToOne };
+        var pass = new ClientPackage { Client = client, Package = template, TotalSessions = 4, TotalPrice = 680, OriginalPrice = 680,
+            AmountPaid = 680, ExpectedUnitPrice = 170, PaymentStatus = PaymentStatus.Paid, IsActive = true, RenewalSource = "OpeningBalance" };
+        db.AddRange(owner, pass); await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+
+        var result = await service.CorrectAsync(client.Id, pass.Id, new PackageChangeRequest
+        { ExpectedVersion = preview.Version, Reason = "Rozliczenie wewnetrzne", TotalPrice = 600, SurplusDisposition = "KeepByStudio" });
+
+        Assert.Equal(80m, result.Surplus); Assert.Equal(600m, pass.AmountPaid); Assert.Equal(0m, result.AmountDue);
+        Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
+        Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageSurplusKeptByStudio"));
+    }
+
     private sealed class Settings : IStudioSettingsService
     {
         public Task<OwnerSettingsDto> GetOwnerSettingsAsync() => Task.FromResult(new OwnerSettingsDto { DefaultPackageValidityDays = 90, DefaultPaymentDueDays = 7 });

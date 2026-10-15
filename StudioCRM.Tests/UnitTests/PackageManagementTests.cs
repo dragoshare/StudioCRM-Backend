@@ -29,6 +29,22 @@ public class PackageManagementTests
             new PackageChangeRequest { TotalSessions = sessions, TotalPrice = price }));
     }
 
+    [Theory]
+    [InlineData("ToBalance")]
+    [InlineData("KeepByStudio")]
+    public void PriceBelowPaidAmountNeedsAnExplicitSurplusDecision(string disposition)
+    {
+        var p = new ClientPackage { IsActive = true, UsedSessions = 3, AmountPaid = 680 };
+        Assert.Throws<InvalidOperationException>(() => ClientPackageService.ValidateCorrection(p,
+            new PackageChangeRequest { TotalPrice = 540 }));
+        ClientPackageService.ValidateCorrection(p, new PackageChangeRequest { TotalPrice = 540, SurplusDisposition = disposition });
+    }
+
+    [Fact]
+    public void UnknownSurplusDecisionIsRejected()
+        => Assert.Throws<InvalidOperationException>(() => ClientPackageService.ValidateCorrection(
+            new ClientPackage { AmountPaid = 680 }, new PackageChangeRequest { TotalPrice = 540, SurplusDisposition = "Refund" }));
+
     [Fact]
     public void ValidCorrectionCanExtendPackageAndReduceUnpaidDebt()
     {

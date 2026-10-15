@@ -68,22 +68,32 @@ public partial class ClientPackageService
         return new PackageManagementPreviewDto
         {
             ClientPackageId = p.Id, Version = Version(p), AmountDue = Math.Max(0, p.TotalPrice - p.AmountPaid),
+            AmountPaid = p.AmountPaid, TotalPrice = p.TotalPrice,
             RemainingSessions = Math.Max(0, p.TotalSessions - p.UsedSessions),
             CanDelete = deleteReason == null, DeleteBlockReason = deleteReason,
             CanEdit = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0 && !payments && !balance && !counted && p.AmountPaid == 0,
-            CanCorrect = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0, CanClose = blockers.Count == 0, Blockers = blockers
+            CanCorrect = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0,
+            CanCorrectPrice = p.BillingMode == PackageBillingMode.SessionBased && blockers.All(PriceCorrectionAllows),
+            CanClose = blockers.Count == 0, Blockers = blockers
         };
     }
 
     public async Task<PackageManagementPreviewDto> GetManagementPreviewAsync(int clientId, int clientPackageId)
         => await PreviewAsync(await LoadManagedAsync(clientId, clientPackageId));
 
-    private async Task EnsureChangeAsync(ClientPackage p, string expectedVersion)
+    private async Task EnsureChangeAsync(ClientPackage p, string expectedVersion, bool priceOnly = false)
     {
         if (expectedVersion != Version(p)) throw new InvalidOperationException("Package changed. Refresh the preview before confirming.");
         var preview = await PreviewAsync(p);
-        if (preview.Blockers.Count > 0) throw new InvalidOperationException(string.Join("; ", preview.Blockers));
+        var blockers = priceOnly ? preview.Blockers.Where(b => !PriceCorrectionAllows(b)).ToList() : preview.Blockers;
+        if (blockers.Count > 0) throw new InvalidOperationException(string.Join("; ", blockers));
     }
+
+    // A renewal or planned sessions do not depend on this cycle's price: any surplus or debt goes through the balance.
+    private static bool PriceCorrectionAllows(string blocker) => blocker is "HasRenewal" or "UnfinishedSessions";
+
+    internal const string SurplusToBalance = "ToBalance";
+    internal const string SurplusKeptByStudio = "KeepByStudio";
 
     internal static void ValidateCorrection(ClientPackage p, PackageChangeRequest r)
     {
@@ -93,20 +103,27 @@ public partial class ClientPackageService
             throw new InvalidOperationException("Total sessions must be positive and not less than used sessions.");
         if (p.IsActive && r.TotalSessions.HasValue && r.TotalSessions <= p.UsedSessions)
             throw new InvalidOperationException("Use package closure to remove all remaining entries.");
-        if (r.TotalPrice.HasValue && (r.TotalPrice < 0 || r.TotalPrice < p.AmountPaid))
-            throw new InvalidOperationException("Price cannot be lower than the amount already paid. Reconcile a refund separately.");
+        if (r.TotalPrice.HasValue && r.TotalPrice < 0)
+            throw new InvalidOperationException("Price cannot be negative.");
+        if (r.SurplusDisposition is not (null or SurplusToBalance or SurplusKeptByStudio))
+            throw new InvalidOperationException("Surplus disposition must be ToBalance or KeepByStudio.");
+        if (r.TotalPrice.HasValue && r.TotalPrice < p.AmountPaid && r.SurplusDisposition == null)
+            throw new InvalidOperationException("Price is lower than the amount already paid. Choose whether the surplus goes to the client balance (ToBalance) or stays with the studio (KeepByStudio).");
         if (r.ValidUntil.HasValue && r.ValidUntil < p.PurchaseDate)
             throw new InvalidOperationException("Validity cannot end before purchase.");
     }
 
-    public async Task CorrectAsync(int clientId, int clientPackageId, PackageChangeRequest request)
+    public async Task<PackageCorrectionResultDto> CorrectAsync(int clientId, int clientPackageId, PackageChangeRequest request)
     {
         RequireOwner(); RequireReason(request.Reason);
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var p = await LoadManagedAsync(clientId, clientPackageId);
-        await EnsureChangeAsync(p, request.ExpectedVersion);
+        var priceOnly = !request.TotalSessions.HasValue && !request.ValidUntil.HasValue;
+        await EnsureChangeAsync(p, request.ExpectedVersion, priceOnly);
         ValidateCorrection(p, request);
         var before = State(p);
+        var surplus = request.TotalPrice.HasValue ? Math.Max(0, p.AmountPaid - request.TotalPrice.Value) : 0;
+        if (surplus > 0) await DisposeSurplusAsync(p, surplus, request.SurplusDisposition!, request.Reason);
         p.TotalSessions = request.TotalSessions ?? p.TotalSessions;
         if (request.TotalPrice.HasValue)
         {
@@ -121,7 +138,58 @@ public partial class ClientPackageService
         p.PaymentDueDate = NormalizeNullableDateTime(request.PaymentDueDate) ?? p.PaymentDueDate;
         RefreshStatus(p);
         Audit(p, "PackageCorrected", before, request.Reason);
+        if (surplus > 0)
+            _context.ClientAuditEntries.Add(new ClientAuditEntry
+            {
+                ClientId = p.ClientId, ActorUserId = _currentUser.UserId,
+                Action = request.SurplusDisposition == SurplusToBalance ? "PackageSurplusToBalance" : "PackageSurplusKeptByStudio",
+                BeforeJson = before,
+                AfterJson = JsonSerializer.Serialize(new { ClientPackageId = p.Id, Surplus = surplus, p.TotalPrice, p.AmountPaid }),
+                Reason = request.Reason.Trim()
+            });
         await _context.SaveChangesAsync(); await tx.CommitAsync();
+        return new PackageCorrectionResultDto
+        {
+            Surplus = surplus, SurplusDisposition = surplus > 0 ? request.SurplusDisposition : null,
+            AmountPaid = p.AmountPaid, AmountDue = Math.Max(0, p.TotalPrice - p.AmountPaid)
+        };
+    }
+
+    // Moves money paid above the corrected price out of the package. It is taken from the newest confirmed payments,
+    // so a later payment reversal still undoes exactly what that payment contributed (package part and balance part).
+    private async Task DisposeSurplusAsync(ClientPackage p, decimal surplus, string disposition, string reason)
+    {
+        var payments = await _context.ClientPayments
+            .Where(x => x.ClientPackageId == p.Id && x.Status == ClientPaymentStatus.Confirmed && x.AppliedToPackageAmount > 0)
+            .OrderByDescending(x => x.PaymentDate).ThenByDescending(x => x.Id)
+            .ToListAsync();
+        var remaining = surplus;
+        foreach (var payment in payments)
+        {
+            if (remaining <= 0) break;
+            var take = Math.Min(remaining, payment.AppliedToPackageAmount);
+            payment.AppliedToPackageAmount -= take;
+            if (disposition == SurplusToBalance) payment.BalanceCreditAmount += take;
+            remaining -= take;
+        }
+        p.AmountPaid -= surplus;
+        if (disposition != SurplusToBalance) return;
+        var fromPayments = surplus - remaining;
+        if (fromPayments > 0)
+            _context.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = p.ClientId, ClientPackageId = p.Id, Amount = fromPayments,
+                Type = BalanceTransactionType.PaymentOverpayment,
+                Description = "Nadwyżka z korekty ceny pakietu przeniesiona na saldo: " + reason.Trim(), CreatedAt = DateTime.UtcNow
+            });
+        // Amounts imported as already paid have no payment record, so they move to the balance as a manual adjustment.
+        if (remaining > 0)
+            _context.ClientBalanceTransactions.Add(new ClientBalanceTransaction
+            {
+                ClientId = p.ClientId, ClientPackageId = p.Id, Amount = remaining,
+                Type = BalanceTransactionType.ManualAdjustment,
+                Description = "Nadwyżka z korekty ceny pakietu (wpłata sprzed CRM) przeniesiona na saldo: " + reason.Trim(), CreatedAt = DateTime.UtcNow
+            });
     }
 
     public async Task<int?> CloseAsync(int clientId, int clientPackageId, ClosePackageRequest request)

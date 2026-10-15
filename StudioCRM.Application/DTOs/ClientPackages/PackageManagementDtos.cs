@@ -8,6 +8,17 @@ public class PackageChangeRequest
     public decimal? TotalPrice { get; set; }
     public DateTime? ValidUntil { get; set; }
     public DateTime? PaymentDueDate { get; set; }
+    // Required when totalPrice drops below the amount already paid: ToBalance or KeepByStudio.
+    public string? SurplusDisposition { get; set; }
+}
+
+public class PackageCorrectionResultDto
+{
+    public bool Corrected { get; set; } = true;
+    public decimal Surplus { get; set; }
+    public string? SurplusDisposition { get; set; }
+    public decimal AmountPaid { get; set; }
+    public decimal AmountDue { get; set; }
 }
 
 public class ClosePackageRequest
@@ -34,10 +45,14 @@ public class PackageManagementPreviewDto
     public int ClientPackageId { get; set; }
     public string Version { get; set; } = "";
     public decimal AmountDue { get; set; }
+    public decimal AmountPaid { get; set; }
+    public decimal TotalPrice { get; set; }
     public int RemainingSessions { get; set; }
     public bool CanDelete { get; set; }
     public bool CanEdit { get; set; }
     public bool CanCorrect { get; set; }
+    // Price-only corrections ignore renewal and planned-session blockers.
+    public bool CanCorrectPrice { get; set; }
     public bool CanClose { get; set; }
     public string? DeleteBlockReason { get; set; }
     public List<string> Blockers { get; set; } = new();

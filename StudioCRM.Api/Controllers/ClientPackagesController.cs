@@ -96,8 +96,8 @@ public class ClientPackagesController : ControllerBase
         => HandleAsync<PackageManagementPreviewDto>(async () => Ok(await _clientPackageService.GetManagementPreviewAsync(clientId, clientPackageId)));
 
     [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/correct")]
-    public Task<ActionResult<object>> Correct(int clientId, int clientPackageId, PackageChangeRequest request)
-        => HandleAsync<object>(async () => { await _clientPackageService.CorrectAsync(clientId, clientPackageId, request); return Ok(new { corrected = true }); });
+    public Task<ActionResult<PackageCorrectionResultDto>> Correct(int clientId, int clientPackageId, PackageChangeRequest request)
+        => HandleAsync<PackageCorrectionResultDto>(async () => Ok(await _clientPackageService.CorrectAsync(clientId, clientPackageId, request)));
 
     [HttpPost("clients/{clientId:int}/packages/{clientPackageId:int}/close")]
     public Task<ActionResult<object>> Close(int clientId, int clientPackageId, ClosePackageRequest request)

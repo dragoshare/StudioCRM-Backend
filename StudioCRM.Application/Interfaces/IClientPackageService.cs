@@ -7,7 +7,7 @@ public interface IClientPackageService
     Task<bool> ActivateAsync(int clientId, int clientPackageId);
     Task<bool> DeleteAsync(int clientId, int clientPackageId);
     Task<PackageManagementPreviewDto> GetManagementPreviewAsync(int clientId, int clientPackageId);
-    Task CorrectAsync(int clientId, int clientPackageId, PackageChangeRequest request);
+    Task<PackageCorrectionResultDto> CorrectAsync(int clientId, int clientPackageId, PackageChangeRequest request);
     Task<int?> CloseAsync(int clientId, int clientPackageId, ClosePackageRequest request);
     Task<int?> DecideExpiredAsync(int clientId, int clientPackageId, ExpiredPackageDecisionRequest request);
     Task<int> ImportAsync(ImportClientPackageRequest request);
