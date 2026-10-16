@@ -214,7 +214,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories");
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories,transactionId");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
@@ -295,6 +295,11 @@ public class OutlookWebhookService : IOutlookWebhookService
         var startAtValue = ReadGraphDateTime(root, "start");
         var endAtValue = ReadGraphDateTime(root, "end");
 
+        var createdByCrm = CrmOutlookEventMarker.IsCrmCreated(
+            root.TryGetProperty("transactionId", out var transactionId) && transactionId.ValueKind == JsonValueKind.String
+                ? transactionId.GetString()
+                : null);
+
         var attendeeEmails = ReadAttendeeEmails(root);
         var categories = ReadCategories(root);
         var categoryColors = await ResolveCategoryColorsAsync(integration, categories);
@@ -353,7 +358,7 @@ public class OutlookWebhookService : IOutlookWebhookService
                 externalEventId,
                 subjectValue);
         }
-        else if (!existing.IsConvertedToSession &&
+        else if (!existing.IsConvertedToSession && !createdByCrm &&
             !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]))
         {
             var mapper = new OutlookEventMapperService(_context);

@@ -432,6 +432,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         var categories = ResolveGraphEventCategories(session);
         await EnsureTrainerMasterCategoryAsync(session, accessToken, categories);
         var payload = BuildGraphEventPayload(session, categories);
+        payload["transactionId"] = CrmOutlookEventMarker.Create(session.Id);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Post,
