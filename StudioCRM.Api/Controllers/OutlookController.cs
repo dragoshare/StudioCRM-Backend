@@ -57,11 +57,33 @@ public class OutlookController : ControllerBase
 
     [HttpGet("callback")]
     [AllowAnonymous]
-    public async Task<IActionResult> Callback([FromQuery] string code, [FromQuery] string? state)
+    public async Task<IActionResult> Callback(
+        [FromQuery] string? code,
+        [FromQuery] string? state,
+        [FromQuery] string? error = null,
+        [FromQuery(Name = "error_description")] string? errorDescription = null)
     {
+        // Microsoft returns error/error_description instead of code when sign-in or consent fails.
+        // The pending challenge simply expires; nothing is connected.
+        if (!string.IsNullOrWhiteSpace(error))
+        {
+            var failure = StudioCRM.Infrastructure.Services.Calendar.OutlookOAuthError.Describe(error, errorDescription);
+            HttpContext.RequestServices?.GetService<ILogger<OutlookController>>()?.LogWarning(
+                "Outlook OAuth callback returned Microsoft error {Error} ({MicrosoftCode}): {Detail}",
+                failure.MicrosoftError, failure.MicrosoftCode, failure.Detail);
+            return BadRequest(new
+            {
+                message = failure.Message,
+                code = failure.Code,
+                microsoftError = failure.MicrosoftError,
+                microsoftCode = failure.MicrosoftCode,
+                detail = failure.Detail
+            });
+        }
+
         try
         {
-            await _authService.ConnectCallbackAsync(code, state);
+            await _authService.ConnectCallbackAsync(code ?? string.Empty, state);
 
             return Ok(new
             {
