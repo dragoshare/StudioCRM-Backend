@@ -29,6 +29,8 @@ public class TrainerSettlementListItemDto
     public decimal TotalAmount { get; set; }
     public decimal NonContractedTotalHours { get; set; }
     public int NonContractedTotalSessions { get; set; }
+    // Calculated at the trainer rates, but not included in TotalAmount (no covering contract).
+    public decimal NonContractedTotalAmount { get; set; }
     // Paid flag is stored per trainer and month, not per location.
     public bool IsPaid { get; set; }
     public DateTime? PaidAt { get; set; }

@@ -20,6 +20,8 @@ public class TrainerMonthlySettlementDto
 
     public decimal NonContractedTotalHours { get; set; }
     public int NonContractedTotalSessions { get; set; }
+    // Calculated at the trainer rates, but not included in TotalAmount (no covering contract).
+    public decimal NonContractedTotalAmount { get; set; }
 
     public bool IsPaid { get; set; }
     public DateTime? PaidAt { get; set; }

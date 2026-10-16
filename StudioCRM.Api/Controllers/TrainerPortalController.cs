@@ -505,6 +505,7 @@ public class TrainerPortalController : ControllerBase
             TotalSessions = s.TotalSessions, TotalAmount = s.TotalAmount, ContractedTotalHours = s.ContractedTotalHours,
             ContractedTotalSessions = s.ContractedTotalSessions, ContractedTotalAmount = s.ContractedTotalAmount,
             NonContractedTotalHours = s.NonContractedTotalHours, NonContractedTotalSessions = s.NonContractedTotalSessions,
+            NonContractedTotalAmount = s.NonContractedTotalAmount,
             IsPaid = s.IsPaid, PaidAt = s.PaidAt });
     }
 

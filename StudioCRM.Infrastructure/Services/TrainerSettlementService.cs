@@ -80,6 +80,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             ContractedTotalAmount = contractedItems.Sum(i => i.Amount),
             NonContractedTotalHours = nonContractedItems.Sum(i => i.Hours),
             NonContractedTotalSessions = nonContractedItems.Count,
+            NonContractedTotalAmount = nonContractedItems.Sum(i => i.Amount),
             IsPaid = savedSettlement?.IsPaid ?? false,
             PaidAt = savedSettlement?.PaidAt.HasValue == true
                 ? ToStudioDisplayDateTime(savedSettlement.PaidAt.Value)
@@ -145,6 +146,7 @@ public class TrainerSettlementService : ITrainerSettlementService
                 TotalAmount = contracted.Sum(i => i.Amount),
                 NonContractedTotalHours = nonContracted.Sum(i => i.Hours),
                 NonContractedTotalSessions = nonContracted.Count,
+                NonContractedTotalAmount = nonContracted.Sum(i => i.Amount),
                 IsPaid = saved?.IsPaid ?? false,
                 PaidAt = saved?.PaidAt.HasValue == true ? ToStudioDisplayDateTime(saved.PaidAt.Value) : null
             };

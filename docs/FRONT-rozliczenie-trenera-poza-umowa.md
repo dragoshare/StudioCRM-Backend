@@ -11,8 +11,9 @@ Do kwoty (`totalAmount`, `totalSessions`, `totalHours`, `items`) wchodzą tylko 
 lokalizacja należy do aktywnej umowy trenera (`TrainerContract` + `ContractLocations`), a data (dzień w czasie
 polskim) mieści się w okresie umowy — `validFrom` i `validTo` włącznie. Umowa od 15.10 nie obejmuje sesji z 1–14.10.
 Ta sama zasada dotyczy ewidencji godzin. Pozostałe zakończone
-sesje trafiają do `nonContractedItems`, `nonContractedTotalSessions`, `nonContractedTotalHours`. Mają wyliczoną
-stawkę i kwotę, ale nie są doliczane do wypłaty.
+sesje trafiają do `nonContractedItems`, `nonContractedTotalSessions`, `nonContractedTotalHours` i
+`nonContractedTotalAmount`. Mają wyliczoną stawkę i kwotę, ale nie są doliczane do wypłaty (`totalAmount`).
+`nonContractedTotalAmount` zwracają też lista rozliczeń Ownera i podsumowanie w panelu trenera.
 
 ## Co pokazać u Ownera
 
