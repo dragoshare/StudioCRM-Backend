@@ -5,6 +5,7 @@ public record GroupPackageOptionsDto(int SessionId, int ClientId, int LocationId
 public record GroupPackageOfferDto(int PackageId, string Name, decimal Price, string Currency,
     int SessionsLimit, int DurationDays, bool CanSelect, List<string> Reasons)
 {
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; init; }
     public string? Description { get; init; }
     public int SessionsPerWeek { get; init; }
     public int ParticipantsCount { get; init; }
@@ -18,4 +19,7 @@ public record GroupPackageOfferDto(int PackageId, string Name, decimal Price, st
 public record OwnedGroupPackageDto(int ClientPackageId, int PackageId, string Name, decimal Price, string Currency,
     decimal AmountDue, int? LocationId, DateTime? ValidUntil, string PaymentStatus, bool IsActive,
     int TotalEntries, int UsedEntries, int ReservedEntries, int AvailableEntries,
-    bool IsEligible, bool CanSelect, List<string> Reasons);
+    bool IsEligible, bool CanSelect, List<string> Reasons)
+{
+    public StudioCRM.Domain.Enums.PackageBillingMode BillingMode { get; init; }
+}

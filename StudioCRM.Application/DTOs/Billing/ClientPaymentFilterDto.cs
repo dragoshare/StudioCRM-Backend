@@ -5,7 +5,7 @@ namespace StudioCRM.Application.DTOs.Billing;
 
 public class ClientPaymentFilterDto : IValidatableObject
 {
-    public const string SortValues = "paymentDateDesc|paymentDate|amountDesc|amount";
+    public const string SortValues = "paymentDateDesc|paymentDate|amountDesc|amount|clientName|clientNameDesc|overpayment|overpaymentDesc";
 
     [StringLength(100)]
     public string? Search { get; set; }

@@ -36,8 +36,14 @@ public class TrainerSettlementListItemDto
     public DateTime? PaidAt { get; set; }
 }
 
+// Exact sums of the row values of the whole filtered set (no extra rounding), so summary == sum of all rows.
 public class TrainerSettlementListSummaryDto
 {
+    public decimal TotalHours { get; set; }
+    public int TotalSessions { get; set; }
+    public decimal NonContractedTotalHours { get; set; }
+    public int NonContractedTotalSessions { get; set; }
+    public decimal NonContractedTotalAmount { get; set; }
     public decimal TotalAmount { get; set; }
     public decimal PaidAmount { get; set; }
     public decimal UnpaidAmount { get; set; }
@@ -57,6 +63,8 @@ public class TrainerSettlementListDto
     public int TotalPages { get; set; }
     // Covers every trainer matching the filter, not only the current page.
     public TrainerSettlementListSummaryDto Summary { get; set; } = new();
+    // Trainer rates carry no currency; settlements are always PLN.
+    public string Currency { get; set; } = "PLN";
     public DateTime AsOf { get; set; }
     public string TimeZone { get; set; } = "Europe/Warsaw";
 }

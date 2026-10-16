@@ -44,6 +44,7 @@ public class OwnerPanelReadTests
         Assert.Equal((2, 2, 1), (page.TotalCount, page.TotalPages, page.Items.Count));
         Assert.Equal("T Anna", page.Items[0].TrainerFullName);
         Assert.Equal((300m, 200m, 100m), (page.Summary.TotalAmount, page.Summary.PaidAmount, page.Summary.UnpaidAmount));
+        Assert.Equal((3m, 2, "PLN"), (page.Summary.TotalHours, page.Summary.TotalSessions, page.Currency));
         var single = (await service.GetMonthlySettlementAsync(anna.Id, 2026, 10, location.Id))!;
         Assert.Equal((single.TotalAmount, single.TotalHours, single.TotalSessions, single.IsPaid),
             (page.Items[0].TotalAmount, page.Items[0].TotalHours, page.Items[0].TotalSessions, page.Items[0].IsPaid));
@@ -156,5 +157,132 @@ public class OwnerPanelReadTests
         Assert.Equal(("Completed", created.Id), (status.State, status.Result!.Id));
         Assert.Null(await PortalSecurityTests.Payments(db, new PortalSecurityTests.Actor(user.Id + 1000, "Owner")).GetStaffPaymentOperationAsync(key));
         Assert.Equal(1, await db.ClientPayments.CountAsync());
+    }
+
+    [PostgresFact]
+    public async Task ClientPageSortsByUsageBalanceTrainerAndArchiveAndSearchesPhone()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Main" };
+        var zed = new Trainer { User = new User { Email = "zed@test.invalid", FirstName = "A", LastName = "Zed" } };
+        var abe = new Trainer { User = new User { Email = "abe@test.invalid", FirstName = "A", LastName = "Abe" } };
+        Client Make(string last, Trainer? trainer) => new() { FirstName = "K", LastName = last, Location = location, Trainer = trainer };
+        var half = Make("Half", zed); var full = Make("Full", abe); var period = Make("Period", null); var none = Make("None", abe);
+        half.PhoneNumber = "+48 600-100-200";
+        ClientPackage Cycle(Client c, int total, int used, PackageBillingMode mode = PackageBillingMode.SessionBased) => new()
+        {
+            Client = c, Package = new Package { Name = "P" }, Name = "P", BillingMode = mode, TotalSessions = total, UsedSessions = used,
+            PurchaseDate = DateTime.UtcNow, Location = location
+        };
+        db.AddRange(Cycle(half, 10, 5), Cycle(full, 4, 4), Cycle(period, 0, 0, PackageBillingMode.PeriodBased));
+        db.Add(none);
+        db.AddRange(
+            new ClientBalanceTransaction { Client = half, Type = BalanceTransactionType.ManualAdjustment, Amount = 40 },
+            new ClientBalanceTransaction { Client = full, Type = BalanceTransactionType.ManualAdjustment, Amount = -20 });
+        await db.SaveChangesAsync();
+        var service = new ClientService(db, new PortalSecurityTests.Actor(1, "Owner"), null!, null!);
+        async Task<List<string>> Names(string sort) =>
+            (await service.GetPageAsync(new ClientPageFilter { Sort = sort, PageSize = 100 })).Items.Select(c => c.LastName).ToList();
+
+        // Clients without a personal/semi session-based package (period-only or none) go last in both directions.
+        var noPersonal = new[] { period, none }.OrderBy(c => c.Id).Select(c => c.LastName).ToList();
+        Assert.Equal(["Half", "Full", .. noPersonal], await Names("packageUsage"));
+        Assert.Equal(["Full", "Half", .. noPersonal], await Names("packageUsageDesc"));
+        Assert.Equal("Full", (await Names("balance"))[0]);
+        Assert.Equal("Half", (await Names("balanceDesc"))[0]);
+        Assert.Equal("Period", (await Names("trainer"))[^1]);
+        // Trainer Abe (Full, None by client name) before Zed (Half); clients without a trainer last.
+        Assert.Equal(["Full", "None", "Half"], (await Names("trainer")).Take(3));
+
+        foreach (var search in new[] { "600100200", "+48600100200", "600 100" })
+            Assert.Equal("Half", Assert.Single((await service.GetPageAsync(new ClientPageFilter { Search = search })).Items).LastName);
+
+        none.IsDeleted = true; none.DeletedAt = DateTime.UtcNow.AddDays(-1);
+        full.IsDeleted = true; full.DeletedAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        var archived = await service.GetPageAsync(new ClientPageFilter { IsArchived = true, Sort = "archivedAtDesc" });
+        Assert.Equal(["Full", "None"], archived.Items.Select(c => c.LastName));
+        var pastEnd = await service.GetPageAsync(new ClientPageFilter { Page = 5, PageSize = 1 });
+        Assert.Empty(pastEnd.Items);
+        Assert.Equal((2, 2), (pastEnd.TotalCount, pastEnd.TotalPages));
+    }
+
+    [PostgresFact]
+    public async Task FilterOptionsApplyExactStatusBeforeLimitAndKeepSelectedPerson()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Main" };
+        var inactive = Enumerable.Range(0, 3).Select(i => new Client { FirstName = "A", LastName = $"Inactive{i}", Location = location, Status = "Inactive" }).ToList();
+        var active = new Client { FirstName = "Z", LastName = "Zactive", Location = location, Status = "Active" };
+        var archived = new Client { FirstName = "Old", LastName = "Archived", Location = location, IsDeleted = true };
+        var group = new Client { FirstName = "G", LastName = "Group", Location = new Location { Name = "Home" } };
+        db.AddRange(inactive); db.AddRange(active, archived, group);
+        db.Add(new ClientLocationMembership { Client = group, Location = location, GroupAccessEnabled = true });
+        await db.SaveChangesAsync();
+        var service = new ClientService(db, new PortalSecurityTests.Actor(1, "Owner"), null!, null!);
+
+        Assert.Equal(active.Id, Assert.Single((await service.GetFilterOptionsAsync(new OwnerFilterOptionsQuery { ClientStatus = "Active", Limit = 1 })).Clients).Id);
+        var withSelected = await service.GetFilterOptionsAsync(new OwnerFilterOptionsQuery { Limit = 1, SelectedClientId = archived.Id });
+        Assert.Equal(2, withSelected.Clients.Count);
+        Assert.True(withSelected.Clients.Single(c => c.Id == archived.Id) is { IsSelected: true, IsArchived: true });
+        Assert.Equal(group.Id, Assert.Single((await service.GetFilterOptionsAsync(new OwnerFilterOptionsQuery { LocationId = location.Id, GroupAccess = true })).Clients).Id);
+    }
+
+    [PostgresFact]
+    public async Task GroupEnrollmentDetailsCarryActionsCurrencyAndPendingPayments()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Group" };
+        var trainer = new Trainer { User = new User { Email = "ge@test.invalid" } };
+        var client = new Client { FirstName = "Anna", Location = location, Trainer = trainer };
+        var session = new Session { Title = "Group", Location = location, Trainer = trainer, PlannedSessionType = "Group",
+            StartAt = DateTime.UtcNow.AddDays(2), EndAt = DateTime.UtcNow.AddDays(2).AddHours(1) };
+        var package = new ClientPackage { Client = client, Package = new Package { Name = "G", BillingType = SessionBillingType.Group }, Name = "G",
+            TotalPrice = 120, TotalSessions = 4, ExpectedBillingType = SessionBillingType.Group, PaymentStatus = PaymentStatus.Unpaid,
+            IsActive = false, Location = location, Currency = "PLN" };
+        var enrollment = new GroupEnrollmentRequest { Session = session, Client = client, ClientPackage = package };
+        db.AddRange(enrollment, new ClientPayment { Client = client, ClientPackage = package, Amount = 50, Method = PaymentMethod.Blik,
+            Status = ClientPaymentStatus.PendingConfirmation, Source = ClientPaymentSource.ClientRequest, PaymentDate = DateTime.UtcNow });
+        await db.SaveChangesAsync();
+
+        var owner = new GroupEnrollmentService(db, new PortalSecurityTests.Actor(trainer.UserId, "Owner"), null!);
+        var details = await owner.GetAsync(enrollment.Id);
+        Assert.Equal(("AwaitingPayment", "PLN", 50m), (details.Status, details.Currency, details.PendingPaymentsAmount));
+        Assert.Equal(["RecordPayment"], details.AllowedActions);
+        Assert.Equal(PackageBillingMode.SessionBased, details.PackageBillingMode);
+        Assert.Equal(details.AllowedActions, Assert.Single((await owner.ListAsync(session.Id, 1, 25)).Items).AllowedActions);
+    }
+
+    [PostgresFact]
+    public async Task OwnerPanelReadsDoNotLeakAnotherOrganizationsRows()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        Guid other;
+        await using (var seed = database.Context())
+        {
+            var profile = new OrganizationBrandingProfile { Id = Guid.NewGuid(), Name = "Other" };
+            var organization = new Organization { Id = Guid.NewGuid(), Name = "Other", Slug = "other", BrandingProfileId = profile.Id };
+            seed.AddRange(profile, organization); await seed.SaveChangesAsync();
+            other = organization.Id;
+        }
+        await using (var foreign = database.Context(organizationId: other))
+        {
+            var trainer = new Trainer { User = new User { Email = "foreign-trainer@test.invalid", FirstName = "F", LastName = "Foreign" } };
+            var client = new Client { FirstName = "F", LastName = "Foreign", Location = new Location { Name = "Foreign" }, Trainer = trainer };
+            foreign.AddRange(client, new ClientPayment { Client = client, Amount = 10, Method = PaymentMethod.Cash, Status = ClientPaymentStatus.Confirmed,
+                Source = ClientPaymentSource.StaffEntry, PaymentDate = DateTime.UtcNow });
+            await foreign.SaveChangesAsync();
+        }
+        await using var db = database.Context();
+        var owner = new PortalSecurityTests.Actor(1, "Owner");
+        Assert.Equal(0, (await new ClientService(db, owner, null!, null!).GetPageAsync(new ClientPageFilter())).TotalCount);
+        Assert.Equal(0, (await new ClientService(db, owner, null!, null!).GetPageAsync(new ClientPageFilter { IsArchived = true })).TotalCount);
+        var options = await new ClientService(db, owner, null!, null!).GetFilterOptionsAsync(new OwnerFilterOptionsQuery { Search = "foreign" });
+        Assert.Empty(options.Clients); Assert.Empty(options.Trainers);
+        Assert.Equal(0, (await PortalSecurityTests.Payments(db, owner).GetPaymentsAsync(new ClientPaymentFilterDto())).TotalCount);
+        Assert.Equal(0, (await new TrainerSettlementService(db, owner).GetMonthlySettlementsAsync(new TrainerSettlementListFilter { Year = 2026, Month = 10 })).TotalCount);
     }
 }

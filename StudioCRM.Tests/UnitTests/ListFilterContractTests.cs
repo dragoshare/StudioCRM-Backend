@@ -86,7 +86,7 @@ public class ListFilterContractTests
         var payments = doc.Paths["/api/billing/payments"].Operations[OperationType.Get];
         Assert.Contains("paymentDateDesc", payments.Description);
         var sort = payments.Parameters.Single(p => p.Name == "Sort");
-        Assert.Equal(["paymentDateDesc", "paymentDate", "amountDesc", "amount"], sort.Schema.Enum.Cast<OpenApiString>().Select(v => v.Value));
+        Assert.Equal(["paymentDateDesc", "paymentDate", "amountDesc", "amount", "clientName", "clientNameDesc", "overpayment", "overpaymentDesc"], sort.Schema.Enum.Cast<OpenApiString>().Select(v => v.Value));
         Assert.Contains("PaymentDate", payments.Parameters.Single(p => p.Name == "From").Description);
         Assert.Contains(payments.Parameters, p => p.Name == "Method");
 
@@ -119,6 +119,7 @@ public class ListSortTranslationTests
 
     [Theory]
     [InlineData(null)] [InlineData("paymentDate")] [InlineData("amount")] [InlineData("amountDesc")]
+    [InlineData("clientName")] [InlineData("clientNameDesc")] [InlineData("overpayment")] [InlineData("overpaymentDesc")]
     public void PaymentSortsUsePaymentDateAndIdTieBreak(string? sort)
     {
         using var db = Context();

@@ -25,12 +25,12 @@ public partial class GroupEnrollmentService
             .OrderBy(p => p.Name).ThenBy(p => p.Id)
             .Select(p => new { p.Id, p.Name, p.Price, p.Currency, p.SessionsLimit, p.DurationDays,
                 p.Description, p.SessionsPerWeek, p.ParticipantsCount, p.LocationId, LocationName = p.Location != null ? p.Location.Name : null,
-                p.IsPubliclyAvailable }).ToListAsync();
+                p.IsPubliclyAvailable, p.BillingMode }).ToListAsync();
         var offers = catalog.Select(p => new GroupPackageOfferDto(p.Id, p.Name, p.Price, p.Currency, p.SessionsLimit, p.DurationDays,
             (session.StartAt - (p.Price == 0 ? now : now.Date)).TotalDays <= p.DurationDays,
             (session.StartAt - (p.Price == 0 ? now : now.Date)).TotalDays <= p.DurationDays ? [] : ["ValidityTooShortFromToday"])
         {
-            Description = p.Description, SessionsPerWeek = p.SessionsPerWeek, ParticipantsCount = p.ParticipantsCount,
+            BillingMode = p.BillingMode, Description = p.Description, SessionsPerWeek = p.SessionsPerWeek, ParticipantsCount = p.ParticipantsCount,
             LocationId = p.LocationId, LocationName = p.LocationName, IsPubliclyAvailable = p.IsPubliclyAvailable,
             UnitPrice = decimal.Round(p.Price / p.SessionsLimit, 2)
         }).ToList();
@@ -60,7 +60,7 @@ public partial class GroupEnrollmentService
             if (payable && !p.ValidUntil.HasValue && offer != null && !offer.CanSelect) reasons.Add("ValidityTooShortFromToday");
             packages.Add(new(p.Id, p.PackageId, p.Name, p.TotalPrice, p.Currency, Math.Max(0, p.TotalPrice - p.AmountPaid),
                 p.LocationId, p.ValidUntil, p.PaymentStatus.ToString(), p.IsActive, p.TotalSessions, p.UsedSessions,
-                row.Reserved, available, eligible, canSelect, reasons));
+                row.Reserved, available, eligible, canSelect, reasons) { BillingMode = p.BillingMode });
         }
         return new(session.Id, client.Id, session.LocationId, session.StartAt, offers, packages);
     }

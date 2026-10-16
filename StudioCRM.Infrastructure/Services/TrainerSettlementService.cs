@@ -166,6 +166,11 @@ public class TrainerSettlementService : ITrainerSettlementService
             TotalPages = items.Count == 0 ? 0 : (int)Math.Ceiling(items.Count / (decimal)filter.PageSize),
             Summary = new TrainerSettlementListSummaryDto
             {
+                TotalHours = items.Sum(i => i.TotalHours),
+                TotalSessions = items.Sum(i => i.TotalSessions),
+                NonContractedTotalHours = items.Sum(i => i.NonContractedTotalHours),
+                NonContractedTotalSessions = items.Sum(i => i.NonContractedTotalSessions),
+                NonContractedTotalAmount = items.Sum(i => i.NonContractedTotalAmount),
                 TotalAmount = totalAmount,
                 PaidAmount = paidAmount,
                 UnpaidAmount = totalAmount - paidAmount,

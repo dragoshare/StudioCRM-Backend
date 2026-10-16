@@ -75,36 +75,52 @@ public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserS
         if (page < 1 || page > 100000 || pageSize < 1 || pageSize > 100) throw new InvalidOperationException("Invalid pagination.");
         var query = db.GroupEnrollmentRequests.AsNoTracking().Where(e => e.SessionId == sessionId);
         var count = await query.CountAsync();
-        var rows = await query.OrderBy(e => e.Id).Skip((page - 1) * pageSize).Take(pageSize)
+        var items = await ReadAsync(query.OrderBy(e => e.Id).Skip((page - 1) * pageSize).Take(pageSize));
+        return new() { Page = page, PageSize = pageSize, TotalCount = count, TotalPages = (int)Math.Ceiling(count / (double)pageSize), Items = items };
+    }
+
+    // One read model for list, details and prepare/confirm responses: a fixed number of queries per page (no per-row reads).
+    private async Task<List<GroupEnrollmentDto>> ReadAsync(IQueryable<GroupEnrollmentRequest> query)
+    {
+        var rows = await query
             .Select(e => new { e.Id, e.SessionId, e.ClientId, e.ClientPackageId, e.Session.Status, e.Session.StartAt,
                 e.ClientPackage.ClosureDisposition, e.ClientPackage.ValidUntil, e.ClientPackage.PaymentStatus,
                 Due = Math.Max(0, e.ClientPackage.TotalPrice - e.ClientPackage.AmountPaid),
                 Booked = db.SessionParticipants.Any(p => p.SessionId == e.SessionId && p.ClientId == e.ClientId && p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"),
                 PackageName = e.ClientPackage.Name, e.ClientPackage.TotalPrice, e.ClientPackage.AmountPaid, PackageActive = e.ClientPackage.IsActive,
-                e.ClientPackage.TotalSessions, e.ClientPackage.UsedSessions,
+                e.ClientPackage.TotalSessions, e.ClientPackage.UsedSessions, e.ClientPackage.Currency, e.ClientPackage.BillingMode,
                 Participant = db.SessionParticipants.Where(p => p.SessionId == e.SessionId && p.ClientId == e.ClientId)
                     .OrderByDescending(p => p.Id).Select(p => new { p.Id, p.AttendanceStatus }).FirstOrDefault() }).ToListAsync();
         // Separate read so archived clients keep their rows (Client has a soft-delete query filter).
         var clientIds = rows.Select(r => r.ClientId).Distinct().ToArray();
         var clients = await db.Clients.IncludingOrganizationArchive(db.OrganizationId).AsNoTracking().Where(c => clientIds.Contains(c.Id))
             .Select(c => new { c.Id, Name = c.FirstName + " " + c.LastName, c.Email, c.PhoneNumber, c.IsDeleted }).ToDictionaryAsync(c => c.Id);
-        return new() { Page = page, PageSize = pageSize, TotalCount = count, TotalPages = (int)Math.Ceiling(count / (double)pageSize),
-            Items = rows.Select(e =>
+        var packageIds = rows.Select(r => (int?)r.ClientPackageId).Distinct().ToArray();
+        var pending = (await db.ClientPayments.AsNoTracking()
+            .Where(p => packageIds.Contains(p.ClientPackageId) && p.Status == ClientPaymentStatus.PendingConfirmation)
+            .OrderBy(p => p.PaymentDate).ThenBy(p => p.Id)
+            .Select(p => new { p.ClientPackageId, p.Id, p.Amount, p.Currency, p.Method, p.Source, p.PaymentDate })
+            .ToListAsync()).ToLookup(p => p.ClientPackageId!.Value,
+                p => new GroupEnrollmentPendingPaymentDto(p.Id, p.Amount, p.Currency, p.Method, p.Source, p.PaymentDate));
+        return rows.Select(e =>
+        {
+            var status = e.Booked ? "Booked" : e.Status != "Planned" || e.StartAt <= DateTime.UtcNow ? "Unavailable" :
+                e.ClosureDisposition != null || e.ValidUntil < e.StartAt ? "PackageUnavailable" :
+                e.PaymentStatus != PaymentStatus.Paid ? "AwaitingPayment" : "ReadyToBook";
+            var client = clients.GetValueOrDefault(e.ClientId);
+            var pendingPayments = pending[e.ClientPackageId].ToList();
+            return new GroupEnrollmentDto(e.Id, e.SessionId, e.ClientId, e.ClientPackageId, status, e.Due, e.Booked)
             {
-                var status = e.Booked ? "Booked" : e.Status != "Planned" || e.StartAt <= DateTime.UtcNow ? "Unavailable" :
-                    e.ClosureDisposition != null || e.ValidUntil < e.StartAt ? "PackageUnavailable" :
-                    e.PaymentStatus != PaymentStatus.Paid ? "AwaitingPayment" : "ReadyToBook";
-                return new GroupEnrollmentDto(e.Id, e.SessionId, e.ClientId, e.ClientPackageId, status, e.Due, e.Booked)
-                {
-                    ClientName = clients.GetValueOrDefault(e.ClientId)?.Name, ClientEmail = clients.GetValueOrDefault(e.ClientId)?.Email,
-                    ClientPhone = clients.GetValueOrDefault(e.ClientId)?.PhoneNumber, ClientIsArchived = clients.GetValueOrDefault(e.ClientId)?.IsDeleted,
-                    PackageName = e.PackageName, PackageTotalPrice = e.TotalPrice, PackageAmountPaid = e.AmountPaid,
-                    PackagePaymentStatus = e.PaymentStatus.ToString(), PackageValidUntil = e.ValidUntil, PackageIsActive = e.PackageActive,
-                    PackageTotalEntries = e.TotalSessions, PackageUsedEntries = e.UsedSessions,
-                    SessionParticipantId = e.Participant?.Id, AttendanceStatus = e.Participant?.AttendanceStatus,
-                    AllowedActions = AllowedActions(status, e.Due, clients.GetValueOrDefault(e.ClientId)?.IsDeleted ?? true)
-                };
-            }).ToList() };
+                ClientName = client?.Name, ClientEmail = client?.Email, ClientPhone = client?.PhoneNumber, ClientIsArchived = client?.IsDeleted,
+                PackageName = e.PackageName, PackageTotalPrice = e.TotalPrice, PackageAmountPaid = e.AmountPaid,
+                PackagePaymentStatus = e.PaymentStatus.ToString(), PackageValidUntil = e.ValidUntil, PackageIsActive = e.PackageActive,
+                PackageTotalEntries = e.TotalSessions, PackageUsedEntries = e.UsedSessions,
+                PackageBillingMode = e.BillingMode, Currency = e.Currency,
+                PendingPayments = pendingPayments, PendingPaymentsAmount = pendingPayments.Sum(p => p.Amount),
+                SessionParticipantId = e.Participant?.Id, AttendanceStatus = e.Participant?.AttendanceStatus,
+                AllowedActions = current.IsOwner ? AllowedActions(status, e.Due, client?.IsDeleted ?? true) : []
+            };
+        }).ToList();
     }
 
     // Mirrors ConfirmAsync (only ReadyToBook can be confirmed); a payment is recorded through the billing endpoint.
@@ -124,13 +140,8 @@ public partial class GroupEnrollmentService(StudioCRMDbContext db, ICurrentUserS
 
     public async Task<GroupEnrollmentDto> GetAsync(int id)
     {
-        var e = await AccessibleAsync(id); var p = e.ClientPackage;
-        var booked = await db.SessionParticipants.AnyAsync(x => x.SessionId == e.SessionId && x.ClientId == e.ClientId &&
-            x.AttendanceStatus != "CancelledInTime" && x.AttendanceStatus != "CancelledLate");
-        var status = booked ? "Booked" : e.Session.Status != "Planned" || e.Session.StartAt <= DateTime.UtcNow ? "Unavailable" :
-            p.ClosureDisposition != null || p.ValidUntil < e.Session.StartAt ? "PackageUnavailable" :
-            p.PaymentStatus != PaymentStatus.Paid ? "AwaitingPayment" : "ReadyToBook";
-        return new(e.Id, e.SessionId, e.ClientId, p.Id, status, Math.Max(0, p.TotalPrice - p.AmountPaid), booked);
+        var e = await AccessibleAsync(id);
+        return (await ReadAsync(db.GroupEnrollmentRequests.AsNoTracking().Where(x => x.Id == e.Id))).Single();
     }
 
     public async Task<GroupEnrollmentDto> ConfirmAsync(int id)

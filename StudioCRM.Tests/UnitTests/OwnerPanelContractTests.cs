@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Reflection;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Api.Controllers;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
@@ -39,7 +40,7 @@ public class OwnerPanelContractTests
         Assert.Equal("nameDesc", new ClientPageFilter { Sort = "name", Order = "desc" }.ResolveSort());
         Assert.Throws<ValidationException>(new ClientPageFilter { PageSize = 101 }.Validate);
         Assert.Throws<ValidationException>(new ClientPageFilter { PackageStatus = "expired" }.Validate);
-        Assert.Throws<ValidationException>(new ClientPageFilter { Sort = "balance" }.Validate);
+        Assert.Throws<ValidationException>(new ClientPageFilter { Sort = "phone" }.Validate);
     }
 
     [Fact]
@@ -50,6 +51,47 @@ public class OwnerPanelContractTests
         Assert.Throws<ValidationException>(new TrainerSettlementListFilter { Year = 2026, Month = 1, PageSize = 0 }.Validate);
         Assert.Throws<ValidationException>(new OwnerFilterOptionsQuery { Limit = 101 }.Validate);
     }
+
+    [Theory]
+    [InlineData("+48 600-100-200", "600100200")]
+    [InlineData("0048600100200", "600100200")]
+    [InlineData("600 100", "600100")]
+    [InlineData("12 34 56 78 901", "12345678901")]
+    [InlineData("Anna 12", null)]
+    [InlineData("anna", null)]
+    public void PhoneSearchComparesDigitsAndDropsPolishPrefix(string search, string? expected) =>
+        Assert.Equal(expected, ClientPageFilter.NormalizePhoneSearch(search));
+
+    [Theory]
+    [InlineData("balance")] [InlineData("balanceDesc")] [InlineData("packageUsage")] [InlineData("packageUsageDesc")]
+    [InlineData("trainer")] [InlineData("trainerDesc")] [InlineData("archivedAt")] [InlineData("archivedAtDesc")]
+    [InlineData("name")] [InlineData("nameDesc")] [InlineData("created")] [InlineData("createdDesc")]
+    public void ClientPageSortsTranslateToOneStatementWithIdTieBreak(string sort)
+    {
+        new ClientPageFilter { Sort = sort }.Validate();
+        using var db = TranslationContext();
+        var sql = Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToQueryString(
+            StudioCRM.Infrastructure.Services.ClientService.OrderClientPage(db, db.Clients, sort).Skip(25).Take(25));
+        Assert.Matches(@"\.""Id""( DESC)?$", sql[..sql.LastIndexOf("LIMIT", StringComparison.Ordinal)].TrimEnd());
+    }
+
+    [Fact]
+    public void PhoneSearchRunsInSqlAsDigitsOnlyComparison()
+    {
+        using var db = TranslationContext();
+        var sql = Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToQueryString(
+            StudioCRM.Infrastructure.Services.ClientService.WhereMatchesSearch(db.Clients, "+48 600 100 200"));
+        Assert.Contains("replace(", sql);
+        Assert.Contains("600100200", sql);
+    }
+
+    [Fact]
+    public void FilterOptionsGroupAccessRequiresLocation() =>
+        Assert.Throws<ValidationException>(new OwnerFilterOptionsQuery { GroupAccess = true }.Validate);
+
+    private static StudioCRM.Infrastructure.Persistence.StudioCRMDbContext TranslationContext() => new(
+        new Microsoft.EntityFrameworkCore.DbContextOptionsBuilder<StudioCRM.Infrastructure.Persistence.StudioCRMDbContext>()
+            .UseNpgsql("Host=localhost;Database=translation_only").Options, null, null, null);
 
     [Fact]
     public void SessionFilterIsPagedOnlyWhenPagingIsSent()

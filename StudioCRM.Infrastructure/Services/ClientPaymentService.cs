@@ -1135,6 +1135,13 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         "paymentDate" => query.OrderBy(p => p.PaymentDate).ThenBy(p => p.Id),
         "amount" => query.OrderBy(p => p.Amount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
         "amountDesc" => query.OrderByDescending(p => p.Amount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        // Client: last name, first name, then newest payment first. Overpayment = BalanceCreditAmount.
+        "clientName" => query.OrderBy(p => p.Client.LastName).ThenBy(p => p.Client.FirstName).ThenBy(p => p.ClientId)
+            .ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        "clientNameDesc" => query.OrderByDescending(p => p.Client.LastName).ThenByDescending(p => p.Client.FirstName).ThenByDescending(p => p.ClientId)
+            .ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        "overpayment" => query.OrderBy(p => p.BalanceCreditAmount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
+        "overpaymentDesc" => query.OrderByDescending(p => p.BalanceCreditAmount).ThenByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id),
         _ => query.OrderByDescending(p => p.PaymentDate).ThenByDescending(p => p.Id)
     };
 
