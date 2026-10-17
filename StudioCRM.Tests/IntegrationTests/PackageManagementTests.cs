@@ -207,6 +207,38 @@ public class PackageManagementTests
             .CreateHistoricalAsync(new HistoricalClientPackageRequest { RequestId = Guid.NewGuid(), Reason = "trener", ClientId = client.Id, PackageId = template.Id, PurchaseDate = request.PurchaseDate }));
     }
 
+    [PostgresFact]
+    public async Task BalanceAdjustmentSetsTargetOnceKeepsHistoryAndRejectsStaleValues()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "balance-owner@example.test" };
+        var client = new Client { FirstName = "Milena", Location = new Location { Name = "Studio" } };
+        db.AddRange(owner, client);
+        // Payment credit is not part of CurrentBalance and must not influence the adjustment.
+        db.Add(new ClientBalanceTransaction { Client = client, Type = BalanceTransactionType.PaymentCredit, Amount = 500 });
+        db.Add(new ClientBalanceTransaction { Client = client, Type = BalanceTransactionType.PaymentOverpayment, Amount = 15 });
+        await db.SaveChangesAsync();
+        var staff = new ClientLifecycleV2Tests.Staff(owner.Id);
+        var service = new ClientPackageService(db, staff, new Settings());
+
+        var result = await service.AdjustBalanceAsync(client.Id, new BalanceAdjustmentRequest { TargetBalance = -10, ExpectedCurrentBalance = 15, Reason = "Uzgodniona dopłata" });
+        Assert.Equal((15m, -10m, -25m), (result.PreviousBalance, result.Balance, result.Adjustment));
+        var retry = await service.AdjustBalanceAsync(client.Id, new BalanceAdjustmentRequest { TargetBalance = -10, ExpectedCurrentBalance = 15, Reason = "Ponowienie" });
+        Assert.Equal(0m, retry.Adjustment);
+        await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() =>
+            service.AdjustBalanceAsync(client.Id, new BalanceAdjustmentRequest { TargetBalance = 0, ExpectedCurrentBalance = 15, Reason = "Stara wartość" }));
+
+        db.ChangeTracker.Clear();
+        var adjustment = await db.ClientBalanceTransactions.SingleAsync(t => t.Type == BalanceTransactionType.ManualAdjustment);
+        Assert.Equal(-25m, adjustment.Amount);
+        Assert.Equal(1, await db.ClientAuditEntries.CountAsync(a => a.Action == "BalanceAdjusted"));
+        var summary = await new ClientPaymentService(db, staff, null!, Options.Create(new TpaySettings())).GetClientSummaryAsync(client.Id);
+        Assert.Equal(-10m, summary.CurrentBalance);
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new ClientPackageService(db, new PortalSecurityTests.Actor(owner.Id), new Settings())
+            .AdjustBalanceAsync(client.Id, new BalanceAdjustmentRequest { TargetBalance = 0, ExpectedCurrentBalance = -10, Reason = "trener" }));
+    }
+
     private sealed class Settings : IStudioSettingsService
     {
         public Task<OwnerSettingsDto> GetOwnerSettingsAsync() => Task.FromResult(new OwnerSettingsDto { DefaultPackageValidityDays = 90, DefaultPaymentDueDays = 7 });

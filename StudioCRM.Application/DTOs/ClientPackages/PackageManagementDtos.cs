@@ -74,3 +74,19 @@ public class HistoricalClientPackageRequest
     public DateTime? ValidUntil { get; set; }
     public DateTime? PaymentDueDate { get; set; }
 }
+
+public class BalanceAdjustmentRequest
+{
+    // Desired CurrentBalance after the correction; negative = the client owes this amount.
+    public decimal TargetBalance { get; set; }
+    // CurrentBalance the owner saw; a different value means someone changed it meanwhile (409).
+    public decimal ExpectedCurrentBalance { get; set; }
+    public string Reason { get; set; } = "";
+}
+
+public class BalanceAdjustmentResultDto
+{
+    public decimal PreviousBalance { get; set; }
+    public decimal Balance { get; set; }
+    public decimal Adjustment { get; set; }
+}

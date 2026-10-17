@@ -12,4 +12,5 @@ public interface IClientPackageService
     Task<int?> DecideExpiredAsync(int clientId, int clientPackageId, ExpiredPackageDecisionRequest request);
     Task<int> ImportAsync(ImportClientPackageRequest request);
     Task<int> CreateHistoricalAsync(HistoricalClientPackageRequest request);
+    Task<BalanceAdjustmentResultDto> AdjustBalanceAsync(int clientId, BalanceAdjustmentRequest request);
 }

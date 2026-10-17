@@ -114,4 +114,8 @@ public class ClientPackagesController : ControllerBase
     [HttpPost("historical")]
     public Task<ActionResult<object>> CreateHistorical(HistoricalClientPackageRequest request)
         => HandleAsync<object>(async () => Ok(new { id = await _clientPackageService.CreateHistoricalAsync(request) }));
+
+    [HttpPost("clients/{clientId:int}/balance-adjustment")]
+    public Task<ActionResult<object>> AdjustBalance(int clientId, BalanceAdjustmentRequest request)
+        => HandleAsync<object>(async () => Ok(await _clientPackageService.AdjustBalanceAsync(clientId, request)));
 }
