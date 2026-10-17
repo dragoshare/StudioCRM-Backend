@@ -22,6 +22,11 @@ public class OutlookWebhookService : IOutlookWebhookService
     private readonly IOutlookCalendarSyncService _calendarSyncService;
     private readonly ICurrentUserService _currentUser;
     private readonly IConfiguration _configuration;
+    // Same fields as the single-event read, so a calendar-view page can be imported without one request per event.
+    private const string EventSelect = "id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories,transactionId";
+    // Set only for the duration of ReconcileAsync: master category colours are read once per integration instead of
+    // once per event. Webhook processing keeps reading them fresh.
+    private Dictionary<int, Dictionary<string, string>>? _categoryColorCache;
 
     public OutlookWebhookService(
         StudioCRMDbContext context,
@@ -65,18 +70,21 @@ public class OutlookWebhookService : IOutlookWebhookService
             RangeEndAt = rangeEnd
         };
         var seriesRequiringAttention = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
+        _categoryColorCache = new Dictionary<int, Dictionary<string, string>>();
+        try
+        {
         foreach (var integration in integrations)
         {
             try
             {
                 await _tokenService.EnsureValidAccessTokenAsync(integration);
-                var outlookEventIds = await GetCalendarViewEventIdsAsync(integration, rangeStart, rangeEnd);
+                var outlookEvents = await GetCalendarViewEventsAsync(integration, rangeStart, rangeEnd);
+                var outlookEventIds = outlookEvents.Keys.ToHashSet(StringComparer.OrdinalIgnoreCase);
                 result.OutlookEventsFound += outlookEventIds.Count;
 
-                foreach (var externalEventId in outlookEventIds)
+                foreach (var (externalEventId, payload) in outlookEvents)
                 {
-                    await ImportOrUpdateEventAsync(integration, externalEventId);
+                    await ImportOrUpdateEventAsync(integration, externalEventId, payload);
                     result.ImportedOrUpdatedEvents++;
                 }
 
@@ -149,6 +157,11 @@ public class OutlookWebhookService : IOutlookWebhookService
                 result.Errors.Add($"{integration.Email}: {ex.Message}");
             }
         }
+        }
+        finally
+        {
+            _categoryColorCache = null;
+        }
 
         result.SeriesRequiringAttention = seriesRequiringAttention.OrderBy(value => value).ToList();
         return result;
@@ -214,7 +227,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
-            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select=id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories,transactionId");
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}?$select={EventSelect}");
 
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
 
@@ -231,7 +244,11 @@ public class OutlookWebhookService : IOutlookWebhookService
             return;
 
         using var doc = JsonDocument.Parse(body);
-        var root = doc.RootElement;
+        await ImportOrUpdateEventAsync(integration, externalEventId, doc.RootElement);
+    }
+
+    private async Task ImportOrUpdateEventAsync(CalendarIntegration integration, string externalEventId, JsonElement root)
+    {
 
         var isRecurring = root.TryGetProperty("type", out var type) &&
                           !string.Equals(type.GetString(), "singleInstance", StringComparison.OrdinalIgnoreCase);
@@ -846,6 +863,17 @@ public class OutlookWebhookService : IOutlookWebhookService
     private async Task<Dictionary<string, string>> ReadMasterCategoryColorsAsync(
         CalendarIntegration integration)
     {
+        if (_categoryColorCache is not null && _categoryColorCache.TryGetValue(integration.Id, out var cached))
+            return cached;
+        var colors = await ReadMasterCategoryColorsFromGraphAsync(integration);
+        if (_categoryColorCache is not null)
+            _categoryColorCache[integration.Id] = colors;
+        return colors;
+    }
+
+    private async Task<Dictionary<string, string>> ReadMasterCategoryColorsFromGraphAsync(
+        CalendarIntegration integration)
+    {
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         using var request = new HttpRequestMessage(
@@ -923,16 +951,16 @@ public class OutlookWebhookService : IOutlookWebhookService
         }
     }
 
-    private async Task<HashSet<string>> GetCalendarViewEventIdsAsync(
+    private async Task<Dictionary<string, JsonElement>> GetCalendarViewEventsAsync(
         CalendarIntegration integration,
         DateTime rangeStart,
         DateTime rangeEnd)
     {
-        var eventIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var events = new Dictionary<string, JsonElement>(StringComparer.OrdinalIgnoreCase);
         var nextUrl = "https://graph.microsoft.com/v1.0/me/calendarView" +
             $"?startDateTime={Uri.EscapeDataString(rangeStart.ToString("o"))}" +
             $"&endDateTime={Uri.EscapeDataString(rangeEnd.ToString("o"))}" +
-            "&$select=id&$top=200";
+            $"&$select={EventSelect}&$top=100";
 
         for (var page = 0; page < 50 && nextUrl is not null; page++)
         {
@@ -953,7 +981,8 @@ public class OutlookWebhookService : IOutlookWebhookService
                     if (item.TryGetProperty("id", out var idElement) &&
                         !string.IsNullOrWhiteSpace(idElement.GetString()))
                     {
-                        eventIds.Add(idElement.GetString()!);
+                        // Clone: the page document is disposed before the events are imported.
+                        events[idElement.GetString()!] = item.Clone();
                     }
                 }
             }
@@ -972,7 +1001,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             }
         }
 
-        return eventIds;
+        return events;
     }
 
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)
