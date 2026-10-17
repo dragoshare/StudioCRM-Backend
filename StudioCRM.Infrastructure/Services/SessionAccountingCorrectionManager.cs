@@ -121,7 +121,8 @@ internal static class SessionAccountingCorrectionManager
 
         foreach (var participant in participants)
         {
-            participant.CountsAgainstPackage = false;
+            // Only the executed accounting is undone. CountsAgainstPackage is the participant's declaration;
+            // clearing it made a cancelled-then-recompleted session skip the package entry.
             participant.IsCountedFromPackage = false;
             participant.ClientPackageId = null;
             participant.PackageId = null;

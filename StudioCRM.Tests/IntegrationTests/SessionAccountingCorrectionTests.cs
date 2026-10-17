@@ -132,6 +132,7 @@ public class SessionAccountingCorrectionTests
         Assert.Equal(PaymentStatus.Paid, renewal.PaymentStatus);
         Assert.Equal(package.Id, client.ActivePackageId);
         Assert.False(participant.IsCountedFromPackage);
+        Assert.True(participant.CountsAgainstPackage);
         Assert.Null(participant.ClientPackageId);
     }
 }

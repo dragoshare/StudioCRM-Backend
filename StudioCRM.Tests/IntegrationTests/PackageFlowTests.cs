@@ -54,6 +54,39 @@ public class PackageFlowTests
     }
 
     [PostgresFact]
+    public async Task CancellingAndRecompletingSessionCountsTheEntryAgain()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.PlannedSessionType = "TwoToOne"; catalog.BillingType = SessionBillingType.TwoToOne;
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId,
+            ExpectedBillingType = SessionBillingType.TwoToOne, TotalSessions = 8, UsedSessions = 2, ExpectedUnitPrice = 60m };
+        db.AddRange(pass, new SessionParticipant { Client = client, Session = session, CountsAgainstPackage = true });
+        await db.SaveChangesAsync();
+        var participants = Participants(db, owner);
+        var sessions = new SessionService(db, owner, null!, participants, new PortalSecurityTests.NoSync(), null!,
+            NullLogger<SessionService>.Instance);
+        await participants.CompleteSessionAsync(session.Id, new()
+        { ActualSessionType = "TwoToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true }] });
+        Assert.Equal(3, pass.UsedSessions);
+
+        StudioCRM.Application.DTOs.Sessions.UpdateSessionDto Edit(string status) => new()
+        { StartAt = DateTime.SpecifyKind(session.StartAt, DateTimeKind.Utc), EndAt = DateTime.SpecifyKind(session.EndAt, DateTimeKind.Utc),
+          TrainerId = session.TrainerId, LocationId = session.LocationId, PlannedSessionType = "TwoToOne", Status = status };
+
+        await sessions.UpdateAsync(session.Id, Edit("Cancelled"));
+        db.ChangeTracker.Clear();
+        Assert.Equal(2, (await db.ClientPackages.SingleAsync(x => x.Id == pass.Id)).UsedSessions);
+        // Cancelling reverts the accounting but keeps the declaration, so completing again counts the entry.
+        Assert.True((await db.SessionParticipants.SingleAsync()).CountsAgainstPackage);
+
+        await sessions.UpdateAsync(session.Id, Edit("Completed"));
+        db.ChangeTracker.Clear();
+        Assert.Equal(3, (await db.ClientPackages.SingleAsync(x => x.Id == pass.Id)).UsedSessions);
+        Assert.True((await db.SessionParticipants.SingleAsync()).IsCountedFromPackage);
+    }
+
+    [PostgresFact]
     public async Task IndividualMixedAgreementPreservesOpeningUsageAndDoesNotCreateBalance()
     {
         await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
