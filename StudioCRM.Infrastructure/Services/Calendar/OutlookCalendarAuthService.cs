@@ -62,7 +62,10 @@ public class OutlookCalendarAuthService : IOutlookCalendarAuthService
             $"&redirect_uri={Uri.EscapeDataString(_settings.RedirectUri)}" +
             $"&response_mode=query" +
             $"&scope={Uri.EscapeDataString(_settings.Scopes)}" +
-            $"&prompt=consent" +
+            // select_account: the user picks the Microsoft account (avoids connecting the wrong one). Consent is
+            // asked by Microsoft only when needed; forcing it (prompt=consent) blocks staff of tenants where only an
+            // administrator may consent, even after the administrator granted it for the whole organization.
+            $"&prompt=select_account" +
             $"&state={Uri.EscapeDataString(state)}&code_challenge={challenge}&code_challenge_method=S256";
 
         return new CalendarConnectUrlDto { Url = url };
