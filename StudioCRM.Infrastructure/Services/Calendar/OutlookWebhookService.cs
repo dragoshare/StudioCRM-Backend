@@ -44,10 +44,18 @@ public class OutlookWebhookService : IOutlookWebhookService
         _currentUser = currentUser;
     }
 
-    public async Task<OutlookReconciliationResultDto> ReconcileAsync(
-        OutlookReconciliationRequestDto request)
+    public Task<OutlookReconciliationResultDto> ReconcileAsync(OutlookReconciliationRequestDto request)
     {
-        if (!_currentUser.IsOwner && !_currentUser.IsTrainer)
+        if (!_currentUser.UserId.HasValue)
+            throw new InvalidOperationException("Current user is not authenticated.");
+        return ReconcileAsync(request, new OutlookReconcileActor(_currentUser.UserId.Value, _currentUser.IsOwner, _currentUser.IsTrainer));
+    }
+
+    public async Task<OutlookReconciliationResultDto> ReconcileAsync(
+        OutlookReconciliationRequestDto request,
+        OutlookReconcileActor actor)
+    {
+        if (!actor.IsOwner && !actor.IsTrainer)
             throw new InvalidOperationException("Current user cannot reconcile Outlook calendars.");
 
         var pastDays = Math.Clamp(request.PastDays, 0, 365);
@@ -56,11 +64,18 @@ public class OutlookWebhookService : IOutlookWebhookService
         var rangeEnd = DateTime.UtcNow.Date.AddDays(futureDays + 1);
         var integrationsQuery = _context.CalendarIntegrations
             .Where(integration => integration.Provider == "Outlook" && integration.IsActive);
-        if (!_currentUser.IsOwner)
+        if (request.TrainerId.HasValue && !actor.IsOwner)
+            throw new UnauthorizedAccessException("Only the owner can reconcile another trainer's Outlook.");
+        if (!actor.IsOwner || request.OnlyMine)
         {
-            var userId = _currentUser.UserId
-                ?? throw new InvalidOperationException("Current user is not authenticated.");
+            var userId = actor.UserId;
             integrationsQuery = integrationsQuery.Where(integration => integration.UserId == userId);
+        }
+        else if (request.TrainerId.HasValue)
+        {
+            var trainerUserId = await _context.Trainers.Where(t => t.Id == request.TrainerId.Value).Select(t => (int?)t.UserId).SingleOrDefaultAsync()
+                ?? throw new KeyNotFoundException("Trainer not found.");
+            integrationsQuery = integrationsQuery.Where(integration => integration.UserId == trainerUserId);
         }
 
         var integrations = await integrationsQuery.OrderBy(integration => integration.Id).ToListAsync();

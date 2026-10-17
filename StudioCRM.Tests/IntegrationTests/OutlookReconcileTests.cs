@@ -60,6 +60,34 @@ public class OutlookReconcileTests
         Assert.Equal(0, handler.Count("/me/events/"));
     }
 
+    [PostgresFact]
+    public async Task OwnerCanLimitReconcileToOwnOrOneTrainersOutlook()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "owner-scope@example.test" };
+        var trainer = new Trainer { User = new User { Email = "trainer-scope@example.test" } };
+        CalendarIntegration Connect(User user) => new()
+        {
+            User = user, Provider = "Outlook", IsActive = true, Email = user.Email,
+            AccessToken = "token", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+        db.AddRange(owner, trainer, Connect(owner), Connect(trainer.User));
+        await db.SaveChangesAsync();
+        var configuration = new ConfigurationBuilder().AddInMemoryCollection().Build();
+        OutlookWebhookService Service(GraphHandler handler, int userId, string role) =>
+            new(db, new HttpClient(handler), configuration, new NoRefresh(), null!, new PortalSecurityTests.Actor(userId, role));
+        GraphHandler Empty() => new(request => request.RequestUri!.AbsolutePath.EndsWith("/me/calendarView") ? "{\"value\":[]}" : null);
+
+        Assert.Equal(2, (await Service(Empty(), owner.Id, "Owner").ReconcileAsync(new())).IntegrationsProcessed);
+        Assert.Equal(1, (await Service(Empty(), owner.Id, "Owner").ReconcileAsync(new() { OnlyMine = true })).IntegrationsProcessed);
+        var single = Empty();
+        Assert.Equal(1, (await Service(single, owner.Id, "Owner").ReconcileAsync(new() { TrainerId = trainer.Id })).IntegrationsProcessed);
+        Assert.Equal(1, single.Count("/me/calendarView"));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
+            Service(Empty(), trainer.UserId, "Trainer").ReconcileAsync(new() { TrainerId = trainer.Id }));
+    }
+
     private sealed class NoRefresh : IOutlookTokenService
     {
         public Task EnsureValidAccessTokenAsync(CalendarIntegration integration, bool forceRefresh = false) => Task.CompletedTask;

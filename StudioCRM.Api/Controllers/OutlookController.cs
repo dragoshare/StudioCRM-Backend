@@ -191,20 +191,60 @@ public class OutlookController : ControllerBase
 
     [HttpPost("reconcile")]
     [Authorize(Roles = "Trainer,Owner")]
-    public async Task<ActionResult<OutlookReconciliationResultDto>> Reconcile(
+    [ProducesResponseType(typeof(OutlookReconciliationResultDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> Reconcile(
         [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
-        OutlookReconciliationRequestDto? request)
+        OutlookReconciliationRequestDto? request,
+        [FromServices] StudioCRM.Api.BackgroundServices.OutlookReconcileJobs jobs,
+        [FromServices] StudioCRM.Api.Security.RequestOrganizationContext organization)
     {
-        try
-        {
-            return Ok(await _webhookService.ReconcileAsync(
-                request ?? new OutlookReconciliationRequestDto()));
-        }
-        catch (InvalidOperationException ex)
-        {
-            return BadRequest(new { message = ex.Message });
-        }
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        var actor = new OutlookReconcileActor(userId, User.IsInRole("Owner"), User.IsInRole("Trainer"));
+        request ??= new OutlookReconciliationRequestDto();
+        if (request.TrainerId.HasValue && !actor.IsOwner) return Forbid();
+
+        // Runs in the background so a long reconcile is not cut off by the browser or proxy. Short ones still
+        // answer with the result as before; longer ones answer 202 and finish in the background.
+        var job = jobs.Enqueue(organization.OrganizationId, actor, request);
+        await Task.WhenAny(job.Done, Task.Delay(ReconcileWait, HttpContext.RequestAborted));
+        if (job.State == StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Completed) return Ok(job.Result);
+        if (job.State == StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Failed)
+            return job.IsUserError ? BadRequest(new { message = job.Error }) : StatusCode(StatusCodes.Status500InternalServerError, new { message = job.Error });
+        return Accepted($"/api/outlook/reconcile/{job.Id}", ReconcileStatus(job));
     }
+
+    private static readonly TimeSpan ReconcileWait = TimeSpan.FromSeconds(15);
+
+    [HttpGet("reconcile/{jobId:guid}")]
+    [Authorize(Roles = "Trainer,Owner")]
+    public IActionResult ReconcileJob(
+        Guid jobId,
+        [FromServices] StudioCRM.Api.BackgroundServices.OutlookReconcileJobs jobs,
+        [FromServices] StudioCRM.Api.Security.RequestOrganizationContext organization)
+    {
+        var job = jobs.Find(jobId);
+        if (job is null || job.OrganizationId != organization.OrganizationId) return NotFound();
+        if (!int.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier), out var userId)) return Unauthorized();
+        if (job.Actor.UserId != userId && !User.IsInRole("Owner")) return NotFound();
+        return Ok(ReconcileStatus(job));
+    }
+
+    private static object ReconcileStatus(StudioCRM.Api.BackgroundServices.OutlookReconcileJob job) => new
+    {
+        jobId = job.Id,
+        state = job.State.ToString(),
+        message = job.State switch
+        {
+            StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Completed => "Synchronizacja z Outlookiem zakończona.",
+            StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Failed => job.Error,
+            _ => "Synchronizacja z Outlookiem trwa w tle. Grafik odświeży się po jej zakończeniu."
+        },
+        result = job.Result,
+        queuedAt = job.QueuedAt,
+        startedAt = job.StartedAt,
+        finishedAt = job.FinishedAt
+    };
 
     [HttpGet("imported-events")]
     [Authorize(Roles = "Trainer,Owner")]
