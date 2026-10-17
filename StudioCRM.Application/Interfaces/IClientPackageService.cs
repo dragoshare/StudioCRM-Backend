@@ -11,4 +11,5 @@ public interface IClientPackageService
     Task<int?> CloseAsync(int clientId, int clientPackageId, ClosePackageRequest request);
     Task<int?> DecideExpiredAsync(int clientId, int clientPackageId, ExpiredPackageDecisionRequest request);
     Task<int> ImportAsync(ImportClientPackageRequest request);
+    Task<int> CreateHistoricalAsync(HistoricalClientPackageRequest request);
 }

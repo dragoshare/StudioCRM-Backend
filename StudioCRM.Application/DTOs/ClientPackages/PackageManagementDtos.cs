@@ -57,3 +57,20 @@ public class PackageManagementPreviewDto
     public string? DeleteBlockReason { get; set; }
     public List<string> Blockers { get; set; } = new();
 }
+
+// Owner-only record of an already finished personal package entered after the fact (e.g. a payment for an earlier
+// package that was never registered). Created inactive with all entries used; does not touch the active package or balance.
+public class HistoricalClientPackageRequest
+{
+    public Guid RequestId { get; set; }
+    public string Reason { get; set; } = "";
+    public int ClientId { get; set; }
+    public int PackageId { get; set; }
+    public string? Name { get; set; }
+    public int? TotalSessions { get; set; }
+    public decimal? TotalPrice { get; set; }
+    public DateTime PurchaseDate { get; set; }
+    // Defaults to the purchase day; must not be later than today.
+    public DateTime? ValidUntil { get; set; }
+    public DateTime? PaymentDueDate { get; set; }
+}

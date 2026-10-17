@@ -134,6 +134,30 @@ RequestId generuj raz dla danego zatwierdzenia i zachowaj przy ponowieniu identy
 
 Wykorzystanie: od 0 do `totalSessions - 1`; wcześniejsze opłacenie: od 0 do ceny. Import nie zużywa salda CRM i nie tworzy wpłaty ani sztucznych treningów. Kwota będzie widoczna w opłaceniu pakietu, a szczegóły importu w audycie. Nie będzie jej w historii nowych wpłat i przychodach CRM.
 
+### Zakończony pakiet wstecz (owner)
+
+`POST /api/client-packages/historical` zapisuje wcześniejszy, już zakończony pakiet indywidualny lub semi, np. gdy klient zapłacił za pakiet, którego nie było w CRM. Pakiet powstaje **nieaktywny, z wykorzystanymi wszystkimi wejściami**. Nie zmienia bieżącego pakietu, salda ani statusu klienta i nie jest wybierany do liczenia treningów. Działa także wtedy, gdy klient ma aktywny pakiet.
+
+```json
+{
+  "requestId": "2c3b2e60-e34d-467f-b9cf-7719e894fb39",
+  "reason": "Wpłata 01.10 za wcześniejszy pakiet",
+  "clientId": 134,
+  "packageId": 56,
+  "totalPrice": 690,
+  "purchaseDate": "2026-10-01T10:00:00Z",
+  "validUntil": "2026-10-01T10:00:00Z"
+}
+```
+
+Zasady:
+- `requestId` działa jak przy imporcie: ponowienie zwraca ten sam pakiet, a inne dane z tym samym kluczem dają 400.
+- Data zakupu musi być w przeszłości. `validUntil` domyślnie wynosi dzień zakupu i nie może być w przyszłości.
+- Pakiety grupowe i okresowe są odrzucane.
+- Odpowiedź: `{ "id": 123 }`. Origin pakietu to `"Historical"`; pokaż oznaczenie „Pakiet wstecz”.
+
+Wpłatę za taki pakiet wprowadza się zwykłym `POST /api/billing/payments` z `clientPackageId` i `paymentDate`. Wpłata nie aktywuje pakietu, bo nie ma on wolnych wejść. Usunięcie takiego pakietu jest zablokowane (wykorzystane wejścia), więc pomyłkę cofa się zamknięciem.
+
 ## 7. Cofanie, historia i blokady
 
 - Cofnięcie wpłaty: istniejące `POST /api/billing/payments/{paymentId}/reverse` z `reason`. Nie usuwaj wiersza — pokaż „Cofnięta”.

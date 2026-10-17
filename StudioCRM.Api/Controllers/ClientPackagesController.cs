@@ -110,4 +110,8 @@ public class ClientPackagesController : ControllerBase
     [HttpPost("import")]
     public Task<ActionResult<object>> Import(ImportClientPackageRequest request)
         => HandleAsync<object>(async () => Ok(new { id = await _clientPackageService.ImportAsync(request) }));
+
+    [HttpPost("historical")]
+    public Task<ActionResult<object>> CreateHistorical(HistoricalClientPackageRequest request)
+        => HandleAsync<object>(async () => Ok(new { id = await _clientPackageService.CreateHistoricalAsync(request) }));
 }

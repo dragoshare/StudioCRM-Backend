@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.ClientPackages.Services;
+using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.ClientPackages;
 using StudioCRM.Application.DTOs.Settings;
 using StudioCRM.Application.Interfaces;
@@ -154,6 +155,56 @@ public class PackageManagementTests
         Assert.Equal(80m, result.Surplus); Assert.Equal(600m, pass.AmountPaid); Assert.Equal(0m, result.AmountDue);
         Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
         Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageSurplusKeptByStudio"));
+    }
+
+    [PostgresFact]
+    public async Task HistoricalPackageIsFinishedInactiveAndTakesItsPaymentWithoutTouchingTheCurrentPackage()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "historical-owner@example.test" };
+        var client = new Client { FirstName = "Renata", Location = new Location { Name = "Studio" } };
+        var template = new Package { Name = "8 wejsc", Price = 690, SessionsLimit = 8, BillingType = SessionBillingType.OneToOne };
+        db.AddRange(owner, client, template); await db.SaveChangesAsync();
+        var staff = new ClientLifecycleV2Tests.Staff(owner.Id);
+        var service = new ClientPackageService(db, staff, new Settings());
+        var currentId = await service.CreateAsync(new CreateClientPackageRequest { ClientId = client.Id, PackageId = template.Id, PurchaseDate = DateTime.UtcNow });
+
+        var request = new HistoricalClientPackageRequest
+        {
+            RequestId = Guid.NewGuid(), Reason = "Płatność 01.10 za wcześniejszy pakiet", ClientId = client.Id, PackageId = template.Id,
+            PurchaseDate = new DateTime(2026, 9, 1, 10, 0, 0, DateTimeKind.Utc), ValidUntil = new DateTime(2026, 9, 30, 10, 0, 0, DateTimeKind.Utc)
+        };
+        var id = await service.CreateHistoricalAsync(request);
+        Assert.Equal(id, await service.CreateHistoricalAsync(request));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateHistoricalAsync(new HistoricalClientPackageRequest
+        {
+            RequestId = request.RequestId, Reason = "inna", ClientId = client.Id, PackageId = template.Id, PurchaseDate = request.PurchaseDate
+        }));
+        db.ChangeTracker.Clear();
+        var historical = await db.ClientPackages.SingleAsync(p => p.Id == id);
+        Assert.Equal((false, 8, 8, "Historical", 690m, 0m), (historical.IsActive, historical.UsedSessions, historical.TotalSessions,
+            historical.RenewalSource, historical.TotalPrice, historical.BalanceApplied));
+
+        var payments = new ClientPaymentService(db, staff, null!, Options.Create(new TpaySettings()));
+        var paymentDate = new DateTime(2026, 10, 1, 10, 0, 0, DateTimeKind.Utc);
+        var payment = await payments.CreatePaymentAsStaffAsync(new CreateClientPaymentRequest
+        { ClientId = client.Id, ClientPackageId = id, Amount = 690, Method = PaymentMethod.BankTransfer, PaymentDate = paymentDate });
+        Assert.Equal((paymentDate, 690m, 0m), (payment.PaymentDate, payment.AppliedToPackageAmount, payment.BalanceCreditAmount));
+
+        db.ChangeTracker.Clear();
+        historical = await db.ClientPackages.SingleAsync(p => p.Id == id);
+        Assert.Equal((PaymentStatus.Paid, false), (historical.PaymentStatus, historical.IsActive));
+        var current = await db.ClientPackages.SingleAsync(p => p.Id == currentId);
+        Assert.Equal((true, 0m), (current.IsActive, current.AmountPaid));
+        var summary = await payments.GetClientSummaryAsync(client.Id);
+        Assert.Equal(currentId, summary.ActiveClientPackageId);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.ActivateAsync(client.Id, id));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CreateHistoricalAsync(new HistoricalClientPackageRequest
+        { RequestId = Guid.NewGuid(), Reason = "przyszłość", ClientId = client.Id, PackageId = template.Id, PurchaseDate = DateTime.UtcNow.AddDays(2) }));
+        await Assert.ThrowsAsync<UnauthorizedAccessException>(() => new ClientPackageService(db, new PortalSecurityTests.Actor(owner.Id), new Settings())
+            .CreateHistoricalAsync(new HistoricalClientPackageRequest { RequestId = Guid.NewGuid(), Reason = "trener", ClientId = client.Id, PackageId = template.Id, PurchaseDate = request.PurchaseDate }));
     }
 
     private sealed class Settings : IStudioSettingsService
