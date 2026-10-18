@@ -83,6 +83,9 @@ public class SessionService : ISessionService
             .Where(x => x.OriginalSessionId == id)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
+        var authorIds = corrections.Where(x => x.ChangedByUserId.HasValue).Select(x => x.ChangedByUserId!.Value).Distinct().ToList();
+        var authors = await _context.Users.AsNoTracking().Where(u => authorIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim());
 
         return corrections.Select(x => new SessionCorrectionDto
         {
@@ -94,6 +97,7 @@ public class SessionService : ISessionService
             BeforeState = JsonSerializer.Deserialize<JsonElement>(x.BeforeStateJson),
             AfterState = JsonSerializer.Deserialize<JsonElement>(x.AfterStateJson),
             ChangedByUserId = x.ChangedByUserId,
+            ChangedByFullName = x.ChangedByUserId.HasValue ? authors.GetValueOrDefault(x.ChangedByUserId.Value) : null,
             CreatedAt = x.CreatedAt
         }).ToList();
     }
@@ -1132,7 +1136,7 @@ public class SessionService : ISessionService
     {
         if (await IsSessionLockedByPaidSettlementAsync(trainerId, startAt))
         {
-            throw new InvalidOperationException(
+            throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.TrainerSettlementPaid,
                 "Session cannot be changed because the trainer settlement for this month has already been paid.");
         }
     }

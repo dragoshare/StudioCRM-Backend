@@ -1,3 +1,4 @@
+using StudioCRM.Application.Common;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
@@ -74,7 +75,7 @@ internal static class SessionCorrectionRecorder
         if (string.IsNullOrWhiteSpace(normalized))
             return null;
         if (normalized.Length > 500)
-            throw new InvalidOperationException("Correction reason cannot exceed 500 characters.");
+            throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.CorrectionReasonTooLong, "Correction reason cannot exceed 500 characters.");
         return normalized;
     }
 }

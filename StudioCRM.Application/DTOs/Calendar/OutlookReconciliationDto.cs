@@ -36,3 +36,17 @@ public class OutlookReconciliationResultDto
 
 // The user a reconcile runs for; captured from the request so a background job keeps the same scope.
 public record OutlookReconcileActor(int UserId, bool IsOwner, bool IsTrainer);
+
+// 202 body of POST /api/outlook/reconcile and the body of GET /api/outlook/reconcile/{jobId}.
+public class OutlookReconcileJobStatusDto
+{
+    public Guid JobId { get; set; }
+    // Queued, Running, Completed, Failed
+    public string State { get; set; } = string.Empty;
+    public string? Message { get; set; }
+    // Set when State is Completed.
+    public OutlookReconciliationResultDto? Result { get; set; }
+    public DateTime QueuedAt { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? FinishedAt { get; set; }
+}

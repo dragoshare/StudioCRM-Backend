@@ -112,6 +112,8 @@ public class OutlookController : ControllerBase
     }
 
     [HttpPost("sync-session/{sessionId:int}")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> SyncSession(int sessionId, [FromServices] StudioCRMDbContext db)
     {
@@ -192,7 +194,7 @@ public class OutlookController : ControllerBase
     [HttpPost("reconcile")]
     [Authorize(Roles = "Trainer,Owner")]
     [ProducesResponseType(typeof(OutlookReconciliationResultDto), StatusCodes.Status200OK)]
-    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(typeof(OutlookReconcileJobStatusDto), StatusCodes.Status202Accepted)]
     public async Task<IActionResult> Reconcile(
         [FromBody(EmptyBodyBehavior = Microsoft.AspNetCore.Mvc.ModelBinding.EmptyBodyBehavior.Allow)]
         OutlookReconciliationRequestDto? request,
@@ -218,6 +220,8 @@ public class OutlookController : ControllerBase
 
     [HttpGet("reconcile/{jobId:guid}")]
     [Authorize(Roles = "Trainer,Owner")]
+    [ProducesResponseType(typeof(OutlookReconcileJobStatusDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
     public IActionResult ReconcileJob(
         Guid jobId,
         [FromServices] StudioCRM.Api.BackgroundServices.OutlookReconcileJobs jobs,
@@ -230,20 +234,20 @@ public class OutlookController : ControllerBase
         return Ok(ReconcileStatus(job));
     }
 
-    private static object ReconcileStatus(StudioCRM.Api.BackgroundServices.OutlookReconcileJob job) => new
+    private static OutlookReconcileJobStatusDto ReconcileStatus(StudioCRM.Api.BackgroundServices.OutlookReconcileJob job) => new()
     {
-        jobId = job.Id,
-        state = job.State.ToString(),
-        message = job.State switch
+        JobId = job.Id,
+        State = job.State.ToString(),
+        Message = job.State switch
         {
             StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Completed => "Synchronizacja z Outlookiem zakończona.",
             StudioCRM.Api.BackgroundServices.OutlookReconcileJobState.Failed => job.Error,
             _ => "Synchronizacja z Outlookiem trwa w tle. Grafik odświeży się po jej zakończeniu."
         },
-        result = job.Result,
-        queuedAt = job.QueuedAt,
-        startedAt = job.StartedAt,
-        finishedAt = job.FinishedAt
+        Result = job.Result,
+        QueuedAt = job.QueuedAt,
+        StartedAt = job.StartedAt,
+        FinishedAt = job.FinishedAt
     };
 
     [HttpGet("imported-events")]
@@ -254,6 +258,7 @@ public class OutlookController : ControllerBase
     }
 
     [HttpGet("issues")]
+    [ProducesResponseType(typeof(List<OutlookMappingIssueDto>), StatusCodes.Status200OK)]
     [Authorize(Roles = "Trainer,Owner")]
     public async Task<IActionResult> GetIssues()
     {

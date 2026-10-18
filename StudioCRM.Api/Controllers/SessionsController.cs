@@ -160,7 +160,7 @@ public class SessionsController : ControllerBase
         {
             _logger?.LogWarning("Session request {Method} {Path} rejected: {Message}",
                 Request.Method, Request.Path.Value, ex.Message);
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(StudioCRM.Application.Common.CodedInvalidOperationException.Body(ex));
         }
     }
 
@@ -174,7 +174,7 @@ public class SessionsController : ControllerBase
         {
             _logger?.LogWarning("Session request {Method} {Path} rejected: {Message}",
                 Request.Method, Request.Path.Value, ex.Message);
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(StudioCRM.Application.Common.CodedInvalidOperationException.Body(ex));
         }
     }
 }

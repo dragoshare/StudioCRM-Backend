@@ -1,6 +1,8 @@
 # Outlook i korekty zrealizowanych sesji — notatka dla frontu (2026-10-18)
 
-Zbiorcza instrukcja do paneli: połączenie z Outlookiem, odświeżanie, lista zgłoszeń, korekta zrealizowanej sesji. Backend jest wdrożony. Wszystkie odpowiedzi błędów mają postać `{ "message": "…" }`. Komunikat pokazuj użytkownikowi bez zamiany na ogólne „Nie udało się”.
+Zbiorcza instrukcja do paneli: połączenie z Outlookiem, odświeżanie, lista zgłoszeń, korekta zrealizowanej sesji. Backend jest wdrożony. Odpowiedzi błędów mają postać `{ "message": "…", "code": "…" | null }`. Gdy jest `code`, rozpoznawaj błąd po nim, a nie po słowach w `message`. `message` pokazuj użytkownikowi bez zamiany na ogólne „Nie udało się”.
+
+> Aktualizacja 2026-10-18 (po uwagach frontu): pola listy zgłoszeń, `requiresDecision`, kody błędów korekty, dozwolone `attendanceStatus`, autor korekty, schematy odświeżania. Szczegóły w punktach 1–4 i w sekcji 6.
 
 ---
 
@@ -26,6 +28,8 @@ Microsoft wraca na `/api/outlook/callback`. Sukces to 200 `{ message }`. Błędy
 
 Błąd z `code` ma też pola `microsoftCode` (np. `AADSTS65001`) i `detail`. Pokaż je drobną czcionką, bo przydają się administratorowi.
 
+**Przekazywanie parametrów:** jeśli strona powrotu jest na froncie, przekaż do `GET /api/outlook/callback` **cały query string** od Microsoftu bez zmian (`code`, `state`, a przy błędzie także `error` i `error_description`). Gdy front przekazuje tylko `code` i `state`, informacja o błędzie Microsoftu ginie i backend zwraca wtedy tylko „Invalid or expired OAuth state.”. Jeśli `error` jest w adresie, front może też od razu pokazać komunikat, ale backend zwróci go z `code` i `message`.
+
 ---
 
 ## 2. Odświeżanie Outlooka
@@ -41,12 +45,14 @@ Błąd z `code` ma też pola `microsoftCode` (np. `AADSTS65001`) i `detail`. Pok
 
 Opcjonalne pola: `pastDays` (0–365, domyślnie 30) i `futureDays` (1–730, domyślnie 180).
 
+**Trener:** backend sam pilnuje zakresu. Konto bez roli Owner zawsze odświeża **tylko własny** kalendarz, niezależnie od body. Próba podania `trainerId` przez trenera kończy się 403.
+
 **Odpowiedź:**
 - **200**: gotowe. Wynik ma pola:
   - `integrationsProcessed` (kalendarze), `outlookEventsFound` (wydarzenia w Outlooku), `importedOrUpdatedEvents` (zaimportowane lub zaktualizowane);
   - `crmSessionsSyncedToOutlook` (sesje CRM wysłane do Outlooka), `missingOutlookEventsMarkedDeleted` (oznaczone jako usunięte);
   - `seriesRequiringAttention[]` (serie wymagające uwagi), `errors[]` (błędy).
-- **202**: trwa w tle. Body: `{ jobId, state, message }`. Co 3–5 s odpytuj `GET /api/outlook/reconcile/{jobId}`, aż `state` będzie `Completed` (wynik w `result`) albo `Failed` (pokaż `message`). 404 przy odpytywaniu oznacza restart serwera: poproś o ponowne kliknięcie.
+- **202**: trwa w tle. Body `OutlookReconcileJobStatusDto`: `{ jobId, state, message, result, queuedAt, startedAt, finishedAt }` (schemat jest w Swaggerze). Co 3–5 s odpytuj `GET /api/outlook/reconcile/{jobId}`, aż `state` będzie `Completed` (wynik w `result`) albo `Failed` (pokaż `message`). 404 przy odpytywaniu oznacza restart serwera: poproś o ponowne kliknięcie.
 
 **UI:**
 - Na czas trwania przycisk jest zablokowany z tekstem „Synchronizuję…”. Ponowne kliknięcie nie startuje drugiej synchronizacji.
@@ -57,7 +63,7 @@ Opcjonalne pola: `pastDays` (0–365, domyślnie 30) i `futureDays` (1–730, do
 
 ## 3. Lista zgłoszeń Outlooka (panel „Problemy z kalendarzem”)
 
-`GET /api/outlook/issues` → lista:
+`GET /api/outlook/issues` → lista `OutlookMappingIssueDto` (schemat jest w Swaggerze). **Nazwy pól są inne, niż front zakładał:** typ to `issueType` (nie `type`), tytuł to `subject` (nie `title`), a osoba to `calendarOwnerFullName` (właściciel kalendarza, z którego pochodzi wydarzenie).
 
 ```json
 {
@@ -65,10 +71,18 @@ Opcjonalne pola: `pastDays` (0–365, domyślnie 30) i `futureDays` (1–730, do
   "startAt": "2026-10-14T16:00:00Z", "endAt": "2026-10-14T17:00:00Z",
   "locationName": "Kłaj", "organizerEmail": "trener@…",
   "issueType": "CompletedSessionAttendeeRemovedInOutlook",
+  "requiresDecision": true,
+  "calendarOwnerFullName": "Karolina Wróbel",
   "message": "Do weryfikacji w CRM: klienta usunięto w Outlooku z zrealizowanej sesji: anna@…",
   "email": "anna@…", "importedAt": "…"
 }
 ```
+
+**Dwie sekcje w UI według `requiresDecision`:**
+- `true`: panel „Wymaga Twojej decyzji” (rozliczenie). Dotyczy wyłącznie sesji i wydarzeń, które już się odbyły;
+- `false`: osobna sekcja „Problemy z importem kalendarza”. To ostrzeżenia z mapowania (nieznany klient, lokalizacja, trener, limit sali), także przy przyszłych sesjach. **Nie pokazuj ich jako decyzji o rozliczeniu.**
+
+Zawsze wyświetlaj `message`, a nie ogólny tekst.
 
 **Kto co widzi:**
 - trener: zgłoszenia ze swojego kalendarza;
@@ -84,7 +98,7 @@ Opcjonalne pola: `pastDays` (0–365, domyślnie 30) i `futureDays` (1–730, do
 | `UnknownLocation`, `UnknownTrainer`, `LocationLimitExceeded`, `Other` | problemy z mapowaniem | „Ignoruj” (i ewentualnie poprawka w Outlooku) |
 
 **Akcje:**
-- **Zamień na sesję:** `POST /api/outlook/imported-events/{externalCalendarEventId}/convert-to-session` z body `{}`. Zwraca ID sesji. Sesja z przeszłości zostanie automatycznie zakończona i rozliczona przez CRM, więc przed wysłaniem pokaż potwierdzenie: „Utworzyć sesję i rozliczyć wejścia uczestników?”.
+- **Zamień na sesję:** `POST /api/outlook/imported-events/{externalCalendarEventId}/convert-to-session` z body `{}`. Pola w schemacie (`clientId`, `packageId`, `locationId`, `status`) są opcjonalne i nieużywane: sesja powstaje z danych wydarzenia. Body musi jednak być, choćby `{}`. Zwraca ID sesji. Sesja z przeszłości zostanie automatycznie zakończona i rozliczona przez CRM, więc przed wysłaniem pokaż potwierdzenie: „Utworzyć sesję i rozliczyć wejścia uczestników?”.
 - **Ignoruj:** `POST /api/outlook/issues/ignore` z body `{ "externalCalendarEventId": 812, "message": "<dokładnie pole message>" }`.
 - **Wyślij zaproszenie:** `POST /api/outlook/issues/send-invite` z body `{ "email": "…" }`.
 - **Powiąż z klientem:** `POST /api/outlook/issues/link-client` z body `{ "clientId": 41, "email": "…" }`.
@@ -112,9 +126,13 @@ Zrealizowanej sesji nie edytuje się zwykłym formularzem. Każda zmiana jest ko
 ```
 
 - Wysyłaj **pełną docelową listę** uczestników. Kogo nie ma na liście, ten zostaje usunięty z sesji i odzyskuje wejście.
-- Wejście jest zdejmowane **tylko** przy `attendanceStatus: "Present"` i `countsAgainstPackage: true`. Inne statusy obecności są zapisywane bez zdejmowania wejścia.
+- Dozwolone `attendanceStatus` (inne wartości, np. `"Absent"`, dają 400 z `code: "InvalidAttendanceStatus"`):
+  - `Present`: obecny; z `countsAgainstPackage: true` zdejmuje wejście;
+  - `CancelledInTime`: odwołał w terminie; wejście nie jest zdejmowane;
+  - `CancelledLate`: odwołał po terminie; wejście **nie** jest zdejmowane (tak działa dziś cały CRM).
+- Klienta nieobecnego, za którego wejście ma przepaść, oznacz jako `Present`. Takiego, za którego nie ma przepaść, oznacz jako `CancelledInTime` albo usuń z listy.
 - `actualSessionType`: `OneToOne`, `TwoToOne`, `ThreeToOne`, `FourToOne`, `Group`.
-- W UI wymagaj `correctionReason` (1–1000 znaków).
+- W UI wymagaj `correctionReason` (**1–500 znaków**; dłuższy daje 400 `CorrectionReasonTooLong`).
 - Formularz: lista uczestników z przełącznikiem obecności i naliczania, „dodaj klienta”, wybór typu i pole powodu.
 
 ### 4.2 Sesja się nie odbyła — „Cofnij realizację”
@@ -130,7 +148,13 @@ Zrealizowanej sesji nie edytuje się zwykłym formularzem. Każda zmiana jest ko
 
 ### 4.4 Historia korekt
 
-`GET /api/sessions/{sessionId}/corrections` zwraca listę `{ changeType, reason, beforeState, afterState, changedByUserId, createdAt }`, od najnowszej.
+`GET /api/sessions/{sessionId}/corrections` zwraca listę `{ changeType, reason, beforeState, afterState, changedByUserId, changedByFullName, createdAt }`, od najnowszej. Autora pokazuj z `changedByFullName`.
+
+`beforeState` i `afterState` mają klucze w PascalCase:
+- `Status`, `StartAt`, `EndAt`, `TrainerId`, `LocationId`, `PlannedSessionType`, `ActualSessionType`, `ActualParticipantsCount`, `CompletedAt`;
+- `Participants[]`: `ClientId`, `AttendanceStatus`, `CountsAgainstPackage`, `IsCountedFromPackage`, `SessionsCharged`, `PackageId`, `ClientPackageId`, `PlannedBillingType`, `ActualBillingType`, `ExpectedUnitPrice`, `ActualUnitPrice`, `BalanceDifference`.
+
+Do porównania „przed i po” wystarczą `Status`, termin i lista uczestników z `AttendanceStatus` i `IsCountedFromPackage`.
 
 `changeType`:
 - `SessionRecalculated`: ponowne rozliczenie (4.1);
@@ -139,14 +163,30 @@ Zrealizowanej sesji nie edytuje się zwykłym formularzem. Każda zmiana jest ko
 
 Pokaż ją jako zakładkę „Historia” w szczegółach sesji.
 
-### 4.5 Blokady (400 z `message`)
+### 4.5 Blokady (400 z `message` i `code`)
 
-Backend nie zapisze częściowej korekty, gdy:
-- rozliczenie trenera za ten miesiąc jest wypłacone (przy zmianie terminu dotyczy starego i nowego miesiąca). W UI dodaj podpowiedź „Najpierw otwórz ponownie rozliczenie trenera”;
-- korygowana była ostatnia sesja pakietu, a z kolejnego pakietu klient już korzystał, ma do niego oczekującą płatność albo istnieje dalszy cykl;
-- pakiet jest zamknięty albo klient jest w archiwum.
+Backend nie zapisze częściowej korekty. Rozpoznawaj błąd po `code`:
 
-Pokaż `message`, zachowaj dane w formularzu i nie oznaczaj zapisu jako udanego.
+| `code` | Kiedy | Podpowiedź w UI |
+| --- | --- | --- |
+| `TrainerSettlementPaid` | rozliczenie trenera za ten miesiąc jest wypłacone (przy zmianie terminu dotyczy starego i nowego miesiąca) | „Najpierw otwórz ponownie rozliczenie trenera” |
+| `RenewalAlreadyUsed` | to było ostatnie wejście pakietu, a z kolejnego pakietu klient już korzystał | „Skoryguj najpierw sesje z nowego pakietu” |
+| `RenewalPaymentPending` | kolejny pakiet ma oczekującą płatność | „Rozstrzygnij najpierw płatność” |
+| `MultipleRenewalCycles`, `RenewalClosed` | pakiet ma kilka kolejnych cykli albo kolejny cykl jest zamknięty | „Wymaga ręcznego uzgodnienia pakietów” |
+| `OtherActivePackage` | klient ma już inny aktywny pakiet | „Wymaga ręcznego uzgodnienia pakietów” |
+| `ArchivedClientOrClosedPackage` | klient w archiwum albo pakiet zamknięty | „Przywróć klienta lub wybierz inny sposób” |
+| `CorrectionReasonTooLong` | powód dłuższy niż 500 znaków | — |
+| `InvalidAttendanceStatus` | nieznana wartość `attendanceStatus` | — |
+| `null` | inny błąd walidacji | pokaż `message` |
+
+Zachowaj dane w formularzu i nie oznaczaj zapisu jako udanego.
+
+### 4.5a Usuwanie i przywracanie
+
+- **`DELETE /api/sessions/{id}` usuwa sesję trwale** (wiersz znika z bazy) i **nie da się jej przywrócić**. Przy zrealizowanej sesji cofa wejścia, ale nie zapisuje powodu ani historii.
+  - Zrealizowanych sesji **nie usuwaj**. Gdy sesja się nie odbyła, użyj 4.2 (status `Cancelled` z powodem). Wtedy zostaje historia, a sesję można później przywrócić zmianą statusu.
+  - Przy usuwaniu sesji zaplanowanej pokaż mocne potwierdzenie („nieodwracalne”) albo zaproponuj anulowanie.
+- `GET /api/sessions/deleted` i `POST /api/sessions/{id}/restore` dotyczą wyłącznie starszych sesji ze statusem `Deleted`, a nie sesji usuniętych przez `DELETE`. Nie buduj na nich interfejsu „kosza”.
 
 ### 4.6 Po udanej korekcie
 
