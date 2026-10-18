@@ -208,6 +208,8 @@ Nie przeliczaj wejść lokalnie: odpowiedzi backendu są źródłem prawdy. Kore
 | Usunięcie sesji, która **już się zaczęła** | bez zmian i zgłoszenie dla ownera |
 | Usunięcie **zrealizowanej** sesji albo klienta z niej | bez zmian w rozliczeniu i zgłoszenie dla ownera |
 | Nowe **przyszłe** wydarzenie w lokalizacji studia | nowa zaplanowana sesja, jak dotąd |
+| Wydarzenie z kategorią **„Zajęcia grupowe”** | zajęcia grupowe (typ `Group`): tytuł z wydarzenia, tylko klienci z dostępem grupowym w tej lokalizacji, pakiety grupowe, bez limitu 4 osób. Limit miejsc i zapisy publiczne owner ustawia potem w CRM. Dodanie kategorii do zaplanowanej sesji zmienia ją na grupową. |
+| Wydarzenie z kategorią **„Konsultacje”** | konsultacja (czas pracy trenera, bez klientów i rozliczeń) |
 | Nowe wydarzenie **z przeszłości** | zgłoszenie „Zamień na sesję”; nic nie jest rozliczane automatycznie |
 
 Zasada dla UI: rozliczenia (wejścia, pakiety, saldo) zmieniają się tylko przez akcje w CRM. Outlook może je co najwyżej zgłosić do weryfikacji.

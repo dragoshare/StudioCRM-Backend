@@ -514,6 +514,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         session.OutlookCategoriesJson = evt.CategoriesJson;
         session.OutlookCategoryColorsJson = evt.CategoryColorsJson;
         session.PrimaryOutlookCategory = GetPrimaryCategory(evt.CategoriesJson);
+        // Adding "Zajęcia grupowe" in Outlook turns a planned session into a group class (never the other way round).
+        if (session.Status == "Planned" && !ConsultationSessions.IsConsultation(session.PlannedSessionType) &&
+            !GroupClassSessions.IsGroup(session.PlannedSessionType) && GroupClassSessions.HasOutlookCategory(evt.CategoriesJson))
+            session.PlannedSessionType = GroupClassSessions.SessionType;
 
         var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
             _context, evt.CategoriesJson, session.LocationId);
@@ -634,10 +638,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         foreach (var client in clientsToAdd)
         {
-            var activeClientPackage = await _context.ClientPackages
-                .Where(cp => cp.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && cp.ClientId == client.Id && cp.IsActive)
-                .OrderByDescending(cp => cp.PurchaseDate)
-                .FirstOrDefaultAsync();
+            var activeClientPackage = await OutlookParticipantPackage.FindAsync(_context, client.Id, session);
 
             await _context.SessionParticipants.AddAsync(new SessionParticipant
             {
