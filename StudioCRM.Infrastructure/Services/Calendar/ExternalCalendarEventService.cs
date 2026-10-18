@@ -64,10 +64,14 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         if (!_currentUser.UserId.HasValue)
             return new List<OutlookMappingIssueDto>();
 
+        var userId = _currentUser.UserId.Value;
+        var isOwner = _currentUser.IsOwner;
+        // Own calendar: every issue. Owner: also the "review in CRM" issues of every trainer's calendar.
         var events = await _context.ExternalCalendarEvents
             .Include(x => x.CalendarIntegration)
             .Where(x =>
-                x.CalendarIntegration.UserId == _currentUser.UserId.Value &&
+                (x.CalendarIntegration.UserId == userId ||
+                 (isOwner && x.MappingWarningsJson!.Contains(OutlookReviewIssues.Prefix))) &&
                 x.MappingWarningsJson != null)
             .OrderByDescending(x => x.StartAt)
             .ToListAsync();
@@ -76,7 +80,9 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
 
         foreach (var calendarEvent in events)
         {
-            var warnings = ReadWarnings(calendarEvent.MappingWarningsJson);
+            var ownCalendar = calendarEvent.CalendarIntegration.UserId == userId;
+            var warnings = ReadWarnings(calendarEvent.MappingWarningsJson)
+                .Where(warning => ownCalendar || OutlookReviewIssues.IsReview(warning));
 
             foreach (var warning in warnings)
             {
@@ -107,12 +113,13 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         if (!_currentUser.UserId.HasValue)
             throw new InvalidOperationException("User is not authenticated.");
 
+        // The owner may convert any trainer's event (past events wait for this confirmation).
         var importedEvent = await _context.ExternalCalendarEvents
             .Include(x => x.CalendarIntegration)
             .Include(x => x.Session)
             .FirstOrDefaultAsync(x =>
                 x.Id == importedEventId &&
-                x.CalendarIntegration.UserId == _currentUser.UserId.Value);
+                (_currentUser.IsOwner || x.CalendarIntegration.UserId == _currentUser.UserId.Value));
 
         if (importedEvent is null)
             throw new InvalidOperationException("Imported event does not exist.");
@@ -129,6 +136,8 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
             throw new InvalidOperationException(message);
         }
 
+        OutlookReviewIssues.RemovePastEventReview(importedEvent);
+        await _context.SaveChangesAsync();
         return result.Session.Id;
     }
 
@@ -274,7 +283,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
     public async Task IgnoreIssueAsync(int externalEventId, string message)
     {
         var evt = await _context.ExternalCalendarEvents
-            .FirstOrDefaultAsync(x => x.Id == externalEventId && x.CalendarIntegration.UserId == _currentUser.UserId);
+            .FirstOrDefaultAsync(x => x.Id == externalEventId && (_currentUser.IsOwner || x.CalendarIntegration.UserId == _currentUser.UserId));
 
         if (evt == null)
             throw new InvalidOperationException("Event not found.");
@@ -338,6 +347,10 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
 
     private static string ResolveIssueType(string warning)
     {
+        var review = OutlookReviewIssues.ResolveType(warning);
+        if (review != null)
+            return review;
+
         var normalized = warning.ToLowerInvariant();
 
         if (normalized.Contains("nie znaleziono klienta"))
@@ -357,6 +370,13 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
 
     private static string? ExtractEmailFromWarning(string warning)
     {
+        // Review issues are sentences; only an address inside them (removed attendee) is an email.
+        if (OutlookReviewIssues.IsReview(warning))
+        {
+            var match = System.Text.RegularExpressions.Regex.Match(warning, @"[^\s:]+@[^\s:]+\.[A-Za-z]{2,}");
+            return match.Success ? match.Value : null;
+        }
+
         var parts = warning.Split(':', StringSplitOptions.TrimEntries);
 
         if (parts.Length < 2)

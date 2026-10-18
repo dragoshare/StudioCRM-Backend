@@ -116,6 +116,13 @@ public class OutlookWebhookService : IOutlookWebhookService
                     .Where(externalEventId => !outlookEventIds.Contains(externalEventId))
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToList();
+                // An empty calendar while CRM knows events in it points to a broken connection (wrong account,
+                // revoked consent, moved mailbox), not to deletions: cancel nothing and push nothing.
+                if (outlookEventIds.Count == 0 && missingEventIds.Count > 0)
+                {
+                    result.Errors.Add($"{integration.Email}: Outlook zwrócił pusty kalendarz, a CRM zna w nim {missingEventIds.Count} wydarzeń. Nic nie anulowano ani nie wysłano - sprawdź połączenie z Outlookiem.");
+                    continue;
+                }
                 foreach (var externalEventId in missingEventIds)
                 {
                     await MarkDeletedAsync(integration.Id, externalEventId);
@@ -366,6 +373,7 @@ public class OutlookWebhookService : IOutlookWebhookService
             await _context.ExternalCalendarEvents.AddAsync(existing);
         }
 
+        var previousAttendeesJson = existing.AttendeesJson;
         existing.Subject = subjectValue;
         existing.BodyPreview = bodyPreviewValue;
         existing.LocationName = locationNameValue;
@@ -388,7 +396,23 @@ public class OutlookWebhookService : IOutlookWebhookService
                 integration,
                 existing,
                 externalEventId,
-                subjectValue);
+                subjectValue,
+                ReadAttendeeEmailsFromJson(previousAttendeesJson));
+        }
+        else if (!existing.IsConvertedToSession && !createdByCrm &&
+            !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]) &&
+            existing.EndAt <= DateTime.UtcNow)
+        {
+            // Fix 4: a past event would become a Planned session that auto-completion settles within minutes,
+            // charging entries nobody confirmed (and possibly twice). It waits for "convert to session" instead.
+            // Already in CRM (e.g. entered in CRM at the same time): nothing to review.
+            var trainerId = await _context.Trainers.Where(t => t.UserId == integration.UserId).Select(t => (int?)t.Id).FirstOrDefaultAsync();
+            var alreadyInCrm = await _context.Sessions.AnyAsync(session =>
+                session.Status != "Cancelled" &&
+                (trainerId == null || session.TrainerId == trainerId) &&
+                session.StartAt < existing.EndAt && session.EndAt > existing.StartAt);
+            if (!alreadyInCrm && OutlookReviewIssues.Add(existing, OutlookReviewIssues.PastEventNeedsReview()))
+                await _context.SaveChangesAsync();
         }
         else if (!existing.IsConvertedToSession && !createdByCrm &&
             !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]))
@@ -450,7 +474,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         CalendarIntegration integration,
         ExternalCalendarEvent evt,
         string externalEventId,
-        string currentOutlookTitle)
+        string currentOutlookTitle,
+        List<string> previousAttendees)
     {
         await using var transaction = await _context.Database.BeginTransactionAsync();
         if (!evt.SessionId.HasValue) return;
@@ -459,7 +484,18 @@ public class OutlookWebhookService : IOutlookWebhookService
             .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
 
-        if (session == null || session.Status == "Completed" || session.Status == "Cancelled" ||
+        if (session != null && session.Status == "Completed")
+        {
+            // Outlook never changes a settled session; a client removed from its event is reported to the owner.
+            if (await ReportRemovedAttendeesOfCompletedSessionAsync(session, evt, previousAttendees))
+            {
+                await _context.SaveChangesAsync();
+                await transaction.CommitAsync();
+            }
+            return;
+        }
+
+        if (session == null || session.Status == "Cancelled" ||
             !await OutlookImportAccess.CanManageAsync(_context, integration.UserId, session.TrainerId, session.LocationId))
             return;
 
@@ -518,6 +554,28 @@ public class OutlookWebhookService : IOutlookWebhookService
             externalEventId,
             currentOutlookTitle,
             outlookTitle);
+    }
+
+    // Clients who were attendees of the event before and are gone now, and whose participation was settled.
+    private async Task<bool> ReportRemovedAttendeesOfCompletedSessionAsync(Session session, ExternalCalendarEvent evt, List<string> previousAttendees)
+    {
+        var current = ReadAttendeeEmailsFromJson(evt.AttendeesJson).Select(x => x.Trim().ToLowerInvariant()).ToHashSet();
+        var removed = previousAttendees.Select(x => x.Trim().ToLowerInvariant())
+            .Where(x => x.Length > 0 && !current.Contains(x)).ToHashSet();
+        if (removed.Count == 0) return false;
+        var settled = await _context.SessionParticipants
+            .Where(p => p.SessionId == session.Id && (p.IsCountedFromPackage || p.AttendanceStatus == "Present"))
+            .Select(p => new { p.Client.Email, p.Client.CalendarEmail })
+            .ToListAsync();
+        var added = false;
+        foreach (var participant in settled)
+        {
+            var email = new[] { participant.Email, participant.CalendarEmail }
+                .FirstOrDefault(e => !string.IsNullOrWhiteSpace(e) && removed.Contains(e!.Trim().ToLowerInvariant()));
+            if (email != null && OutlookReviewIssues.Add(evt, OutlookReviewIssues.CompletedSessionAttendeeRemoved(email.Trim())))
+                added = true;
+        }
+        return added;
     }
 
     private async Task SyncSessionParticipantsFromOutlookAsync(Session session, ExternalCalendarEvent evt)
@@ -1078,25 +1136,85 @@ public class OutlookWebhookService : IOutlookWebhookService
                 deletedEvent.Subject = "[DELETED] " + deletedEvent.Subject;
         }
 
+        var keptSessionIds = new HashSet<int>();
         if (sessionIds.Count > 0)
         {
             var sessions = await _context.Sessions
                 .Where(s => sessionIds.Contains(s.Id))
                 .ToListAsync();
+            var now = DateTime.UtcNow;
 
             foreach (var session in sessions)
             {
-                if (string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase))
+                if (string.Equals(session.Status, "Cancelled", StringComparison.OrdinalIgnoreCase))
                     continue;
 
+                // Settled sessions and sessions that already started are never cancelled from Outlook:
+                // the owner decides in CRM (correction or cancellation) from the issues list.
+                if (string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase) || session.StartAt <= now)
+                {
+                    keptSessionIds.Add(session.Id);
+                    var issue = string.Equals(session.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                        ? OutlookReviewIssues.CompletedSessionDeleted()
+                        : OutlookReviewIssues.StartedSessionDeleted();
+                    OutlookReviewIssues.Add(await DeletedEventForSessionAsync(integrationId, session, deletedEvents, links), issue);
+                    continue;
+                }
+
                 session.Status = "Cancelled";
-                session.UpdatedAt = DateTime.UtcNow;
+                session.UpdatedAt = now;
+                // Same notice as a cancellation in CRM (the freed group entries return to the packages).
+                if (session.IsPubliclyBookable || string.Equals(session.PlannedSessionType, "Group", StringComparison.OrdinalIgnoreCase))
+                    await NotifyGroupClassCancelledAsync(session);
             }
         }
 
-        _context.CalendarEventLinks.RemoveRange(links);
+        // Links of kept sessions stay, so a reconcile does not recreate the deleted event for them.
+        _context.CalendarEventLinks.RemoveRange(links.Where(link => !keptSessionIds.Contains(link.SessionId)));
 
         await _context.SaveChangesAsync();
+    }
+
+    // The Outlook event row that carries the review issue; created when CRM only had the link.
+    private async Task<ExternalCalendarEvent> DeletedEventForSessionAsync(
+        int integrationId, Session session, List<ExternalCalendarEvent> deletedEvents, List<CalendarEventLink> links)
+    {
+        var row = deletedEvents.FirstOrDefault(e => e.SessionId == session.Id);
+        if (row != null) return row;
+        var linkIds = links.Where(l => l.SessionId == session.Id).Select(l => l.ExternalEventId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        row = deletedEvents.FirstOrDefault(e => linkIds.Contains(e.ExternalEventId));
+        if (row != null) return row;
+        row = new ExternalCalendarEvent
+        {
+            CalendarIntegrationId = integrationId,
+            Provider = "Outlook",
+            ExternalEventId = linkIds.FirstOrDefault() ?? string.Empty,
+            Subject = "[DELETED] " + session.Title,
+            StartAt = session.StartAt,
+            EndAt = session.EndAt,
+            SessionId = session.Id,
+            IsConvertedToSession = true,
+            ImportedAt = DateTime.UtcNow
+        };
+        await _context.ExternalCalendarEvents.AddAsync(row);
+        deletedEvents.Add(row);
+        return row;
+    }
+
+    private async Task NotifyGroupClassCancelledAsync(Session session)
+    {
+        var sourceKey = $"group-session:{session.Id}:cancelled:{session.UpdatedAt.Ticks}";
+        var clientUserIds = await _context.SessionParticipants
+            .Where(x => x.SessionId == session.Id && x.AttendanceStatus != "CancelledInTime" &&
+                x.AttendanceStatus != "CancelledLate" && x.Client.UserId.HasValue)
+            .Select(x => x.Client.UserId!.Value)
+            .Distinct()
+            .ToListAsync();
+        var trainerUserId = await _context.Trainers.Where(x => x.Id == session.TrainerId).Select(x => x.UserId).FirstOrDefaultAsync();
+        var recipients = trainerUserId != 0 ? clientUserIds.Append(trainerUserId).Distinct() : clientUserIds;
+        await NotificationWriter.QueueAsync(_context, recipients, sourceKey, "GroupClassCancelled",
+            "Zajęcia grupowe zostały odwołane", $"{session.Title}. Wykorzystane wejście wróciło do pakietu.",
+            "Warning", "session", session.Id, $"/group-classes?sessionId={session.Id}");
     }
 
     private static string? ResolveExternalEventId(JsonElement notification, string resource)
