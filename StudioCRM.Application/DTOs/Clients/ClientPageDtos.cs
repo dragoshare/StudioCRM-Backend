@@ -5,7 +5,7 @@ namespace StudioCRM.Application.DTOs.Clients;
 // Paged mode of GET /api/clients (enabled when page or pageSize is sent).
 public class ClientPageFilter
 {
-    public const string SortValues = "createdDesc|created|name|nameDesc|balance|balanceDesc|packageUsage|packageUsageDesc|trainer|trainerDesc|archivedAt|archivedAtDesc";
+    public const string SortValues = "createdDesc|created|name|nameDesc|balance|balanceDesc|packageUsage|packageUsageDesc|trainer|trainerDesc|archivedAt|archivedAtDesc|amountDue|amountDueDesc";
     public const string PackageStatusValues = "active|none";
 
     // Name or email (case-insensitive); with 3+ digits also the phone number, see NormalizePhoneSearch.
@@ -21,6 +21,8 @@ public class ClientPageFilter
     // active: at least one active, not closed package (same set as activePackages); none: no such package.
     [RegularExpression("^(" + PackageStatusValues + ")$")]
     public string? PackageStatus { get; set; }
+    // true: only clients with TotalAmountDue > 0; false or missing: no filter.
+    public bool? HasAmountDue { get; set; }
     [RegularExpression("^(" + SortValues + ")$")]
     public string? Sort { get; set; }
     [RegularExpression("^(asc|desc)$")]

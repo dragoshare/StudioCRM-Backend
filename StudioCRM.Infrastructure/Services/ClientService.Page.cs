@@ -24,6 +24,8 @@ public partial class ClientService
             query = WhereMatchesSearch(query, filter.Search);
         if (filter.PackageStatus is not null)
             query = TrainerPortalService.WhereHasActivePackage(_context, query, filter.PackageStatus == "active");
+        if (filter.HasAmountDue == true)
+            query = query.Where(c => _context.ClientPackages.Any(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid));
 
         var totalCount = await query.CountAsync();
         var activeCount = await query.CountAsync(c => c.Status == "Active");
@@ -63,6 +65,11 @@ public partial class ClientService
         "archivedAt" => query.OrderBy(c => c.DeletedAt == null).ThenBy(c => c.DeletedAt).ThenBy(c => c.Id),
         "archivedAtDesc" => query.OrderBy(c => c.DeletedAt == null).ThenByDescending(c => c.DeletedAt).ThenByDescending(c => c.Id),
         "name" => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id),
+        // Amount due = sum of max(0, TotalPrice - AmountPaid) over all the client's packages.
+        "amountDue" => query.OrderBy(c => db.ClientPackages.Where(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid)
+            .Sum(p => p.TotalPrice - p.AmountPaid)).ThenBy(c => c.Id),
+        "amountDueDesc" => query.OrderByDescending(c => db.ClientPackages.Where(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid)
+            .Sum(p => p.TotalPrice - p.AmountPaid)).ThenByDescending(c => c.Id),
         _ => TrainerPortalService.OrderPortalClients(db, query, sort)
     };
 

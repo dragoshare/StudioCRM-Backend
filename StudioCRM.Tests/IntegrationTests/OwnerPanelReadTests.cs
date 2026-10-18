@@ -89,6 +89,35 @@ public class OwnerPanelReadTests
     }
 
     [PostgresFact]
+    public async Task ClientPageReturnsAndFiltersAmountDueBeforePaging()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Due" };
+        var trainer = new Trainer { User = new User { Email = "due-trainer@test.invalid" } };
+        Client Make(string last) => new() { FirstName = "K", LastName = last, Location = location, Trainer = trainer, Status = "Active" };
+        var big = Make("Big"); var small = Make("Small"); var paid = Make("Paid");
+        db.AddRange(big, small, paid);
+        ClientPackage Pass(Client c, decimal price, decimal paidAmount, bool active = true) => new()
+        { Client = c, Package = new Package { Name = "P" }, Name = "P", TotalSessions = 4, TotalPrice = price, AmountPaid = paidAmount,
+          PurchaseDate = DateTime.UtcNow, Location = location, IsActive = active };
+        // Overpaid packages do not reduce the amount due of other packages.
+        db.AddRange(Pass(big, 500, 100), Pass(big, 300, 0, active: false), Pass(small, 200, 150), Pass(paid, 400, 400), Pass(paid, 100, 150, active: false));
+        await db.SaveChangesAsync();
+
+        var service = new ClientService(db, new PortalSecurityTests.Actor(1, "Owner"), null!, null!);
+        var page = await service.GetPageAsync(new ClientPageFilter { HasAmountDue = true, Sort = "amountDueDesc", PageSize = 1 });
+        Assert.Equal((2, 2), (page.TotalCount, page.TotalPages));
+        var first = Assert.Single(page.Items);
+        Assert.Equal(("Big", 700m, "PLN"), (first.LastName, first.TotalAmountDue, first.AmountDueCurrency));
+
+        var all = await service.GetPageAsync(new ClientPageFilter { Sort = "amountDue", PageSize = 10 });
+        Assert.Equal(["Paid", "Small", "Big"], all.Items.Select(c => c.LastName));
+        Assert.Equal([0m, 50m, 700m], all.Items.Select(c => c.TotalAmountDue));
+        Assert.Equal(3, (await service.GetPageAsync(new ClientPageFilter { HasAmountDue = false })).TotalCount);
+    }
+
+    [PostgresFact]
     public async Task SessionHistoryPagesNewestFirstWhileScheduleListStaysAscending()
     {
         await using var database = await TestDatabase.CreateAsync();

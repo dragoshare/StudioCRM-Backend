@@ -8,6 +8,9 @@ public class ClientDto : ClientListSummaryDto
     public string PortalAccessStatus { get; set; } = "NoAccount";
     public bool IsArchived { get; set; }
     public DateTime? ArchivedAt { get; set; }
+    // Same value as ClientBillingSummaryDto.TotalAmountDue: unpaid part of all the client's packages.
+    public decimal TotalAmountDue { get; set; }
+    public string AmountDueCurrency { get; set; } = "PLN";
 
     public int? TrainerId { get; set; }
 
