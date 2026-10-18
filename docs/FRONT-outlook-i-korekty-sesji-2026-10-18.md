@@ -2,7 +2,7 @@
 
 Zbiorcza instrukcja do paneli: połączenie z Outlookiem, odświeżanie, lista zgłoszeń, korekta zrealizowanej sesji. Backend jest wdrożony. Odpowiedzi błędów mają postać `{ "message": "…", "code": "…" | null }`. Gdy jest `code`, rozpoznawaj błąd po nim, a nie po słowach w `message`. `message` pokazuj użytkownikowi bez zamiany na ogólne „Nie udało się”.
 
-> Aktualizacja 2026-10-18 (po uwagach frontu): pola listy zgłoszeń, `requiresDecision`, kody błędów korekty, dozwolone `attendanceStatus`, autor korekty, schematy odświeżania. Szczegóły w punktach 1–4 i w sekcji 6.
+> Aktualizacja 2026-10-18 (po uwagach frontu): pola listy zgłoszeń, `requiresDecision`, kody błędów korekty, dozwolone `attendanceStatus`, autor korekty, schematy odświeżania. Szczegóły w sekcjach 1–4.
 
 ---
 
