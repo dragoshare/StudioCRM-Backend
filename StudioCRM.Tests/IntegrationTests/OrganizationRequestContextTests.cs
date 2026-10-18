@@ -82,13 +82,18 @@ public class OrganizationRequestContextTests
 
     [Theory]
     [InlineData(typeof(TrainersController), "Create", true)]
-    [InlineData(typeof(TrainersController), "Deactivate", false)]
+    [InlineData(typeof(TrainersController), "Deactivate", true)]
     [InlineData(typeof(ClientsController), "Create", true)]
-    [InlineData(typeof(ClientsController), "CloseCooperation", false)]
+    [InlineData(typeof(ClientsController), "CloseCooperation", true)]
     [InlineData(typeof(LocationsController), "GetAll", true)]
     [InlineData(typeof(AuthController), "Me", true)]
-    [InlineData(typeof(AuthController), "Register", false)]
-    [InlineData(typeof(AuthController), "UploadMyAvatar", false)]
+    [InlineData(typeof(SessionsController), "Create", true)]
+    [InlineData(typeof(PackagesController), "Create", true)]
+    [InlineData(typeof(OwnerSettingsController), "Get", true)]
+    [InlineData(typeof(OutlookController), "Connect", false)]
+    [InlineData(typeof(TpayPaymentsController), "Create", false)]
+    [InlineData(typeof(AuthController), "Register", true)]
+    [InlineData(typeof(AuthController), "UploadMyAvatar", true)]
     [InlineData(typeof(PlatformOrganizationsController), "List", false)]
     public async Task NewStudioAllowsOnlyAuditedActions(Type controller, string actionName, bool allowed)
     {

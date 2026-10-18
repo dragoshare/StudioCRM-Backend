@@ -218,7 +218,7 @@ public class PackageFlowTests
         Assert.Empty(await db.SessionParticipants.ToListAsync());
         var booked = await service.ConfirmAsync(waiting.Id);
         Assert.Equal("Booked", booked.Status); Assert.True(booked.ReservesSeat);
-        Assert.Equal(booked, await service.ConfirmAsync(waiting.Id));
+        Assert.Equal(System.Text.Json.JsonSerializer.Serialize(booked), System.Text.Json.JsonSerializer.Serialize(await service.ConfirmAsync(waiting.Id)));
         Assert.Single(await db.SessionParticipants.ToListAsync());
         await Assert.ThrowsAsync<KeyNotFoundException>(() => new GroupEnrollmentService(db, new PortalSecurityTests.Actor(999, "Client"), Participants(db, owner)).GetAsync(waiting.Id));
     }

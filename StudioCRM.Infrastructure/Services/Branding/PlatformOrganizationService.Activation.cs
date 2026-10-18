@@ -32,7 +32,7 @@ public partial class PlatformOrganizationService
     {
         var actor = await access.RequireAdminAsync();
         Validate(request); ValidateNames("Activation", request.Reason);
-        if (!request.ConfirmSetupOnly) throw new InvalidOperationException("ConfirmSetupOnly is required: integrations and full CRM operations remain disabled.");
+        if (!request.ConfirmCoreCrm && !request.ConfirmSetupOnly) throw new InvalidOperationException("ConfirmCoreCrm is required: external integrations remain disabled.");
         await using var transaction = await db.Database.BeginTransactionAsync();
         var org = await db.Organizations.SingleOrDefaultAsync(o => o.Id == id)
             ?? throw new KeyNotFoundException("Organization not found.");

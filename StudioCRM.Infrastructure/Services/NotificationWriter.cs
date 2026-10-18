@@ -68,7 +68,9 @@ internal static class NotificationWriter
         DateTime? createdAt = null)
     {
         var ownerIds = await context.Users
-            .Where(x => x.IsActive && x.UserRoles.Any(ur => ur.Role.Name == "Owner"))
+            .Where(x => x.IsActive && (context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId
+                ? x.UserRoles.Any(ur => ur.Role.Name == "Owner")
+                : context.Set<OrganizationMembership>().Any(m => m.OrganizationId == context.OrganizationId && m.UserId == x.Id && m.IsOwner)))
             .Select(x => x.Id)
             .ToListAsync();
 

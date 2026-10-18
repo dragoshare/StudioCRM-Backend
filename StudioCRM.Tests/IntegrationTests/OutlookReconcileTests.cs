@@ -25,7 +25,7 @@ public class OutlookReconcileTests
             User = owner, Provider = "Outlook", IsActive = true, Email = owner.Email,
             AccessToken = "token", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1)
         };
-        db.AddRange(owner, integration);
+        db.AddRange(owner, integration, new Location { Name = "Reconcile studio" });
         await db.SaveChangesAsync();
 
         var start = DateTime.UtcNow.Date.AddDays(3).AddHours(9);
@@ -35,7 +35,7 @@ public class OutlookReconcileTests
             categories = new[] { "Prywatne" }, transactionId = (string?)null,
             start = new { dateTime = start.AddDays(i).ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
             end = new { dateTime = start.AddDays(i).AddHours(1).ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
-            location = new { displayName = "" },
+            location = new { displayName = "Reconcile studio" },
             organizer = new { emailAddress = new { address = owner.Email } },
             attendees = Array.Empty<object>()
         }).ToArray();

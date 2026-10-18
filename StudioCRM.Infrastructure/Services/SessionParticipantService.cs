@@ -463,6 +463,7 @@ public class SessionParticipantService : ISessionParticipantService
 
     private async Task TrySyncSessionToOutlookAsync(int sessionId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return;
         try
         {
             await _outlookCalendarSyncService.SyncSessionAsync(sessionId);

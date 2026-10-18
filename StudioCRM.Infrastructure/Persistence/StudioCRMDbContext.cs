@@ -263,7 +263,8 @@ public partial class StudioCRMDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(500);
 
-            entity.HasIndex(s => s.Key)
+            entity.Property<Guid>("OrganizationId");
+            entity.HasIndex("OrganizationId", nameof(SystemSetting.Key))
                 .IsUnique();
 
             entity.HasData(

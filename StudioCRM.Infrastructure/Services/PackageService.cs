@@ -41,6 +41,8 @@ public class PackageService : IPackageService
 
     public async Task<PackageDto> CreateAsync(CreatePackageDto request)
     {
+        if (request.IsPubliclyAvailable && _context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId)
+            throw new InvalidOperationException("Public offers are not enabled for this organization yet.");
         ValidatePeriodMode(request.BillingMode, request.Price, request.DurationDays, request.IsPubliclyAvailable);
         if (request.LocationId.HasValue)
         {
@@ -118,6 +120,8 @@ public class PackageService : IPackageService
                 throw new InvalidOperationException("Location does not exist.");
         }
 
+        if (request.IsPubliclyAvailable && _context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId)
+            throw new InvalidOperationException("Public offers are not enabled for this organization yet.");
         ValidatePeriodMode(request.BillingMode ?? package.BillingMode, request.Price, request.DurationDays, request.IsPubliclyAvailable);
         if (request.BillingMode.HasValue && request.BillingMode != package.BillingMode)
             throw new InvalidOperationException("Package billing mode cannot be changed. Create a separate offer.");

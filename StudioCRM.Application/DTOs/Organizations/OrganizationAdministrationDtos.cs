@@ -32,5 +32,7 @@ public class ActivateOrganizationRequest
 {
     [Range(0, long.MaxValue)] public long ExpectedRevision { get; set; }
     [Required, StringLength(1000)] public string Reason { get; set; } = "";
+    public bool ConfirmCoreCrm { get; set; }
+    // Compatibility with the initial activation UI.
     public bool ConfirmSetupOnly { get; set; }
 }

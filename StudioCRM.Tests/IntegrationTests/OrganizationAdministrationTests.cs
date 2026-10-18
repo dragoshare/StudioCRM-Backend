@@ -127,8 +127,8 @@ public class OrganizationAdministrationTests
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() => Service(db, ids.Owner, "Owner").ActivateAsync(draft.OrganizationId,
             new() { Reason = "No permission", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision }));
         var active = await service.ActivateAsync(draft.OrganizationId,
-            new() { Reason = "Start setup", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision });
-        Assert.Equal("Active", active.Status); Assert.Equal("SetupOnly", active.AccessMode); Assert.True(active.CrmAccessEnabled);
+            new() { Reason = "Start core CRM", ConfirmCoreCrm = true, ExpectedRevision = assigned.Revision });
+        Assert.Equal("Active", active.Status); Assert.Equal("CoreCrm", active.AccessMode); Assert.True(active.CrmAccessEnabled);
         Assert.Single(await db.Set<PlatformAuditEntry>().Where(a => a.Action == "OrganizationActivated").ToListAsync());
         await Assert.ThrowsAsync<DbUpdateConcurrencyException>(() => service.ActivateAsync(draft.OrganizationId,
             new() { Reason = "Replay", ConfirmSetupOnly = true, ExpectedRevision = assigned.Revision }));

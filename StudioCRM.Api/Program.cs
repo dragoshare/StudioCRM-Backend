@@ -47,6 +47,7 @@ builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
 builder.Services.Configure<TpaySettings>(builder.Configuration.GetSection("Tpay"));
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<OrganizationJobRunner>();
 builder.Services.AddHttpClient<ITpayConnectionService, TpayConnectionService>(client =>
     client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });

@@ -2631,10 +2631,10 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Key")
-                        .IsUnique();
-
                     b.HasIndex("OrganizationId");
+
+                    b.HasIndex("OrganizationId", "Key")
+                        .IsUnique();
 
                     b.ToTable("SystemSettings");
 

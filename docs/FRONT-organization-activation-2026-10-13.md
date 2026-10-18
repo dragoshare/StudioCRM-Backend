@@ -1,3 +1,5 @@
+> Aktualizacja 2026-10-18: po nowym wdrożeniu obowiązuje [zakres CoreCrm](FRONT-core-crm-organizations-2026-10-18.md). Poniższy opis SetupOnly dokumentuje wcześniejszy etap.
+
 # Aktywacja drugiego studia — kontrakt frontendu (2026-10-13)
 
 Ten etap pozwala wyjść z Draft do Active w trybie SetupOnly. Nie oznacza pełnej gotowości CRM do obsługi treningów i płatności.

@@ -55,7 +55,10 @@ public partial class AuthService : IAuthService
 
     private async Task<CreatedAccountDto> RegisterAsyncCore(RegisterDto request)
     {
-        await LegacyStaffMembership.RequireLegacyAsync(_context);
+        var legacy = _context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId;
+        if (legacy) await LegacyStaffMembership.RequireLegacyAsync(_context);
+        else if (!await _context.Organizations.AnyAsync(o => o.Id == _context.OrganizationId && o.Status == "Active"))
+            throw new InvalidOperationException("Organization is not active.");
         var email = request.Email.Trim();
         var roleName = NormalizeManualRegistrationRole(request.Role);
 
@@ -137,13 +140,14 @@ public partial class AuthService : IAuthService
         await _context.Users.AddAsync(user);
         await _context.SaveChangesAsync();
 
-        await _context.UserRoles.AddAsync(new UserRole
+        if (legacy) await _context.UserRoles.AddAsync(new UserRole
         {
             UserId = user.Id,
             RoleId = role.Id
         });
 
-        await LegacyStaffMembership.TrackAsync(_context, user.Id, roleName);
+        if (legacy) await LegacyStaffMembership.TrackAsync(_context, user.Id, roleName);
+        else if (roleName == "Trainer") _context.Add(new OrganizationMembership { OrganizationId = _context.OrganizationId, UserId = user.Id, IsTrainer = true, CreatedAt = now });
 
         int? clientId = null;
         int? trainerId = null;

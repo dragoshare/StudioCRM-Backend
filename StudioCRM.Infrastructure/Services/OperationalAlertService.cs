@@ -296,6 +296,7 @@ public class OperationalAlertService : IOperationalAlertService
         OperationalAlertFilterDto filter,
         int? trainerId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return [];
         var now = DateTime.UtcNow;
         var query = _context.Sessions
             .Include(s => s.Location)
