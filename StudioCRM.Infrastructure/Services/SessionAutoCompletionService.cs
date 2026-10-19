@@ -98,7 +98,8 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
             .Where(IsAutoCompletableParticipant)
             .ToList();
 
-        if (billableParticipants.Count == 0)
+        // A group class that took place is completed even with nobody enrolled in CRM (trainer paid the group rate).
+        if (billableParticipants.Count == 0 && !GroupBookingPolicy.IsGroup(session))
             return null;
 
         var actualSessionType = GroupBookingPolicy.IsGroup(session)
