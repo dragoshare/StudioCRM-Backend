@@ -24,6 +24,9 @@ public interface ITrainerPortalService
     Task<SessionWorkspaceDto?> GetSessionWorkspaceAsync(int sessionId);
     Task<SessionDto> CreateSessionAsync(CreateSessionDto request);
     Task<SessionDto?> UpdateSessionAsync(int sessionId, UpdateSessionDto request);
+    Task<SessionSeriesDto> CreateSessionSeriesAsync(CreateSessionSeriesDto request);
+    Task<SessionSeriesOutlookSyncDto?> SyncSessionSeriesToOutlookAsync(string recurringGroupId, SessionRecurrenceDto? recurrence);
+    Task<DeleteSessionSeriesResultDto?> DeleteSessionSeriesAsync(string recurringGroupId);
     Task<TrainerPortalDashboardDto?> GetDashboardAsync();
     Task<TrainerMonthlySettlementDto?> GetMyMonthlySettlementAsync(int year, int month);
 }

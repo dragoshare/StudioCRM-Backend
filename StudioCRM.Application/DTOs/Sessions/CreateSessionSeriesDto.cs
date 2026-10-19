@@ -52,5 +52,8 @@ public class DeleteSessionSeriesResultDto
 
     public int DeletedSessionsCount { get; set; }
 
+    // Trainer portal only: past, completed or accounted sessions left in the series (0 when the whole series was deleted).
+    public int KeptSessionsCount { get; set; }
+
     public bool OutlookSeriesDeleted { get; set; }
 }

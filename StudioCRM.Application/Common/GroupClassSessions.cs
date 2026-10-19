@@ -18,7 +18,7 @@ public static class GroupClassSessions
         try
         {
             var categories = JsonSerializer.Deserialize<List<string>>(categoriesJson ?? "[]") ?? new();
-            return categories.Any(c => Matches(c));
+            return categories.Any(IsOutlookCategory);
         }
         catch (JsonException)
         {
@@ -27,7 +27,7 @@ public static class GroupClassSessions
     }
 
     // Case-insensitive; also accepts the name typed without Polish characters ("Zajecia grupowe").
-    private static bool Matches(string? category)
+    public static bool IsOutlookCategory(string? category)
     {
         var value = category?.Trim();
         return string.Equals(value, OutlookCategory, StringComparison.OrdinalIgnoreCase) ||
