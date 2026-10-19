@@ -81,3 +81,8 @@ Dotychczasowe żądania bez nowych parametrów nadal działają. Nowe pola są d
 Pozostaje obecna synchronizacja alertów operacyjnych ownera/trenera, w tym automatyczne
 oznaczanie rozwiązanych alertów jako przeczytane. Sam filtr nie zmienia tej synchronizacji.
 Uprawnienia, treści powiadomień i `actionUrl` pozostają bez zmian.
+
+Wyjątek od 19.10.2026: `PackagePaymentRequired` i `PackageEndedPaymentRequired` mają `actionUrl`
+prowadzący do płatności klienta, którego dotyczą: `/owner/clients/{clientId}/payments` dla ownera,
+`/trainer/clients/{clientId}/payments` dla trenera. `relatedEntityType` pozostaje `client_package`.
+Istniejące powiadomienia dostają nowy adres przy najbliższym pobraniu listy.
