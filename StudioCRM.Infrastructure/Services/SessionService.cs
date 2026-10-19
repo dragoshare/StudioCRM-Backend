@@ -2014,6 +2014,11 @@ public class SessionService : ISessionService
 
         result = NormalizeOutlookCategoryColors(result);
 
+        // A colour Outlook did not provide (master categories unreadable at import) falls back to the trainer colour too.
+        foreach (var stored in result.Where(c => c.Color is null &&
+                     string.Equals(c.Name, trainerCategoryName, StringComparison.OrdinalIgnoreCase)))
+            stored.Color = NormalizeOutlookCategoryColor(trainerCategoryColor);
+
         foreach (var category in categories)
         {
             if (result.Any(c => string.Equals(c.Name, category, StringComparison.OrdinalIgnoreCase)))

@@ -32,4 +32,20 @@ public class OutlookCategoryPresentationTests
         Assert.Equal(2, result.Colors.Count);
         Assert.Null(result.Colors.Single(c => c.Name == "Konsultacje").Color);
     }
+
+    // Outlook import stored the trainer category without a colour: the schedule must still use the trainer colour.
+    [Fact]
+    public void TrainerCategoryStoredWithoutColourFallsBackToTrainerColour()
+    {
+        var session = new Session
+        {
+            OutlookCategoriesJson = "[\"Karolina Wróbel\"]",
+            OutlookCategoryColorsJson = "[{\"Name\":\"Karolina Wróbel\",\"Color\":null},{\"Name\":\"Inna\",\"Color\":null}]",
+            PrimaryOutlookCategory = "Karolina Wróbel",
+            Trainer = new Trainer { OutlookCategoryName = "Karolina Wróbel", OutlookCategoryColor = "preset8" }
+        };
+        var result = OutlookCategoryPresentation.Read(session);
+        Assert.Equal("preset8", result.PrimaryColor);
+        Assert.Null(result.Colors.Single(c => c.Name == "Inna").Color);
+    }
 }
