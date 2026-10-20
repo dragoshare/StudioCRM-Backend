@@ -183,7 +183,8 @@ public class SessionService : ISessionService
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories,
-            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType),
+            ConsultationSessions.IsConsultation(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
             outlookCategories,
@@ -359,7 +360,8 @@ public class SessionService : ISessionService
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories,
-            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType),
+            ConsultationSessions.IsConsultation(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
             outlookCategories,
@@ -2041,7 +2043,8 @@ public class SessionService : ISessionService
     private async Task<List<string>> ResolveOutlookCategoriesForTrainerAsync(
         int trainerId,
         List<string>? requestedCategories,
-        bool isGroupSession)
+        bool isGroupSession,
+        bool isConsultation = false)
     {
         var trainerCategory = await _context.Trainers
             .Where(t => t.Id == trainerId)
@@ -2055,6 +2058,9 @@ public class SessionService : ISessionService
 
         if (!string.IsNullOrWhiteSpace(trainerCategory))
             categories.Add(trainerCategory);
+
+        if (isConsultation)
+            categories.Add(ConsultationSessions.OutlookCategory);
 
         categories.AddRange(requestedCategories ?? new List<string>());
 
@@ -2084,6 +2090,8 @@ public class SessionService : ISessionService
                     SessionTitleBuilder.GroupClassOutlookCategory,
                     StringComparison.OrdinalIgnoreCase)
                     ? "preset0"
+                    : string.Equals(category, ConsultationSessions.OutlookCategory, StringComparison.OrdinalIgnoreCase)
+                    ? ConsultationSessions.OutlookCategoryColor
                     : trainerCategory is not null &&
                     string.Equals(category, trainerCategory.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
                     ? NormalizeOutlookCategoryColor(trainerCategory.OutlookCategoryColor)

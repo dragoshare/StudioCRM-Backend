@@ -33,9 +33,9 @@ public static class SessionTitleBuilder
 
     public static string BuildOutlookSubject(Session session)
     {
-        // A consultation keeps the title written in Outlook (usually the prospect's name).
+        // A consultation keeps its own title (usually the prospect's name), marked "- Konsultacja" in Outlook.
         if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
-            return session.Title;
+            return ConsultationSessions.BuildOutlookSubject(session.Title);
 
         if (!ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
             return $"ZAJĘCIA GRUPOWE: {session.Title} | {session.Location.Name}";

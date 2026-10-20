@@ -527,7 +527,7 @@ public class OutlookEventMapperService
 
         var session = new Session
         {
-            Title = string.IsNullOrWhiteSpace(evt.Subject) ? StudioCRM.Application.Common.ConsultationSessions.DefaultTitle : evt.Subject.Trim(),
+            Title = StudioCRM.Application.Common.ConsultationSessions.StripOutlookSubjectSuffix(evt.Subject),
             Note = evt.BodyPreview,
             StartAt = evt.StartAt,
             EndAt = evt.EndAt,
