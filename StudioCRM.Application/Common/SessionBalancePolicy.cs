@@ -22,6 +22,9 @@ public static class SessionBalancePolicy
         var terms = AgreedSessionTerms.Read(package);
         // Both training types were already purchased as part of this individual mixed agreement.
         if (terms is { Count: > 1 } && terms.Any(t => t.BillingType == actual)) return 0;
+        // A type outside the mixed agreement (3:1 on a 1:1 + 2:1 agreement) is priced against the pool it uses.
+        if (terms is { Count: > 1 } && AgreedSessionTerms.TermFor(terms, actual) is { } pool)
+            return PerSession(pool.BillingType, actual, oneToOneLevel);
         return PerSession(package.ExpectedBillingType, actual, oneToOneLevel);
     }
 

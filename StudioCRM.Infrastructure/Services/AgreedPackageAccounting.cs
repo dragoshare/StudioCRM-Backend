@@ -25,9 +25,11 @@ internal static class AgreedPackageAccounting
         var counted = await context.SessionParticipants
             .Where(p => p.ClientPackageId == package.Id && p.IsCountedFromPackage && p.SessionId != sessionId)
             .Select(p => new { p.ActualBillingType, p.SessionsCharged }).ToListAsync();
-        if (counted.Any(p => p.ActualBillingType == null || !terms.Any(t => t.BillingType == p.ActualBillingType)))
+        if (counted.Any(p => p.ActualBillingType == null || AgreedSessionTerms.TermFor(terms, p.ActualBillingType.Value) is null))
             throw new InvalidOperationException("Existing sessions do not match the individual package agreement.");
+        // Usage of the pool this session uses, including sessions of other types charged to the same pool (3:1 -> 2:1).
+        var pool = AgreedSessionTerms.TermFor(terms, type);
         AgreedSessionTerms.ValidateUsage(terms, type,
-            counted.Where(p => p.ActualBillingType == type).Sum(p => p.SessionsCharged), charge);
+            counted.Where(p => AgreedSessionTerms.TermFor(terms, p.ActualBillingType!.Value) == pool).Sum(p => p.SessionsCharged), charge);
     }
 }
