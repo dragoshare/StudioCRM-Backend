@@ -763,6 +763,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (AreTitlesEqual(currentOutlookTitle, newTitle))
             return;
 
+        // Our own PATCH comes back as a webhook; if the titles keep differing this would e-mail attendees in a loop.
+        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
+            return;
+
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         using var request = new HttpRequestMessage(

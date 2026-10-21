@@ -60,6 +60,14 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (integration is null || !integration.IsActive)
             throw new InvalidOperationException("Trainer does not have active Outlook integration.");
 
+        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.SessionKey(_context.OrganizationId, session.Id)))
+        {
+            _logger.LogError(
+                "Outlook sync of session {SessionId} skipped: more than {Limit} writes in an hour (each one e-mails the attendees).",
+                session.Id, OutlookWriteGuard.MaxWritesPerHour);
+            return;
+        }
+
         await EnsureAccessTokenAsync(integration);
 
         if (existingLink is null)

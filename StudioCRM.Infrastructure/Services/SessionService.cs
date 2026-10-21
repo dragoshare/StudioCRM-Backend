@@ -253,6 +253,8 @@ public class SessionService : ISessionService
                 {
                     await transaction.CommitAsync();
                     transactionCommitted = true;
+                    if (syncToOutlook)
+                        await TrySyncSessionToOutlookAsync(session.Id);
                 }
             }
             else if (requestedStatus != "Cancelled" && syncToOutlook)
@@ -472,6 +474,7 @@ public class SessionService : ISessionService
                 {
                     await transaction.CommitAsync();
                     transactionCommitted = true;
+                    await TrySyncSessionToOutlookAsync(session.Id);
                 }
             }
             else if (IsGroupClass(session) && requestedStatus == "Cancelled" && previousStatus != "Cancelled")
