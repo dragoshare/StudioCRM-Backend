@@ -81,6 +81,9 @@ public class OrganizationRequestContextTests
     }
 
     [Theory]
+    [InlineData(typeof(TrainerPortalSeriesController), "Create", true)]
+    [InlineData(typeof(TrainerPortalSeriesController), "Delete", true)]
+    [InlineData(typeof(TrainerPortalSeriesController), "SyncToOutlook", false)]
     [InlineData(typeof(TrainersController), "Create", true)]
     [InlineData(typeof(TrainersController), "Deactivate", true)]
     [InlineData(typeof(ClientsController), "Create", true)]

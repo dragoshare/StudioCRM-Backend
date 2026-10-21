@@ -20,6 +20,7 @@ public sealed class OrganizationCapabilityMiddleware(RequestDelegate next)
             var action = http.GetEndpoint()?.Metadata.GetMetadata<ControllerActionDescriptor>();
             var type = action?.ControllerTypeInfo.AsType();
             var allowed = type != null && CoreControllers.Contains(type)
+                || (type == typeof(TrainerPortalSeriesController) && action!.ActionName is "Create" or "Delete")
                 || (type == typeof(TrainerPortalController) && !action!.ActionName.Contains("Invit", StringComparison.OrdinalIgnoreCase))
                 || (type == typeof(ClientPortalController) && action!.ActionName is not ("RequestEmailChange" or "RequestPayment"))
                 || (type == typeof(CurrentOrganizationController) && action!.ActionName == "Get")
