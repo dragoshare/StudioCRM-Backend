@@ -191,7 +191,7 @@ public class OutlookWebhookService : IOutlookWebhookService
 
     public async Task HandleNotificationAsync(string requestBody)
     {
-        if (string.IsNullOrWhiteSpace(requestBody))
+        if (string.IsNullOrWhiteSpace(requestBody) || IsEmergencyStop)
             return;
 
         using var doc = JsonDocument.Parse(requestBody);
@@ -763,6 +763,9 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (AreTitlesEqual(currentOutlookTitle, newTitle))
             return;
 
+        if (IsEmergencyStop)
+            return;
+
         // Our own PATCH comes back as a webhook; if the titles keep differing this would e-mail attendees in a loop.
         if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
             return;
@@ -786,6 +789,8 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         await _httpClient.SendAsync(request);
     }
+
+    private bool IsEmergencyStop => _configuration?.GetValue<bool>("Outlook:EmergencyStop") == true;
 
     private static bool AreTitlesEqual(string? currentTitle, string? newTitle)
     {

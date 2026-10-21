@@ -36,6 +36,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     public async Task SyncSessionAsync(int sessionId)
     {
+        ThrowIfEmergencyStop();
         var session = await _context.Sessions
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
@@ -146,6 +147,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         string recurringGroupId,
         SessionRecurrenceDto recurrence)
     {
+        ThrowIfEmergencyStop();
         var sessions = await _context.Sessions
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
@@ -651,6 +653,12 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         {
             _logger.LogWarning(ex, "Could not clean up Outlook series {EventId} after failed linking.", eventId);
         }
+    }
+
+    private void ThrowIfEmergencyStop()
+    {
+        if (_settings.EmergencyStop)
+            throw new InvalidOperationException("Synchronizacja z Outlookiem jest awaryjnie wstrzymana (Outlook:EmergencyStop).");
     }
 
     private Dictionary<string, object?> BuildGraphEventPayload(Session session, List<string> categories)
