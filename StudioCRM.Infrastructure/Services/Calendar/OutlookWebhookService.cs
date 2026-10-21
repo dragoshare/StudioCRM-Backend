@@ -193,6 +193,9 @@ public class OutlookWebhookService : IOutlookWebhookService
     {
         if (string.IsNullOrWhiteSpace(requestBody) || IsEmergencyStop)
             return;
+        // A backend on a copy of the database must not act on notifications (see OutlookInstanceBinding).
+        if (!await OutlookInstanceBinding.IsAllowedAsync(_context, _configuration?["Outlook:WebhookUrl"]))
+            return;
 
         using var doc = JsonDocument.Parse(requestBody);
 
@@ -396,7 +399,6 @@ public class OutlookWebhookService : IOutlookWebhookService
                 integration,
                 existing,
                 externalEventId,
-                subjectValue,
                 ReadAttendeeEmailsFromJson(previousAttendeesJson));
         }
         else if (!existing.IsConvertedToSession && !createdByCrm &&
@@ -417,17 +419,9 @@ public class OutlookWebhookService : IOutlookWebhookService
         else if (!existing.IsConvertedToSession && !createdByCrm &&
             !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]))
         {
+            // Outlook -> CRM only reads: the Outlook title stays as written (a write-back e-mails every attendee).
             var mapper = new OutlookEventMapperService(_context);
-            var (session, _) = await mapper.MapToSessionAsync(existing);
-
-            if (session != null)
-            {
-                await UpdateOutlookEventTitleIfNeededAsync(
-                    integration,
-                    externalEventId,
-                    currentOutlookTitle: subjectValue,
-                    newTitle: session.Title);
-            }
+            await mapper.MapToSessionAsync(existing);
         }
     }
 
@@ -474,7 +468,6 @@ public class OutlookWebhookService : IOutlookWebhookService
         CalendarIntegration integration,
         ExternalCalendarEvent evt,
         string externalEventId,
-        string currentOutlookTitle,
         List<string> previousAttendees)
     {
         await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -547,17 +540,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         await _context.SaveChangesAsync();
 
         await transaction.CommitAsync();
-        var outlookTitle = SessionTitleBuilder.ShouldDeriveFromParticipants(
-            session.IsPubliclyBookable,
-            session.PlannedSessionType)
-            ? newTitle
-            : SessionTitleBuilder.BuildOutlookSubject(session);
-
-        await UpdateOutlookEventTitleIfNeededAsync(
-            integration,
-            externalEventId,
-            currentOutlookTitle,
-            outlookTitle);
+        // No write-back to Outlook: CRM changes reach Outlook only when the session is edited in CRM.
     }
 
     // Clients who were attendees of the event before and are gone now, and whose participation was settled.
@@ -751,54 +734,7 @@ public class OutlookWebhookService : IOutlookWebhookService
                 ));
     }
 
-    private async Task UpdateOutlookEventTitleIfNeededAsync(
-        CalendarIntegration integration,
-        string externalEventId,
-        string currentOutlookTitle,
-        string newTitle)
-    {
-        if (string.IsNullOrWhiteSpace(newTitle))
-            return;
-
-        if (AreTitlesEqual(currentOutlookTitle, newTitle))
-            return;
-
-        if (IsEmergencyStop)
-            return;
-
-        // Our own PATCH comes back as a webhook; if the titles keep differing this would e-mail attendees in a loop.
-        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
-            return;
-
-        await _tokenService.EnsureValidAccessTokenAsync(integration);
-
-        using var request = new HttpRequestMessage(
-            HttpMethod.Patch,
-            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
-
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
-
-        request.Content = new StringContent(
-            JsonSerializer.Serialize(new
-            {
-                subject = newTitle
-            }),
-            Encoding.UTF8,
-            "application/json");
-
-        await _httpClient.SendAsync(request);
-    }
-
     private bool IsEmergencyStop => _configuration?.GetValue<bool>("Outlook:EmergencyStop") == true;
-
-    private static bool AreTitlesEqual(string? currentTitle, string? newTitle)
-    {
-        var current = (currentTitle ?? string.Empty).Trim();
-        var next = (newTitle ?? string.Empty).Trim();
-
-        return string.Equals(current, next, StringComparison.OrdinalIgnoreCase);
-    }
 
     private async Task<string?> ResolveLocationEmailAsync(
         List<string> attendeeEmails,

@@ -1106,6 +1106,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task EnsureAccessTokenAsync(CalendarIntegration integration)
     {
+        await OutlookInstanceBinding.EnsureAllowedAsync(_context, _settings.WebhookUrl);
+
         if (integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(2) &&
             !string.IsNullOrWhiteSpace(integration.AccessToken))
         {

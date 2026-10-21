@@ -19,5 +19,8 @@ public class OutlookSettings
 
     public string RedirectUri { get; set; } = string.Empty;
 
+    // Address Microsoft sends calendar notifications to; also part of the Outlook instance binding of the database.
+    public string WebhookUrl { get; set; } = string.Empty;
+
     public string Scopes { get; set; } = "openid profile offline_access Calendars.ReadWrite Contacts.ReadWrite MailboxSettings.ReadWrite User.Read";
 }
