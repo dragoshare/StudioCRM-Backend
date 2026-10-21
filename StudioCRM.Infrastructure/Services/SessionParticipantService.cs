@@ -256,7 +256,9 @@ public class SessionParticipantService : ISessionParticipantService
         if (session.Status == "Cancelled")
             throw new InvalidOperationException("Cancelled session cannot be completed.");
 
-        if (!request.Participants.Any())
+        // A group class may be completed with nobody enrolled in CRM (e.g. bookings kept elsewhere):
+        // no entries are charged and the trainer is paid the group rate.
+        if (!request.Participants.Any() && !GroupBookingPolicy.IsGroup(session))
             throw new InvalidOperationException("At least one participant is required.");
 
         if (!Enum.TryParse<SessionBillingType>(request.ActualSessionType, out var actualBillingType))

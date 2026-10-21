@@ -69,6 +69,7 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
         // Own calendar: every issue. Owner: also the "review in CRM" issues of every trainer's calendar.
         var events = await _context.ExternalCalendarEvents
             .Include(x => x.CalendarIntegration)
+                .ThenInclude(i => i.User)
             .Where(x =>
                 (x.CalendarIntegration.UserId == userId ||
                  (isOwner && x.MappingWarningsJson!.Contains(OutlookReviewIssues.Prefix))) &&
@@ -96,6 +97,9 @@ public class ExternalCalendarEventService : IExternalCalendarEventService
                     LocationName = calendarEvent.LocationName,
                     OrganizerEmail = calendarEvent.OrganizerEmail,
                     IssueType = ResolveIssueType(warning),
+                    RequiresDecision = OutlookReviewIssues.IsReview(warning),
+                    CalendarOwnerFullName = calendarEvent.CalendarIntegration.User == null ? null
+                        : $"{calendarEvent.CalendarIntegration.User.FirstName} {calendarEvent.CalendarIntegration.User.LastName}".Trim(),
                     Message = warning,
                     Email = ExtractEmailFromWarning(warning),
                     ImportedAt = calendarEvent.ImportedAt

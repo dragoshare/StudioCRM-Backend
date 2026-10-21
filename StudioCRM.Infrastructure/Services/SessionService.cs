@@ -83,6 +83,9 @@ public class SessionService : ISessionService
             .Where(x => x.OriginalSessionId == id)
             .OrderByDescending(x => x.CreatedAt)
             .ToListAsync();
+        var authorIds = corrections.Where(x => x.ChangedByUserId.HasValue).Select(x => x.ChangedByUserId!.Value).Distinct().ToList();
+        var authors = await _context.Users.AsNoTracking().Where(u => authorIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim());
 
         return corrections.Select(x => new SessionCorrectionDto
         {
@@ -94,6 +97,7 @@ public class SessionService : ISessionService
             BeforeState = JsonSerializer.Deserialize<JsonElement>(x.BeforeStateJson),
             AfterState = JsonSerializer.Deserialize<JsonElement>(x.AfterStateJson),
             ChangedByUserId = x.ChangedByUserId,
+            ChangedByFullName = x.ChangedByUserId.HasValue ? authors.GetValueOrDefault(x.ChangedByUserId.Value) : null,
             CreatedAt = x.CreatedAt
         }).ToList();
     }
@@ -179,7 +183,8 @@ public class SessionService : ISessionService
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories,
-            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType),
+            ConsultationSessions.IsConsultation(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
             outlookCategories,
@@ -355,7 +360,8 @@ public class SessionService : ISessionService
         var outlookCategories = await ResolveOutlookCategoriesForTrainerAsync(
             request.TrainerId,
             request.OutlookCategories,
-            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType));
+            request.IsPubliclyBookable || IsGroupSessionType(request.PlannedSessionType),
+            ConsultationSessions.IsConsultation(request.PlannedSessionType));
         var outlookCategoryColors = await ResolveOutlookCategoryColorsForTrainerAsync(
             request.TrainerId,
             outlookCategories,
@@ -1132,7 +1138,7 @@ public class SessionService : ISessionService
     {
         if (await IsSessionLockedByPaidSettlementAsync(trainerId, startAt))
         {
-            throw new InvalidOperationException(
+            throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.TrainerSettlementPaid,
                 "Session cannot be changed because the trainer settlement for this month has already been paid.");
         }
     }
@@ -2016,6 +2022,13 @@ public class SessionService : ISessionService
 
         result = NormalizeOutlookCategoryColors(result);
 
+        // The trainer's own category always uses the trainer colour from CRM; the colour stored from Outlook
+        // (the mailbox master category) may differ or be missing.
+        var trainerColor = NormalizeOutlookCategoryColor(trainerCategoryColor);
+        foreach (var stored in result.Where(c => trainerColor is not null &&
+                     string.Equals(c.Name, trainerCategoryName, StringComparison.OrdinalIgnoreCase)))
+            stored.Color = trainerColor;
+
         foreach (var category in categories)
         {
             if (result.Any(c => string.Equals(c.Name, category, StringComparison.OrdinalIgnoreCase)))
@@ -2036,7 +2049,8 @@ public class SessionService : ISessionService
     private async Task<List<string>> ResolveOutlookCategoriesForTrainerAsync(
         int trainerId,
         List<string>? requestedCategories,
-        bool isGroupSession)
+        bool isGroupSession,
+        bool isConsultation = false)
     {
         var trainerCategory = await _context.Trainers
             .Where(t => t.Id == trainerId)
@@ -2050,6 +2064,9 @@ public class SessionService : ISessionService
 
         if (!string.IsNullOrWhiteSpace(trainerCategory))
             categories.Add(trainerCategory);
+
+        if (isConsultation)
+            categories.Add(ConsultationSessions.OutlookCategory);
 
         categories.AddRange(requestedCategories ?? new List<string>());
 
@@ -2079,6 +2096,8 @@ public class SessionService : ISessionService
                     SessionTitleBuilder.GroupClassOutlookCategory,
                     StringComparison.OrdinalIgnoreCase)
                     ? "preset0"
+                    : string.Equals(category, ConsultationSessions.OutlookCategory, StringComparison.OrdinalIgnoreCase)
+                    ? ConsultationSessions.OutlookCategoryColor
                     : trainerCategory is not null &&
                     string.Equals(category, trainerCategory.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
                     ? NormalizeOutlookCategoryColor(trainerCategory.OutlookCategoryColor)

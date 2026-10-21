@@ -61,6 +61,16 @@ public class SessionParticipantsController : ControllerBase
         int sessionId,
         CompleteSessionDto request)
     {
+        // Only these values have defined settlement behaviour; anything else would be stored but treated as unknown.
+        var unknown = request.Participants.Select(p => p.AttendanceStatus)
+            .FirstOrDefault(status => !StudioCRM.Application.Common.SessionAttendanceStatuses.Settlement.Contains(status));
+        if (unknown != null)
+            return BadRequest(new
+            {
+                message = $"Unknown attendanceStatus '{unknown}'. Allowed: {string.Join(", ", StudioCRM.Application.Common.SessionAttendanceStatuses.Settlement)}.",
+                code = StudioCRM.Application.Common.SessionCorrectionErrorCodes.InvalidAttendanceStatus
+            });
+
         try
         {
             var result = await _service.CompleteSessionAsync(sessionId, request);
@@ -72,7 +82,7 @@ public class SessionParticipantsController : ControllerBase
         }
         catch (InvalidOperationException ex)
         {
-            return BadRequest(new { message = ex.Message });
+            return BadRequest(StudioCRM.Application.Common.CodedInvalidOperationException.Body(ex));
         }
     }
 }

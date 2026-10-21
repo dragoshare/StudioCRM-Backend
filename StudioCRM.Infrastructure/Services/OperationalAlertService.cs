@@ -214,7 +214,8 @@ public class OperationalAlertService : IOperationalAlertService
                     LocationName = cp.Client.Location.Name,
                     CreatedAt = cp.PurchaseDate,
                     DueAt = cp.PaymentDueDate,
-                    ActionUrl = $"/clients/{cp.ClientId}/workspace"
+                    // Opens the payments of this client (frontend route), so the notification needs no extra lookup.
+                    ActionUrl = ClientPaymentsUrl(cp.ClientId)
                 };
             })
             .ToList();
@@ -839,6 +840,9 @@ public class OperationalAlertService : IOperationalAlertService
 
         return query;
     }
+
+    private string ClientPaymentsUrl(int clientId) =>
+        $"{(_currentUser.IsOwner ? "/owner" : "/trainer")}/clients/{clientId}/payments";
 
     private async Task<int?> GetCurrentTrainerIdAsync()
     {

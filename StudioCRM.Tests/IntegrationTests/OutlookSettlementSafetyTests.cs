@@ -124,7 +124,9 @@ public class OutlookSettlementSafetyTests
         await db.SaveChangesAsync();
 
         var ownerIssues = await new ExternalCalendarEventService(db, new PortalSecurityTests.Actor(owner.Id, "Owner"), null!).GetIssuesAsync();
-        Assert.Equal(OutlookReviewIssues.CompletedSessionDeletedType, Assert.Single(ownerIssues).IssueType);
+        var ownerIssue = Assert.Single(ownerIssues);
+        Assert.Equal((OutlookReviewIssues.CompletedSessionDeletedType, true), (ownerIssue.IssueType, ownerIssue.RequiresDecision));
+        Assert.Null(ownerIssue.Email);
         Assert.Equal(2, (await new ExternalCalendarEventService(db, new PortalSecurityTests.Actor(integration.UserId), null!).GetIssuesAsync()).Count);
     }
 

@@ -9,6 +9,29 @@ public static class ConsultationSessions
     public const string SessionType = "Consultation";
     public const string OutlookCategory = "Konsultacje";
     public const string DefaultTitle = "Konsultacja";
+    // Outlook category colour (green) and subject suffix that mark a consultation in the trainer's calendar.
+    public const string OutlookCategoryColor = "preset4";
+    public const string OutlookSubjectSuffix = " - " + DefaultTitle;
+
+    // "Anna T - Konsultacja"; without a title just "Konsultacja".
+    public static string BuildOutlookSubject(string? title)
+    {
+        var value = StripOutlookSubjectSuffix(title);
+        return string.Equals(value, DefaultTitle, StringComparison.OrdinalIgnoreCase) ? DefaultTitle : value + OutlookSubjectSuffix;
+    }
+
+    // Title for CRM from an Outlook subject, without the suffix CRM itself added.
+    public static string StripOutlookSubjectSuffix(string? subject)
+    {
+        var value = subject?.Trim() ?? string.Empty;
+        while (value.EndsWith(OutlookSubjectSuffix.Trim(), StringComparison.OrdinalIgnoreCase) &&
+               value.Length > DefaultTitle.Length)
+        {
+            value = value[..^DefaultTitle.Length].TrimEnd();
+            if (value.EndsWith('-')) value = value[..^1].TrimEnd();
+        }
+        return value.Length == 0 ? DefaultTitle : value;
+    }
 
     public static bool IsConsultation(string? sessionType) =>
         string.Equals(sessionType, SessionType, StringComparison.OrdinalIgnoreCase);

@@ -1,3 +1,4 @@
+using StudioCRM.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
@@ -28,7 +29,7 @@ internal static class SessionAccountingCorrectionManager
                 continue;
 
             if (package.Client.IsDeleted || package.ClosureDisposition != null)
-                throw new InvalidOperationException("Session belongs to an archived client or a closed package and requires manual reconciliation before correction.");
+                throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.ArchivedClientOrClosedPackage, "Session belongs to an archived client or a closed package and requires manual reconciliation before correction.");
 
             var newUsedSessions = Math.Max(0, package.UsedSessions - counted.SessionsCharged);
             var reopensPackage = package.UsedSessions >= package.TotalSessions &&
@@ -42,13 +43,13 @@ internal static class SessionAccountingCorrectionManager
                     .OrderBy(x => x.Id)
                     .ToListAsync();
                 if (renewals.Count > 1)
-                    throw new InvalidOperationException("Package has multiple renewal cycles and requires manual reconciliation.");
+                    throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.MultipleRenewalCycles, "Package has multiple renewal cycles and requires manual reconciliation.");
 
                 renewal = renewals.SingleOrDefault();
                 if (renewal is not null)
                 {
                     if (renewal.ClosureDisposition != null)
-                        throw new InvalidOperationException("Renewal package has a closure decision and cannot be corrected automatically.");
+                        throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.RenewalClosed, "Renewal package has a closure decision and cannot be corrected automatically.");
                     var renewalWasUsed = renewal.UsedSessions > 0 ||
                         await context.SessionParticipants.AnyAsync(x =>
                             x.ClientPackageId == renewal.Id && x.IsCountedFromPackage);
@@ -59,10 +60,10 @@ internal static class SessionAccountingCorrectionManager
                         x.Status == ClientPaymentStatus.PendingConfirmation);
 
                     if (renewalWasUsed || renewalHasNextCycle)
-                        throw new InvalidOperationException(
+                        throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.RenewalAlreadyUsed,
                             "Session cannot be corrected automatically because the renewed package has already been used.");
                     if (renewalHasPendingPayment)
-                        throw new InvalidOperationException(
+                        throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.RenewalPaymentPending,
                             "Session cannot be corrected while the renewed package has a pending payment.");
                 }
 
@@ -75,7 +76,7 @@ internal static class SessionAccountingCorrectionManager
                         x.IsActive &&
                         (x.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.SessionBased && x.ExpectedBillingType != SessionBillingType.Group));
                     if (hasOtherActivePackage)
-                        throw new InvalidOperationException(
+                        throw new CodedInvalidOperationException(SessionCorrectionErrorCodes.OtherActivePackage,
                             "Session cannot be corrected because the client already has another active package.");
                 }
             }

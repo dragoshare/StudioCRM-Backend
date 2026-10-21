@@ -32,4 +32,22 @@ public class OutlookCategoryPresentationTests
         Assert.Equal(2, result.Colors.Count);
         Assert.Null(result.Colors.Single(c => c.Name == "Konsultacje").Color);
     }
+
+    // The trainer category stored from Outlook with a different or missing colour still shows the CRM trainer colour.
+    [Theory]
+    [InlineData("\"preset11\"")]
+    [InlineData("null")]
+    public void TrainerCategoryAlwaysUsesCrmTrainerColour(string storedColor)
+    {
+        var session = new Session
+        {
+            OutlookCategoriesJson = "[\"Karolina Wróbel\",\"Konsultacje\"]",
+            OutlookCategoryColorsJson = $"[{{\"Name\":\"Karolina Wróbel\",\"Color\":{storedColor}}},{{\"Name\":\"Konsultacje\",\"Color\":\"preset3\"}}]",
+            PrimaryOutlookCategory = "Karolina Wróbel",
+            Trainer = new Trainer { OutlookCategoryName = "Karolina Wróbel", OutlookCategoryColor = "preset10" }
+        };
+        var result = OutlookCategoryPresentation.Read(session);
+        Assert.Equal("preset10", result.PrimaryColor);
+        Assert.Equal("preset3", result.Colors.Single(c => c.Name == "Konsultacje").Color);
+    }
 }

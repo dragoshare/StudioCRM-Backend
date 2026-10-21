@@ -872,6 +872,11 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         {
             managedCategories.Add((SessionTitleBuilder.GroupClassOutlookCategory, "preset0"));
         }
+        if (ConsultationSessions.IsConsultation(session.PlannedSessionType) &&
+            categories.Contains(ConsultationSessions.OutlookCategory, StringComparer.OrdinalIgnoreCase))
+        {
+            managedCategories.Add((ConsultationSessions.OutlookCategory, ConsultationSessions.OutlookCategoryColor));
+        }
         if (trainerCategoryName is not null &&
             categories.Contains(trainerCategoryName, StringComparer.OrdinalIgnoreCase))
         {
@@ -973,6 +978,10 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (trainerCategoryName is not null)
             categories.Add(trainerCategoryName);
 
+        // After the trainer category, so the event keeps the trainer colour in Outlook and CRM.
+        if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
+            categories.Add(ConsultationSessions.OutlookCategory);
+
         categories.AddRange(ReadStringList(session.OutlookCategoriesJson));
 
         return categories
@@ -993,6 +1002,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 Name = category,
                 Color = string.Equals(category, SessionTitleBuilder.GroupClassOutlookCategory, StringComparison.OrdinalIgnoreCase)
                     ? "preset0"
+                    : string.Equals(category, ConsultationSessions.OutlookCategory, StringComparison.OrdinalIgnoreCase)
+                    ? ConsultationSessions.OutlookCategoryColor
                     : string.Equals(category, session.Trainer.OutlookCategoryName, StringComparison.OrdinalIgnoreCase)
                     ? NormalizeCategoryColor(session.Trainer.OutlookCategoryColor)
                     : null

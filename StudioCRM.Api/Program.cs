@@ -272,10 +272,9 @@ app.UseExceptionHandler(errorApp =>
             logger.LogWarning(exception, "Handled request exception returned {StatusCode}.", statusCode);
         }
 
-        await context.Response.WriteAsync(JsonSerializer.Serialize(new
-        {
-            message
-        }));
+        // Business rejections with a stable code keep it: { message, code }.
+        await context.Response.WriteAsync(JsonSerializer.Serialize(
+            new { message, code = exception is null ? null : StudioCRM.Application.Common.CodedInvalidOperationException.CodeOf(exception) }));
     });
 });
 

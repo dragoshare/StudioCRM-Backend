@@ -92,6 +92,8 @@ public class OutlookEventMapperService
         var ownerCalendar = await OutlookImportAccess.IsOwnerAsync(_context, calendarIntegration.UserId);
         // Trainer category + "Konsultacja": trainer work time without a client record (also when an owner books it).
         var consultation = StudioCRM.Application.Common.ConsultationSessions.HasOutlookCategory(evt.CategoriesJson);
+        // "Zajęcia grupowe": a group class (group packages, clients with group access at this location, no 1:4 limit).
+        var groupClass = !consultation && StudioCRM.Application.Common.GroupClassSessions.HasOutlookCategory(evt.CategoriesJson);
 
         var attendeeEmails = consultation ? new List<string>() : ReadAttendeeEmails(evt.AttendeesJson)
             .Select(NormalizeEmail)
@@ -112,7 +114,11 @@ public class OutlookEventMapperService
 
         foreach (var email in attendeeEmails)
         {
-            var client = await _context.Clients
+            var client = groupClass
+                ? await _context.Clients.FirstOrDefaultAsync(c =>
+                    ((c.CalendarEmail != null && c.CalendarEmail.ToLower() == email) || c.Email.ToLower() == email) &&
+                    !c.IsDeleted && c.LocationMemberships.Any(m => m.LocationId == location.Id && m.GroupAccessEnabled))
+                : await _context.Clients
                 .FirstOrDefaultAsync(c =>
                     ((c.CalendarEmail != null && c.CalendarEmail.ToLower() == email) || c.Email.ToLower() == email) &&
                     !c.IsDeleted && (ownerCalendar || c.TrainerId == trainer.Id ||
@@ -121,7 +127,9 @@ public class OutlookEventMapperService
 
             if (client == null)
             {
-                warnings.Add($"Nie znaleziono klienta: {email}");
+                warnings.Add(groupClass
+                    ? $"Nie znaleziono klienta z dostępem do zajęć grupowych w tej lokalizacji: {email}"
+                    : $"Nie znaleziono klienta: {email}");
                 continue;
             }
 
@@ -208,14 +216,16 @@ public class OutlookEventMapperService
 
         var session = new Session
         {
-            Title = BuildSessionTitle(clients),
+            Title = groupClass
+                ? (string.IsNullOrWhiteSpace(evt.Subject) || evt.Subject.StartsWith("[DELETED]") ? StudioCRM.Application.Common.GroupClassSessions.DefaultTitle : evt.Subject.Trim())
+                : BuildSessionTitle(clients),
             Note = evt.BodyPreview,
             StartAt = evt.StartAt,
             EndAt = evt.EndAt,
             TrainerId = trainer.Id,
             LocationId = location.Id,
             Status = "Planned",
-            PlannedSessionType = clients.Select(c => c.Id).Distinct().Count() switch
+            PlannedSessionType = groupClass ? StudioCRM.Application.Common.GroupClassSessions.SessionType : clients.Select(c => c.Id).Distinct().Count() switch
             {
                 1 => nameof(SessionBillingType.OneToOne),
                 2 => nameof(SessionBillingType.TwoToOne),
@@ -238,7 +248,7 @@ public class OutlookEventMapperService
 
         foreach (var client in clients.DistinctBy(c => c.Id))
         {
-            await AddClientToSessionAsync(session.Id, client);
+            await AddClientToSessionAsync(session, client);
         }
 
         await _context.CalendarEventLinks.AddAsync(new CalendarEventLink
@@ -403,16 +413,21 @@ public class OutlookEventMapperService
         if (missingClients.Count == 0)
             return;
 
-        if (existingClientIds.Count + missingClients.Count > Math.Min(4, session.PublicCapacity ?? 4))
+        // Group classes are limited only by their own capacity; personal/semi sessions by 4 people.
+        var limit = StudioCRM.Application.Common.GroupClassSessions.IsGroup(session.PlannedSessionType)
+            ? session.PublicCapacity ?? int.MaxValue
+            : Math.Min(4, session.PublicCapacity ?? 4);
+        if (existingClientIds.Count + missingClients.Count > limit)
         {
-            warnings.Add(
-                $"Nie dopisano klientów do sesji CRM #{session.Id}, bo trener może prowadzić maksymalnie 4 osoby w jednej sesji.");
+            warnings.Add(StudioCRM.Application.Common.GroupClassSessions.IsGroup(session.PlannedSessionType)
+                ? $"Nie dopisano klientów do zajęć grupowych CRM #{session.Id}, bo przekroczyłoby to limit miejsc ({limit})."
+                : $"Nie dopisano klientów do sesji CRM #{session.Id}, bo trener może prowadzić maksymalnie 4 osoby w jednej sesji.");
             return;
         }
 
         foreach (var client in missingClients)
         {
-            await AddClientToSessionAsync(session.Id, client);
+            await AddClientToSessionAsync(session, client);
         }
 
         await _context.SaveChangesAsync();
@@ -420,16 +435,13 @@ public class OutlookEventMapperService
         warnings.Add($"Dopisano {missingClients.Count} klient(ów) do istniejącej sesji CRM #{session.Id}.");
     }
 
-    private async Task AddClientToSessionAsync(int sessionId, Client client)
+    private async Task AddClientToSessionAsync(Session session, Client client)
     {
-        var activeClientPackage = await _context.ClientPackages
-            .Where(cp => cp.ClientId == client.Id && cp.IsActive && cp.BillingMode == PackageBillingMode.SessionBased)
-            .OrderByDescending(cp => cp.PurchaseDate)
-            .FirstOrDefaultAsync();
+        var activeClientPackage = await OutlookParticipantPackage.FindAsync(_context, client.Id, session);
 
         await _context.SessionParticipants.AddAsync(new SessionParticipant
         {
-            SessionId = sessionId,
+            SessionId = session.Id,
             ClientId = client.Id,
             PackageId = activeClientPackage?.PackageId,
             ClientPackageId = activeClientPackage?.Id,
@@ -515,7 +527,7 @@ public class OutlookEventMapperService
 
         var session = new Session
         {
-            Title = string.IsNullOrWhiteSpace(evt.Subject) ? StudioCRM.Application.Common.ConsultationSessions.DefaultTitle : evt.Subject.Trim(),
+            Title = StudioCRM.Application.Common.ConsultationSessions.StripOutlookSubjectSuffix(evt.Subject),
             Note = evt.BodyPreview,
             StartAt = evt.StartAt,
             EndAt = evt.EndAt,
