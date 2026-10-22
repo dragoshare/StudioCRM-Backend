@@ -22,7 +22,13 @@ Skrzynka trenera przekroczyła limit wysyłki i została zablokowana.
 
    W logach i w odpowiedziach pojawia się wtedy komunikat „Outlook jest powiązany z innym backendem lub inną bazą…”. Kopia bazy przeniesiona na inny serwer lub do innego projektu Supabase jest więc rozpoznawana także wtedy, gdy skopiowano zmienne środowiskowe produkcji.
 
-2. **Kierunek Outlook → CRM tylko czyta.** Webhook i odświeżanie kalendarza aktualizują sesje w CRM, ale nie zmieniają już tytułów wydarzeń w Outlooku. Wydarzenie w Outlooku zmienia się tylko wtedy, gdy ktoś zmieni sesję w CRM.
+2. **Kierunek Outlook → CRM zapisuje do Outlooka tylko tytuł i tylko raz na zmianę.** Od 22.10 CRM odsyła tytuł z uczestników, np. „Anna K + Beata N”, wyłącznie w dwóch sytuacjach:
+   - wydarzenie utworzone w Outlooku zostało zaimportowane jako nowa sesja;
+   - w Outlooku zmieniła się lista uczestników sesji indywidualnej lub semi.
+
+   Własny zapis CRM wraca jako powiadomienie z tą samą listą uczestników, więc nic więcej nie zostaje zapisane. Tytuł zmieniony przez trenera bez zmiany uczestników zostaje bez zmian. Tytuły zajęć grupowych i konsultacji nie są nadpisywane.
+
+   Każdy taki zapis to mail „zaktualizowano” do uczestników. Obowiązuje limit 6 zapisów na wydarzenie na godzinę, a przy `Outlook__EmergencyStop=true` CRM nie wykonuje żadnych zapisów.
 
 ## Wdrożenie
 

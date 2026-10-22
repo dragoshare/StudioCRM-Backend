@@ -419,9 +419,14 @@ public class OutlookWebhookService : IOutlookWebhookService
         else if (!existing.IsConvertedToSession && !createdByCrm &&
             !OutlookImportCutoff.IsBefore(existing.StartAt, _configuration["Outlook:ImportSessionsFrom"]))
         {
-            // Outlook -> CRM only reads: the Outlook title stays as written (a write-back e-mails every attendee).
             var mapper = new OutlookEventMapperService(_context);
-            await mapper.MapToSessionAsync(existing);
+            var (session, _) = await mapper.MapToSessionAsync(existing);
+
+            // An event created in Outlook gets the participant title once; group classes and consultations keep
+            // the title the trainer wrote.
+            if (session != null &&
+                SessionTitleBuilder.ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
+                await UpdateOutlookEventTitleIfNeededAsync(integration, externalEventId, subjectValue, session.Title);
         }
     }
 
@@ -523,6 +528,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (categoryWarning != null) warnings.Add(categoryWarning);
         evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
 
+        var participantsBefore = await ParticipantIdsAsync(session.Id);
         // Public reservations are managed by the booking API, not the Outlook attendee list.
         if (!session.IsPubliclyBookable && !ConsultationSessions.IsConsultation(session.PlannedSessionType))
             await SyncSessionParticipantsFromOutlookAsync(session, evt);
@@ -540,8 +546,17 @@ public class OutlookWebhookService : IOutlookWebhookService
         await _context.SaveChangesAsync();
 
         await transaction.CommitAsync();
-        // No write-back to Outlook: CRM changes reach Outlook only when the session is edited in CRM.
+
+        // The participant title follows an attendee change made in Outlook. Our own PATCH comes back as a webhook
+        // with the same attendees, so it is written once per change and cannot loop.
+        if (SessionTitleBuilder.ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType) &&
+            !participantsBefore.SequenceEqual(await ParticipantIdsAsync(session.Id)))
+            await UpdateOutlookEventTitleIfNeededAsync(integration, externalEventId, evt.Subject, newTitle);
     }
+
+    private Task<List<int>> ParticipantIdsAsync(int sessionId) =>
+        _context.SessionParticipants.Where(p => p.SessionId == sessionId)
+            .Select(p => p.ClientId).OrderBy(id => id).ToListAsync();
 
     // Clients who were attendees of the event before and are gone now, and whose participation was settled.
     private async Task<bool> ReportRemovedAttendeesOfCompletedSessionAsync(Session session, ExternalCalendarEvent evt, List<string> previousAttendees)
@@ -732,6 +747,36 @@ public class OutlookWebhookService : IOutlookWebhookService
                     (!string.IsNullOrWhiteSpace(normalizedLocationName) &&
                      normalizedLocationName.Contains(l.Name.ToLower()))
                 ));
+    }
+
+    // The only write from the Outlook -> CRM direction. Every event update e-mails the attendees, so it runs only
+    // for a changed title, never during an emergency stop, at most OutlookWriteGuard.MaxWritesPerHour times per event
+    // and only from the backend bound to this database (the token check enforces OutlookInstanceBinding).
+    private async Task UpdateOutlookEventTitleIfNeededAsync(
+        CalendarIntegration integration,
+        string externalEventId,
+        string? currentOutlookTitle,
+        string? newTitle)
+    {
+        if (string.IsNullOrWhiteSpace(newTitle) || IsEmergencyStop ||
+            string.Equals((currentOutlookTitle ?? string.Empty).Trim(), newTitle.Trim(), StringComparison.OrdinalIgnoreCase))
+            return;
+
+        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
+            return;
+
+        await _tokenService.EnsureValidAccessTokenAsync(integration);
+
+        using var request = new HttpRequestMessage(
+            HttpMethod.Patch,
+            $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(new { subject = newTitle.Trim() }),
+            Encoding.UTF8,
+            "application/json");
+
+        await _httpClient.SendAsync(request);
     }
 
     private bool IsEmergencyStop => _configuration?.GetValue<bool>("Outlook:EmergencyStop") == true;
