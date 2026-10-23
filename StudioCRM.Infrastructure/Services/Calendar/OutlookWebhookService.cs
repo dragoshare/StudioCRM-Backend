@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,6 +23,7 @@ public class OutlookWebhookService : IOutlookWebhookService
     private readonly IOutlookCalendarSyncService _calendarSyncService;
     private readonly ICurrentUserService _currentUser;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<OutlookWebhookService>? _logger;
     // Same fields as the single-event read, so a calendar-view page can be imported without one request per event.
     private const string EventSelect = "id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories,transactionId";
     // Set only for the duration of ReconcileAsync: master category colours are read once per integration instead of
@@ -34,8 +36,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         IConfiguration configuration,
         IOutlookTokenService tokenService,
         IOutlookCalendarSyncService calendarSyncService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ILogger<OutlookWebhookService>? logger = null)
     {
+        _logger = logger;
         _context = context;
         _httpClient = httpClient;
         _configuration = configuration;
@@ -750,7 +754,7 @@ public class OutlookWebhookService : IOutlookWebhookService
     }
 
     // The only write from the Outlook -> CRM direction. Every event update e-mails the attendees, so it runs only
-    // for a changed title, never during an emergency stop, at most OutlookWriteGuard.MaxWritesPerHour times per event
+    // for a changed title, never during an emergency stop, within the OutlookWriteGuard limits per event
     // and only from the backend bound to this database (the token check enforces OutlookInstanceBinding).
     private async Task UpdateOutlookEventTitleIfNeededAsync(
         CalendarIntegration integration,
@@ -763,7 +767,12 @@ public class OutlookWebhookService : IOutlookWebhookService
             return;
 
         if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
+        {
+            _logger?.LogWarning(
+                "Outlook title of event {EventId} not written ({Title}): write limit reached ({PerMinute}/min, {PerHour}/h).",
+                externalEventId, newTitle, OutlookWriteGuard.MaxWritesPerMinute, OutlookWriteGuard.MaxWritesPerHour);
             return;
+        }
 
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
@@ -776,7 +785,12 @@ public class OutlookWebhookService : IOutlookWebhookService
             Encoding.UTF8,
             "application/json");
 
-        await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        if (response.IsSuccessStatusCode)
+            _logger?.LogInformation("Outlook title of event {EventId} written: {Title}.", externalEventId, newTitle);
+        else
+            _logger?.LogWarning("Outlook rejected the title of event {EventId} ({Title}): {Status} {Body}",
+                externalEventId, newTitle, (int)response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
     private bool IsEmergencyStop => _configuration?.GetValue<bool>("Outlook:EmergencyStop") == true;

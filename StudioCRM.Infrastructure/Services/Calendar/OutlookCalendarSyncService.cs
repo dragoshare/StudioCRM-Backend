@@ -64,8 +64,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.SessionKey(_context.OrganizationId, session.Id)))
         {
             _logger.LogError(
-                "Outlook sync of session {SessionId} skipped: more than {Limit} writes in an hour (each one e-mails the attendees).",
-                session.Id, OutlookWriteGuard.MaxWritesPerHour);
+                "Outlook sync of session {SessionId} skipped: more than {PerMinute} writes in a minute or {PerHour} in an hour (each one e-mails the attendees).",
+                session.Id, OutlookWriteGuard.MaxWritesPerMinute, OutlookWriteGuard.MaxWritesPerHour);
             return;
         }
 
