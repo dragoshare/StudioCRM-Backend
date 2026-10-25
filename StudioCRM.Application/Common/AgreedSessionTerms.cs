@@ -21,10 +21,27 @@ public static class AgreedSessionTerms
         return terms;
     }
 
+    // Agreed pool used by a session of this type: its own pool, or for a bigger semi session (3:1, 4:1) not in the
+    // agreement the agreed semi pool with the largest group below it (e.g. 3:1 uses 2:1). 1:1 never falls back.
+    public static AgreedSessionTerm? TermFor(List<AgreedSessionTerm> terms, SessionBillingType type) =>
+        terms.SingleOrDefault(t => t.BillingType == type) ??
+        (SemiSize(type) is { } size
+            ? terms.Where(t => SemiSize(t.BillingType) < size).OrderByDescending(t => SemiSize(t.BillingType)).FirstOrDefault()
+            : null);
+
+    // used: entries already charged to the pool TermFor(terms, type) (sessions of every type that use that pool).
     public static void ValidateUsage(List<AgreedSessionTerm> terms, SessionBillingType type, int used, int charge)
     {
-        var term = terms.SingleOrDefault(t => t.BillingType == type);
+        var term = TermFor(terms, type);
         if (term is null || charge <= 0 || used + term.OpeningUsed + charge > term.Limit)
             throw new InvalidOperationException("Session exceeds the agreed package limit for this training type.");
     }
+
+    private static int? SemiSize(SessionBillingType type) => type switch
+    {
+        SessionBillingType.TwoToOne => 2,
+        SessionBillingType.ThreeToOne => 3,
+        SessionBillingType.FourToOne => 4,
+        _ => null
+    };
 }

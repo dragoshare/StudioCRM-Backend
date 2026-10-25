@@ -181,6 +181,11 @@ public class SessionParticipantService : ISessionParticipantService
             await SessionWriteLock.AcquireAsync(_context, sessionId, request.Participants.Select(p => p.ClientId));
             var result = await CompleteSessionCoreAsync(sessionId, request, skipUserAccessCheck);
             await transaction.CommitAsync();
+            // Outlook only after the commit: an event update e-mails every attendee, so it must never be sent for a
+            // completion that may still roll back and be retried by the worker. The automatic completion changes
+            // nothing an attendee sees, so it does not touch Outlook at all.
+            if (result && !skipUserAccessCheck)
+                await TrySyncSessionToOutlookAsync(sessionId);
             return result;
         }
         catch
@@ -457,8 +462,6 @@ public class SessionParticipantService : ISessionParticipantService
                 _currentUser.UserId);
             await _context.SaveChangesAsync();
         }
-
-        await TrySyncSessionToOutlookAsync(sessionId);
 
         return true;
     }

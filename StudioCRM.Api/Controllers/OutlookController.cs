@@ -171,10 +171,16 @@ public class OutlookController : ControllerBase
     [HttpPost("webhook")]
     [AllowAnonymous]
     [IgnoreAntiforgeryToken]
-    public async Task<IActionResult> Webhook([FromServices] StudioCRM.Api.BackgroundServices.OutlookWebhookQueue queue)
+    public async Task<IActionResult> Webhook(
+        [FromServices] StudioCRM.Api.BackgroundServices.OutlookWebhookQueue queue,
+        [FromServices] IConfiguration configuration)
     {
         if (Request.Query.TryGetValue("validationToken", out var token))
             return Content(token.ToString(), "text/plain");
+
+        // Accepted (not 503) so Graph stops retrying the dropped notifications.
+        if (configuration.GetValue<bool>("Outlook:EmergencyStop"))
+            return Accepted();
 
         // Graph notifications are small; anything larger is not a genuine notification batch.
         if (Request.ContentLength > 1_000_000)

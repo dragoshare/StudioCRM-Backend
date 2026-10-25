@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Logging;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -22,6 +23,7 @@ public class OutlookWebhookService : IOutlookWebhookService
     private readonly IOutlookCalendarSyncService _calendarSyncService;
     private readonly ICurrentUserService _currentUser;
     private readonly IConfiguration _configuration;
+    private readonly ILogger<OutlookWebhookService>? _logger;
     // Same fields as the single-event read, so a calendar-view page can be imported without one request per event.
     private const string EventSelect = "id,subject,bodyPreview,start,end,location,organizer,attendees,type,seriesMasterId,categories,transactionId";
     // Set only for the duration of ReconcileAsync: master category colours are read once per integration instead of
@@ -34,8 +36,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         IConfiguration configuration,
         IOutlookTokenService tokenService,
         IOutlookCalendarSyncService calendarSyncService,
-        ICurrentUserService currentUser)
+        ICurrentUserService currentUser,
+        ILogger<OutlookWebhookService>? logger = null)
     {
+        _logger = logger;
         _context = context;
         _httpClient = httpClient;
         _configuration = configuration;
@@ -191,7 +195,10 @@ public class OutlookWebhookService : IOutlookWebhookService
 
     public async Task HandleNotificationAsync(string requestBody)
     {
-        if (string.IsNullOrWhiteSpace(requestBody))
+        if (string.IsNullOrWhiteSpace(requestBody) || IsEmergencyStop)
+            return;
+        // A backend on a copy of the database must not act on notifications (see OutlookInstanceBinding).
+        if (!await OutlookInstanceBinding.IsAllowedAsync(_context, _configuration?["Outlook:WebhookUrl"]))
             return;
 
         using var doc = JsonDocument.Parse(requestBody);
@@ -396,7 +403,6 @@ public class OutlookWebhookService : IOutlookWebhookService
                 integration,
                 existing,
                 externalEventId,
-                subjectValue,
                 ReadAttendeeEmailsFromJson(previousAttendeesJson));
         }
         else if (!existing.IsConvertedToSession && !createdByCrm &&
@@ -420,14 +426,11 @@ public class OutlookWebhookService : IOutlookWebhookService
             var mapper = new OutlookEventMapperService(_context);
             var (session, _) = await mapper.MapToSessionAsync(existing);
 
-            if (session != null)
-            {
-                await UpdateOutlookEventTitleIfNeededAsync(
-                    integration,
-                    externalEventId,
-                    currentOutlookTitle: subjectValue,
-                    newTitle: session.Title);
-            }
+            // An event created in Outlook gets the participant title once; group classes and consultations keep
+            // the title the trainer wrote.
+            if (session != null &&
+                SessionTitleBuilder.ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType))
+                await UpdateOutlookEventTitleIfNeededAsync(integration, externalEventId, subjectValue, session.Title);
         }
     }
 
@@ -474,7 +477,6 @@ public class OutlookWebhookService : IOutlookWebhookService
         CalendarIntegration integration,
         ExternalCalendarEvent evt,
         string externalEventId,
-        string currentOutlookTitle,
         List<string> previousAttendees)
     {
         await using var transaction = await _context.Database.BeginTransactionAsync();
@@ -530,6 +532,7 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (categoryWarning != null) warnings.Add(categoryWarning);
         evt.MappingWarningsJson = JsonSerializer.Serialize(warnings);
 
+        var participantsBefore = await ParticipantIdsAsync(session.Id);
         // Public reservations are managed by the booking API, not the Outlook attendee list.
         if (!session.IsPubliclyBookable && !ConsultationSessions.IsConsultation(session.PlannedSessionType))
             await SyncSessionParticipantsFromOutlookAsync(session, evt);
@@ -547,18 +550,17 @@ public class OutlookWebhookService : IOutlookWebhookService
         await _context.SaveChangesAsync();
 
         await transaction.CommitAsync();
-        var outlookTitle = SessionTitleBuilder.ShouldDeriveFromParticipants(
-            session.IsPubliclyBookable,
-            session.PlannedSessionType)
-            ? newTitle
-            : SessionTitleBuilder.BuildOutlookSubject(session);
 
-        await UpdateOutlookEventTitleIfNeededAsync(
-            integration,
-            externalEventId,
-            currentOutlookTitle,
-            outlookTitle);
+        // The participant title follows an attendee change made in Outlook. Our own PATCH comes back as a webhook
+        // with the same attendees, so it is written once per change and cannot loop.
+        if (SessionTitleBuilder.ShouldDeriveFromParticipants(session.IsPubliclyBookable, session.PlannedSessionType) &&
+            !participantsBefore.SequenceEqual(await ParticipantIdsAsync(session.Id)))
+            await UpdateOutlookEventTitleIfNeededAsync(integration, externalEventId, evt.Subject, newTitle);
     }
+
+    private Task<List<int>> ParticipantIdsAsync(int sessionId) =>
+        _context.SessionParticipants.Where(p => p.SessionId == sessionId)
+            .Select(p => p.ClientId).OrderBy(id => id).ToListAsync();
 
     // Clients who were attendees of the event before and are gone now, and whose participation was settled.
     private async Task<bool> ReportRemovedAttendeesOfCompletedSessionAsync(Session session, ExternalCalendarEvent evt, List<string> previousAttendees)
@@ -751,45 +753,47 @@ public class OutlookWebhookService : IOutlookWebhookService
                 ));
     }
 
+    // The only write from the Outlook -> CRM direction. Every event update e-mails the attendees, so it runs only
+    // for a changed title, never during an emergency stop, within the OutlookWriteGuard limits per event
+    // and only from the backend bound to this database (the token check enforces OutlookInstanceBinding).
     private async Task UpdateOutlookEventTitleIfNeededAsync(
         CalendarIntegration integration,
         string externalEventId,
-        string currentOutlookTitle,
-        string newTitle)
+        string? currentOutlookTitle,
+        string? newTitle)
     {
-        if (string.IsNullOrWhiteSpace(newTitle))
+        if (string.IsNullOrWhiteSpace(newTitle) || IsEmergencyStop ||
+            string.Equals((currentOutlookTitle ?? string.Empty).Trim(), newTitle.Trim(), StringComparison.OrdinalIgnoreCase))
             return;
 
-        if (AreTitlesEqual(currentOutlookTitle, newTitle))
+        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.EventKey(integration.Id, externalEventId)))
+        {
+            _logger?.LogWarning(
+                "Outlook title of event {EventId} not written ({Title}): write limit reached ({PerMinute}/min, {PerHour}/h).",
+                externalEventId, newTitle, OutlookWriteGuard.MaxWritesPerMinute, OutlookWriteGuard.MaxWritesPerHour);
             return;
+        }
 
         await _tokenService.EnsureValidAccessTokenAsync(integration);
 
         using var request = new HttpRequestMessage(
             HttpMethod.Patch,
             $"https://graph.microsoft.com/v1.0/me/events/{externalEventId}");
-
-        request.Headers.Authorization =
-            new AuthenticationHeaderValue("Bearer", integration.AccessToken);
-
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", integration.AccessToken);
         request.Content = new StringContent(
-            JsonSerializer.Serialize(new
-            {
-                subject = newTitle
-            }),
+            JsonSerializer.Serialize(new { subject = newTitle.Trim() }),
             Encoding.UTF8,
             "application/json");
 
-        await _httpClient.SendAsync(request);
+        using var response = await _httpClient.SendAsync(request);
+        if (response.IsSuccessStatusCode)
+            _logger?.LogInformation("Outlook title of event {EventId} written: {Title}.", externalEventId, newTitle);
+        else
+            _logger?.LogWarning("Outlook rejected the title of event {EventId} ({Title}): {Status} {Body}",
+                externalEventId, newTitle, (int)response.StatusCode, await response.Content.ReadAsStringAsync());
     }
 
-    private static bool AreTitlesEqual(string? currentTitle, string? newTitle)
-    {
-        var current = (currentTitle ?? string.Empty).Trim();
-        var next = (newTitle ?? string.Empty).Trim();
-
-        return string.Equals(current, next, StringComparison.OrdinalIgnoreCase);
-    }
+    private bool IsEmergencyStop => _configuration?.GetValue<bool>("Outlook:EmergencyStop") == true;
 
     private async Task<string?> ResolveLocationEmailAsync(
         List<string> attendeeEmails,

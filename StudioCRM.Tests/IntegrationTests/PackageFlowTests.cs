@@ -113,6 +113,28 @@ public class PackageFlowTests
         Assert.Empty(await db.ClientBalanceTransactions.ToListAsync());
     }
 
+    // Mixed 1:1 + 2:1 agreement on a 3:1 session: uses a 2:1 entry and credits the 3:1 difference (10 zł), instead of
+    // rejecting the whole session completion.
+    [PostgresFact]
+    public async Task MixedAgreementSettlesThreeToOneFromSemiPoolWithCredit()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var (client, session, catalog, owner) = await Seed(db);
+        session.PlannedSessionType = "ThreeToOne";
+        catalog.BillingType = SessionBillingType.OneToOne;
+        var pass = new ClientPackage { Client = client, Package = catalog, LocationId = session.LocationId,
+            ExpectedBillingType = SessionBillingType.OneToOne, TotalSessions = 12, UsedSessions = 0,
+            ExpectedUnitPrice = 117.50m, TotalPrice = 1410m, OriginalPrice = 1410m,
+            AgreedSessionTermsJson = "[{\"BillingType\":1,\"Limit\":6,\"OpeningUsed\":0},{\"BillingType\":2,\"Limit\":6,\"OpeningUsed\":0}]" };
+        var participant = new SessionParticipant { Client = client, Session = session };
+        db.AddRange(pass, participant); await db.SaveChangesAsync();
+        await Participants(db, owner).CompleteSessionAsync(session.Id, new StudioCRM.Application.DTOs.SessionParticipants.CompleteSessionDto
+        { ActualSessionType = "ThreeToOne", Participants = [new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true }] });
+        Assert.Equal(1, pass.UsedSessions);
+        Assert.Equal(SessionBillingType.ThreeToOne, participant.ActualBillingType);
+        Assert.Equal(10m, (await db.ClientBalanceTransactions.SingleAsync()).Amount);
+    }
+
     [PostgresFact]
     public async Task ConsultationIsTrainerTimeWithoutClientsAndCompletesAutomatically()
     {

@@ -36,6 +36,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     public async Task SyncSessionAsync(int sessionId)
     {
+        ThrowIfEmergencyStop();
         var session = await _context.Sessions
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
@@ -59,6 +60,14 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
         if (integration is null || !integration.IsActive)
             throw new InvalidOperationException("Trainer does not have active Outlook integration.");
+
+        if (!OutlookWriteGuard.TryAcquire(OutlookWriteGuard.SessionKey(_context.OrganizationId, session.Id)))
+        {
+            _logger.LogError(
+                "Outlook sync of session {SessionId} skipped: more than {PerMinute} writes in a minute or {PerHour} in an hour (each one e-mails the attendees).",
+                session.Id, OutlookWriteGuard.MaxWritesPerMinute, OutlookWriteGuard.MaxWritesPerHour);
+            return;
+        }
 
         await EnsureAccessTokenAsync(integration);
 
@@ -138,6 +147,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         string recurringGroupId,
         SessionRecurrenceDto recurrence)
     {
+        ThrowIfEmergencyStop();
         var sessions = await _context.Sessions
             .Include(s => s.Trainer)
                 .ThenInclude(t => t.User)
@@ -645,6 +655,12 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         }
     }
 
+    private void ThrowIfEmergencyStop()
+    {
+        if (_settings.EmergencyStop)
+            throw new InvalidOperationException("Synchronizacja z Outlookiem jest awaryjnie wstrzymana (Outlook:EmergencyStop).");
+    }
+
     private Dictionary<string, object?> BuildGraphEventPayload(Session session, List<string> categories)
     {
         var clientName = string.Join(" + ",
@@ -1090,6 +1106,8 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
 
     private async Task EnsureAccessTokenAsync(CalendarIntegration integration)
     {
+        await OutlookInstanceBinding.EnsureAllowedAsync(_context, _settings.WebhookUrl);
+
         if (integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(2) &&
             !string.IsNullOrWhiteSpace(integration.AccessToken))
         {

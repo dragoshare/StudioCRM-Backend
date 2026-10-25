@@ -25,6 +25,9 @@ public class OutlookTokenService : IOutlookTokenService
 
     public async Task EnsureValidAccessTokenAsync(CalendarIntegration integration, bool forceRefresh = false)
     {
+        // Every Microsoft Graph call goes through a token check: a backend not bound to this database calls nothing.
+        await OutlookInstanceBinding.EnsureAllowedAsync(_context, _settings.WebhookUrl);
+
         if (!forceRefresh &&
             integration.AccessTokenExpiresAt > DateTime.UtcNow.AddMinutes(5) &&
             !string.IsNullOrWhiteSpace(integration.AccessToken))
