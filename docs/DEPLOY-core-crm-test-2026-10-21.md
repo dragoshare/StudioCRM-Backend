@@ -1,3 +1,5 @@
+> Korekta adresu z 25.10: użytkownik potwierdził, że testowym backendem jest https://atlas-bsworkout-production.onrender.com. Wcześniejsza identyfikacja usług poniżej jest nieaktualna. Zobacz AUDYT-core-crm-main-2026-10-25.md.
+
 # Kandydat do wdrożenia testowego — 21.10.2026
 
 Branch: `codex/platform-organizations`. Zawiera `main` do commita `49264be` oraz CoreCrm dla drugiej organizacji. Main i produkcja nie zostały zmienione. Niezacommitowane zmiany z głównego katalogu nie są częścią tej paczki.

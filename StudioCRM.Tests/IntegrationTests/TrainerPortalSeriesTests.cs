@@ -10,10 +10,23 @@ public class TrainerPortalSeriesTests
     // Trainer series: trainer forced to the logged-in one, own clients and locations only, no group/public series,
     // and deleting keeps past/completed occurrences.
     [PostgresFact]
-    public async Task TrainerCreatesOwnIndividualSeriesAndDeletesOnlyFutureSessions()
+    public Task TrainerCreatesOwnIndividualSeriesAndDeletesOnlyFutureSessions() => VerifySeriesAsync(false);
+
+    [PostgresFact]
+    public Task DemoTrainerCreatesSeriesWithoutOutlookAndDeletesOnlyFutureSessions() => VerifySeriesAsync(true);
+
+    private static async Task VerifySeriesAsync(bool demo)
     {
         await using var database = await TestDatabase.CreateAsync();
-        await using var db = database.Context();
+        await using var legacy = database.Context();
+        var organizationId = StudioCRM.Infrastructure.Persistence.StudioCRMDbContext.LegacyOrganizationId;
+        if (demo)
+        {
+            var profile = new OrganizationBrandingProfile { Id = Guid.NewGuid(), Name = "Demo" };
+            var org = new Organization { Id = Guid.NewGuid(), Name = "Demo", Slug = "series-demo", Status = "Active", BrandingProfileId = profile.Id };
+            legacy.AddRange(profile, org); await legacy.SaveChangesAsync(); organizationId = org.Id;
+        }
+        await using var db = database.Context(organizationId: organizationId);
         var location = new Location { Name = "Series studio" };
         var foreignLocation = new Location { Name = "Foreign studio" };
         var trainer = new Trainer { User = new User { Email = "series-trainer@test.invalid", FirstName = "S", LastName = "Trener" } };
@@ -40,6 +53,12 @@ public class TrainerPortalSeriesTests
 
         var series = await portal.CreateSessionSeriesAsync(Request(location.Id, client.Id));
         Assert.Equal(4, series.OccurrencesCount);
+        if (demo)
+        {
+            Assert.False(series.OutlookSeriesSynced);
+            Assert.Contains("not enabled", series.OutlookSyncWarning);
+            Assert.Empty(await legacy.Sessions.ToListAsync());
+        }
         Assert.All(await db.Sessions.Where(s => s.RecurringGroupId == series.RecurringGroupId).ToListAsync(),
             s => Assert.Equal(trainer.Id, s.TrainerId));
 

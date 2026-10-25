@@ -36,6 +36,8 @@ internal static class OutlookInstanceBinding
 
     public static async Task<bool> IsAllowedAsync(StudioCRMDbContext context, string? webhookUrl)
     {
+        // Outlook is deliberately unavailable outside the legacy studio, including direct service calls.
+        if (context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return false;
         var connectionString = context.Database.GetConnectionString();
         var fingerprint = Fingerprint(connectionString, webhookUrl);
         // Keyed by the full connection (incl. schema), so separate databases/schemas are never mixed up.
@@ -45,7 +47,7 @@ internal static class OutlookInstanceBinding
 
         // Raw SQL, so the claim never flushes other tracked changes of the caller's context.
         await context.Database.ExecuteSqlInterpolatedAsync(
-            $"""INSERT INTO "SystemSettings" ("Key", "Value", "CreatedAt", "UpdatedAt") VALUES ({SettingKey}, {fingerprint}, now(), now()) ON CONFLICT ("Key") DO NOTHING""");
+            $"""INSERT INTO "SystemSettings" ("OrganizationId", "Key", "Value", "CreatedAt", "UpdatedAt") VALUES ({context.OrganizationId}, {SettingKey}, {fingerprint}, now(), now()) ON CONFLICT ("OrganizationId", "Key") DO NOTHING""");
         var bound = await context.SystemSettings.AsNoTracking()
             .Where(s => s.Key == SettingKey)
             .Select(s => s.Value)

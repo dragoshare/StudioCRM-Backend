@@ -737,7 +737,7 @@ public class SessionService : ISessionService
             recurringGroupId, createdSessions.Count, databaseStopwatch.ElapsedMilliseconds);
         var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, request.Recurrence);
 
-        if (!outlookSync.IsSynced)
+        if (!outlookSync.IsSynced && _context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId)
         {
             await RemoveFailedNewSeriesAsync(recurringGroupId);
             throw new InvalidOperationException(
