@@ -108,6 +108,50 @@ public class OutlookSettlementSafetyTests
         Assert.Contains(OutlookReviewIssues.PastEventNeedsReview(), JsonSerializer.Deserialize<List<string>>(evt.MappingWarningsJson!)!);
     }
 
+    // 28.10 Weronika S: the event was attached to another session at the same time, that session was deleted in
+    // CRM, and the event stayed "converted" without a session, so no refresh ever brought it back.
+    [PostgresFact]
+    public async Task EventWhoseSessionWasDeletedIsImportedAgain()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var (integration, trainer, location) = await Seed(db, "orphan");
+        var client = new Client { FirstName = "Weronika", LastName = "Szewczyk", Email = "orphan-client@test.invalid", Trainer = trainer, Location = location };
+        db.Add(client);
+        var start = DateTime.UtcNow.Date.AddDays(2).AddHours(9);
+        db.Add(new ExternalCalendarEvent
+        {
+            CalendarIntegrationId = integration.Id, ExternalEventId = "orphan-1", Subject = "Weronika S", StartAt = start, EndAt = start.AddHours(1),
+            IsConvertedToSession = true, SessionId = null
+        });
+        await db.SaveChangesAsync();
+        var events = new[]
+        {
+            new
+            {
+                id = "orphan-1", subject = "Weronika S", bodyPreview = "", type = "singleInstance", seriesMasterId = (string?)null,
+                categories = Array.Empty<string>(), transactionId = (string?)null,
+                start = new { dateTime = start.ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
+                end = new { dateTime = start.AddHours(1).ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
+                location = new { displayName = location.Name },
+                organizer = new { emailAddress = new { address = integration.Email } },
+                attendees = new[] { new { emailAddress = new { address = client.Email } } }
+            }
+        };
+        var handler = new GraphHandler(r => r.RequestUri!.AbsolutePath.EndsWith("/me/calendarView")
+            ? JsonSerializer.Serialize(new { value = events })
+            : r.Method == HttpMethod.Patch ? "{}" : null);
+        var service = Service(db, handler, integration.UserId, importFrom: "2026-01-01");
+
+        await service.ReconcileAsync(new() { PastDays = 0, FutureDays = 7 });
+
+        db.ChangeTracker.Clear();
+        var evt = await db.ExternalCalendarEvents.SingleAsync();
+        Assert.NotNull(evt.SessionId);
+        Assert.True(evt.IsConvertedToSession);
+        Assert.Equal(client.Id, (await db.SessionParticipants.SingleAsync(p => p.SessionId == evt.SessionId)).ClientId);
+    }
+
     [PostgresFact]
     public async Task OwnerSeesReviewIssuesOfTrainerCalendarsButNotTheirOtherWarnings()
     {
