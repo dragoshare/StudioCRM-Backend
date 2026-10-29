@@ -394,6 +394,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         existing.SeriesMasterId = seriesMasterId;
         existing.IsRecurring = isRecurring;
         existing.ImportedAt = DateTime.UtcNow;
+        // The session this event was converted into (or attached to, at the same time) was deleted in CRM: the
+        // foreign key cleared SessionId but not the flag, which kept the event out of the import for good.
+        if (existing.SessionId == null && existing.IsConvertedToSession)
+            existing.IsConvertedToSession = false;
 
         await _context.SaveChangesAsync();
 
