@@ -674,7 +674,8 @@ public partial class ClientService : IClientService
                 cp.ClientId == clientId &&
                 cp.IsActive &&
                 cp.Package.LocationId.HasValue &&
-                cp.Package.LocationId.Value != locationId);
+                // A running cycle moved by the owner to the new location (package correction) no longer blocks.
+                (cp.LocationId ?? cp.Package.LocationId.Value) != locationId);
 
         if (hasMismatchedActivePackage)
             throw new InvalidOperationException("Client has an active package from another location. Change the package before changing the client's location.");

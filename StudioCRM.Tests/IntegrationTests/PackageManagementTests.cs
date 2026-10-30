@@ -3,6 +3,7 @@ using Microsoft.Extensions.Options;
 using StudioCRM.Application.ClientPackages.Services;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.ClientPackages;
+using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Settings;
 using StudioCRM.Application.Interfaces;
 using StudioCRM.Application.Settings;
@@ -205,8 +206,12 @@ public class PackageManagementTests
             OriginalPrice = 520, ExpectedUnitPrice = 130, PaymentStatus = PaymentStatus.Unpaid, IsActive = true };
         db.AddRange(owner, pass, niepolomice); await db.SaveChangesAsync();
         var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var clients = new ClientService(db, new ClientLifecycleV2Tests.Staff(owner.Id), null!, null!);
+        var moveClient = new UpdateClientDto { FirstName = "Justyna", LastName = "M", LocationId = niepolomice.Id };
         var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
 
+        // The Kłaj offer blocks the client's location change until her running cycle is moved.
+        await Assert.ThrowsAsync<InvalidOperationException>(() => clients.UpdateAsync(client.Id, moveClient));
         await Assert.ThrowsAsync<InvalidOperationException>(() => service.CorrectAsync(client.Id, pass.Id,
             new PackageChangeRequest { ExpectedVersion = preview.Version, Reason = "Zmiana lokalizacji", LocationId = int.MaxValue }));
         var result = await service.CorrectAsync(client.Id, pass.Id,
@@ -215,6 +220,8 @@ public class PackageManagementTests
         Assert.Equal(niepolomice.Id, pass.LocationId);
         Assert.Equal(1, pass.UsedSessions); Assert.Equal(4, pass.TotalSessions); Assert.Equal(520m, result.AmountDue); Assert.Equal(130m, pass.ExpectedUnitPrice);
         Assert.NotEqual(preview.Version, (await service.GetManagementPreviewAsync(client.Id, pass.Id)).Version);
+        await clients.UpdateAsync(client.Id, moveClient);
+        Assert.Equal(niepolomice.Id, client.LocationId);
     }
 
     [PostgresFact]
