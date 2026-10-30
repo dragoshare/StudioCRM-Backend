@@ -527,8 +527,9 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
             _context, evt.CategoriesJson, session.LocationId);
-        if (categoryTrainer.Trainer != null && !await OutlookImportAccess.CanManageAsync(_context, integration.UserId, categoryTrainer.Trainer.Id, session.LocationId))
-            throw new InvalidOperationException("Calendar account cannot reassign this trainer.");
+        // 30.10: a trainer hands her session over by setting the other trainer's category in her own calendar. The
+        // account already manages this session (checked above) and the resolver accepts only an active trainer of the
+        // session's location. Throwing here rolled the hand-over back and dropped the rest of the notification batch.
         var categoryWarning = OutlookTrainerCategoryResolver.ApplyToSession(
             session, categoryTrainer.Trainer, categoryTrainer.Warning);
         var warnings = JsonSerializer.Deserialize<List<string>>(evt.MappingWarningsJson ?? "[]") ?? new();
