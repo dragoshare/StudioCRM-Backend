@@ -157,6 +157,39 @@ public class PackageManagementTests
         Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageSurplusKeptByStudio"));
     }
 
+    // 30.10: one entry of a client with a long planned series moved to another client. Planned sessions only point
+    // at the cycle, so the entries can drop to 3 without deleting them; a validity change still waits for them.
+    [PostgresFact]
+    public async Task EntriesCanBeCorrectedWhilePlannedSessionsPointAtThePackage()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "entries-owner@example.test" };
+        var location = new Location { Name = "Studio" };
+        var client = new Client { FirstName = "Katarzyna", Location = location };
+        var template = new Package { Name = "4 semi", Price = 540, SessionsLimit = 4, BillingType = SessionBillingType.TwoToOne };
+        var pass = new ClientPackage { Client = client, Package = template, TotalSessions = 4, UsedSessions = 1, TotalPrice = 540, OriginalPrice = 540,
+            AmountPaid = 540, ExpectedUnitPrice = 135, PaymentStatus = PaymentStatus.Paid, IsActive = true };
+        var start = DateTime.UtcNow.AddDays(3);
+        var planned = new Session { Title = "Katarzyna M", Trainer = new Trainer { User = new User { Email = "entries-trainer@example.test" } },
+            Location = location, StartAt = start, EndAt = start.AddHours(1), PlannedSessionType = "TwoToOne" };
+        db.AddRange(owner, pass, new SessionParticipant { Session = planned, Client = client, ClientPackage = pass });
+        await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+        Assert.Equal(["UnfinishedSessions"], preview.Blockers);
+        Assert.True(preview.CanCorrectSessions);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CorrectAsync(client.Id, pass.Id, new PackageChangeRequest
+        { ExpectedVersion = preview.Version, Reason = "Trening dla Tomasza", TotalSessions = 3, ValidUntil = start.AddDays(30) }));
+        var result = await service.CorrectAsync(client.Id, pass.Id, new PackageChangeRequest
+        { ExpectedVersion = preview.Version, Reason = "Trening dla Tomasza", TotalSessions = 3 });
+
+        Assert.Equal(3, pass.TotalSessions); Assert.Equal(0m, result.AmountDue); Assert.Equal(135m, pass.ExpectedUnitPrice);
+        Assert.True(await db.SessionParticipants.AnyAsync(x => x.ClientPackageId == pass.Id && x.SessionId == planned.Id));
+        Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageCorrected"));
+    }
+
     [PostgresFact]
     public async Task HistoricalPackageIsFinishedInactiveAndTakesItsPaymentWithoutTouchingTheCurrentPackage()
     {

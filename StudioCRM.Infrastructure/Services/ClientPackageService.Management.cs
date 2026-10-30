@@ -74,6 +74,7 @@ public partial class ClientPackageService
             CanEdit = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0 && !payments && !balance && !counted && p.AmountPaid == 0,
             CanCorrect = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0,
             CanCorrectPrice = p.BillingMode == PackageBillingMode.SessionBased && blockers.All(PriceCorrectionAllows),
+            CanCorrectSessions = p.BillingMode == PackageBillingMode.SessionBased && blockers.All(SessionCountCorrectionAllows),
             CanClose = blockers.Count == 0, Blockers = blockers
         };
     }
@@ -81,16 +82,20 @@ public partial class ClientPackageService
     public async Task<PackageManagementPreviewDto> GetManagementPreviewAsync(int clientId, int clientPackageId)
         => await PreviewAsync(await LoadManagedAsync(clientId, clientPackageId));
 
-    private async Task EnsureChangeAsync(ClientPackage p, string expectedVersion, bool priceOnly = false)
+    private async Task EnsureChangeAsync(ClientPackage p, string expectedVersion, Func<string, bool>? allows = null)
     {
         if (expectedVersion != Version(p)) throw new InvalidOperationException("Package changed. Refresh the preview before confirming.");
         var preview = await PreviewAsync(p);
-        var blockers = priceOnly ? preview.Blockers.Where(b => !PriceCorrectionAllows(b)).ToList() : preview.Blockers;
+        var blockers = allows == null ? preview.Blockers : preview.Blockers.Where(b => !allows(b)).ToList();
         if (blockers.Count > 0) throw new InvalidOperationException(string.Join("; ", blockers));
     }
 
     // A renewal or planned sessions do not depend on this cycle's price: any surplus or debt goes through the balance.
     private static bool PriceCorrectionAllows(string blocker) => blocker is "HasRenewal" or "UnfinishedSessions";
+
+    // A planned session only points at the cycle; its entry is taken when it is completed, from the cycle active then
+    // and within its limit. Fewer entries (never below the used ones) leave later sessions to the next cycle.
+    private static bool SessionCountCorrectionAllows(string blocker) => blocker is "UnfinishedSessions";
 
     internal const string SurplusToBalance = "ToBalance";
     internal const string SurplusKeptByStudio = "KeepByStudio";
@@ -119,7 +124,8 @@ public partial class ClientPackageService
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var p = await LoadManagedAsync(clientId, clientPackageId);
         var priceOnly = !request.TotalSessions.HasValue && !request.ValidUntil.HasValue;
-        await EnsureChangeAsync(p, request.ExpectedVersion, priceOnly);
+        await EnsureChangeAsync(p, request.ExpectedVersion,
+            priceOnly ? PriceCorrectionAllows : !request.ValidUntil.HasValue ? SessionCountCorrectionAllows : null);
         ValidateCorrection(p, request);
         var before = State(p);
         var surplus = request.TotalPrice.HasValue ? Math.Max(0, p.AmountPaid - request.TotalPrice.Value) : 0;

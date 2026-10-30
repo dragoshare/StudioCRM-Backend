@@ -53,6 +53,8 @@ public class PackageManagementPreviewDto
     public bool CanCorrect { get; set; }
     // Price-only corrections ignore renewal and planned-session blockers.
     public bool CanCorrectPrice { get; set; }
+    // Entries and price (without validUntil) may be corrected while planned sessions point at the package.
+    public bool CanCorrectSessions { get; set; }
     public bool CanClose { get; set; }
     public string? DeleteBlockReason { get; set; }
     public List<string> Blockers { get; set; } = new();
