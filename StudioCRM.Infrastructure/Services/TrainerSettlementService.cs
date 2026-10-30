@@ -446,7 +446,7 @@ public class TrainerSettlementService : ITrainerSettlementService
             var hours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
             var groupRate = TrainerGroupRate.Resolve(session, sessionType, rates);
             var rate = groupRate ?? ResolveHourlyRate(rates, session.StartAt);
-            var amount = groupRate ?? hours * rate;
+            var amount = groupRate ?? HourlyAmount(sessionType, hours, rate);
             var contract = ResolveCoveringContract(contracts, session);
             var isCovered = contract != null;
 
@@ -586,6 +586,10 @@ public class TrainerSettlementService : ITrainerSettlementService
         if (month < 1 || month > 12)
             throw new InvalidOperationException("Invalid month.");
     }
+
+    // 30.10: a 4:1 semi-personal is paid in whole złoty, rounded down (rate 70 x 2.66 = 186, not 186.20).
+    internal static decimal HourlyAmount(string sessionType, decimal hours, decimal rate) =>
+        sessionType == "FourToOne" ? Math.Floor(hours * rate) : hours * rate;
 
     private static decimal ResolveBillableHours(string sessionType, DateTime startAt, DateTime endAt)
     {

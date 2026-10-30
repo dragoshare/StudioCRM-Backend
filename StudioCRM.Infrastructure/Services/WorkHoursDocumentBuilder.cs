@@ -244,7 +244,7 @@ internal static class WorkHoursDocumentBuilder
             Paragraph($"Stawka godzinowa - {FormatCurrency(model.HourlyRate)} zł", alignment: "center", spacingAfter: 0),
             Paragraph($"Trening semipersonalny 2:1 - {FormatCurrency(ResolveRoundedBonus(model.HourlyRate, 1.6m))} zł", alignment: "center", spacingAfter: 0),
             Paragraph($"Trening semipersonalny 3:1 - {FormatCurrency(ResolveRoundedBonus(model.HourlyRate, 2.2m))} zł", alignment: "center", spacingAfter: 0),
-            Paragraph($"Trening semipersonalny 4:1 - {FormatCurrency(ResolveRoundedBonus(model.HourlyRate, 2.66m))} zł", alignment: "center", spacingAfter: 20),
+            Paragraph($"Trening semipersonalny 4:1 - {FormatCurrency(TrainerSettlementService.HourlyAmount("FourToOne", 2.66m, model.HourlyRate) - model.HourlyRate)} zł", alignment: "center", spacingAfter: 20),
             SignatureBlock("podpis zleceniodawcy", "podpis zleceniobiorcy"));
     }
 

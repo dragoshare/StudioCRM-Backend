@@ -215,7 +215,7 @@ public class TrainerCostAnalysisService : ITrainerCostAnalysisService
         var billableHours = ResolveBillableHours(sessionType, session.StartAt, session.EndAt);
         var hourlyRate = ResolveHourlyRate(trainerRates, session.StartAt);
         var groupRate = TrainerGroupRate.Resolve(session, sessionType, trainerRates);
-        var potentialTrainerCost = decimal.Round(groupRate ?? billableHours * hourlyRate, 2);
+        var potentialTrainerCost = decimal.Round(groupRate ?? TrainerSettlementService.HourlyAmount(sessionType, billableHours, hourlyRate), 2);
         var trainerCost = contract is null ? 0 : potentialTrainerCost;
         var participants = BuildParticipantRows(session);
         AllocateTrainerCost(participants, trainerCost, potentialTrainerCost);
