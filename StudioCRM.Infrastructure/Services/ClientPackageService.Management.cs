@@ -28,7 +28,7 @@ public partial class ClientPackageService
         p.Id, p.ClientId, p.PackageId, p.BillingMode, p.PeriodStartsAt, p.PeriodDurationDays, p.PeriodAutoRenewEnabled, p.TotalSessions, p.UsedSessions, p.TotalPrice,
         p.OriginalPrice, p.AmountPaid, p.BalanceApplied, p.ExpectedUnitPrice, p.IsActive,
         p.ClosureDisposition, p.ValidUntil, p.PaymentDueDate, p.ClosedAt, p.RenewalSource,
-        p.RefundAmount, p.RefundConfirmedAt, p.RefundReference
+        p.RefundAmount, p.RefundConfirmedAt, p.RefundReference, p.LocationId
     });
 
     private static string Version(ClientPackage p) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(State(p))));
@@ -123,10 +123,14 @@ public partial class ClientPackageService
         RequireOwner(); RequireReason(request.Reason);
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var p = await LoadManagedAsync(clientId, clientPackageId);
-        var priceOnly = !request.TotalSessions.HasValue && !request.ValidUntil.HasValue;
+        var priceOnly = !request.TotalSessions.HasValue && !request.ValidUntil.HasValue && !request.LocationId.HasValue;
         await EnsureChangeAsync(p, request.ExpectedVersion,
             priceOnly ? PriceCorrectionAllows : !request.ValidUntil.HasValue ? SessionCountCorrectionAllows : null);
         ValidateCorrection(p, request);
+        // 30.10: a client moving to another studio keeps her running cycle; a cycle bound to the old location would
+        // not settle sessions at the new one. Locations are filtered to the current organization.
+        if (request.LocationId.HasValue && !await _context.Locations.AnyAsync(l => l.Id == request.LocationId && l.IsActive))
+            throw new InvalidOperationException("Location not found.");
         var before = State(p);
         var surplus = request.TotalPrice.HasValue ? Math.Max(0, p.AmountPaid - request.TotalPrice.Value) : 0;
         if (surplus > 0) await DisposeSurplusAsync(p, surplus, request.SurplusDisposition!, request.Reason);
@@ -142,6 +146,7 @@ public partial class ClientPackageService
             ? PackageValidity.EndOfStudioDay(NormalizeNullableDateTime(request.ValidUntil))
             : NormalizeNullableDateTime(request.ValidUntil)) ?? p.ValidUntil;
         p.PaymentDueDate = NormalizeNullableDateTime(request.PaymentDueDate) ?? p.PaymentDueDate;
+        p.LocationId = request.LocationId ?? p.LocationId;
         RefreshStatus(p);
         Audit(p, "PackageCorrected", before, request.Reason);
         if (surplus > 0)

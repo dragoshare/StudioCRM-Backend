@@ -190,6 +190,33 @@ public class PackageManagementTests
         Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageCorrected"));
     }
 
+    // 30.10: a client moves from Kłaj to Niepołomice and keeps her running cycle (used entry, price, debt).
+    [PostgresFact]
+    public async Task RunningPackageMovesToAnotherLocationKeepingEntriesAndPrice()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "move-owner@example.test" };
+        var klaj = new Location { Name = "Kłaj" };
+        var niepolomice = new Location { Name = "Niepołomice" };
+        var client = new Client { FirstName = "Justyna", Location = klaj };
+        var template = new Package { Name = "4 semi", Price = 520, SessionsLimit = 4, BillingType = SessionBillingType.TwoToOne, Location = klaj };
+        var pass = new ClientPackage { Client = client, Package = template, Location = klaj, TotalSessions = 4, UsedSessions = 1, TotalPrice = 520,
+            OriginalPrice = 520, ExpectedUnitPrice = 130, PaymentStatus = PaymentStatus.Unpaid, IsActive = true };
+        db.AddRange(owner, pass, niepolomice); await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.CorrectAsync(client.Id, pass.Id,
+            new PackageChangeRequest { ExpectedVersion = preview.Version, Reason = "Zmiana lokalizacji", LocationId = int.MaxValue }));
+        var result = await service.CorrectAsync(client.Id, pass.Id,
+            new PackageChangeRequest { ExpectedVersion = preview.Version, Reason = "Zmiana lokalizacji", LocationId = niepolomice.Id });
+
+        Assert.Equal(niepolomice.Id, pass.LocationId);
+        Assert.Equal(1, pass.UsedSessions); Assert.Equal(4, pass.TotalSessions); Assert.Equal(520m, result.AmountDue); Assert.Equal(130m, pass.ExpectedUnitPrice);
+        Assert.NotEqual(preview.Version, (await service.GetManagementPreviewAsync(client.Id, pass.Id)).Version);
+    }
+
     [PostgresFact]
     public async Task HistoricalPackageIsFinishedInactiveAndTakesItsPaymentWithoutTouchingTheCurrentPackage()
     {
