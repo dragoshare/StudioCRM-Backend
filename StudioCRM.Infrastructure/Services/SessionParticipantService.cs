@@ -120,7 +120,7 @@ public class SessionParticipantService : ISessionParticipantService
         };
 
         await _context.SessionParticipants.AddAsync(participant);
-
+        PersonalSessionType.FollowParticipants(session, await CountActiveParticipantsAsync(sessionId) + 1);
 
         session.UpdatedAt = DateTime.UtcNow;
 
@@ -149,6 +149,8 @@ public class SessionParticipantService : ISessionParticipantService
             throw new InvalidOperationException("Cannot remove participant from completed session.");
 
         _context.SessionParticipants.Remove(participant);
+        PersonalSessionType.FollowParticipants(participant.Session,
+            await CountActiveParticipantsAsync(sessionId, excludedParticipantId: participant.Id));
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
@@ -203,6 +205,11 @@ public class SessionParticipantService : ISessionParticipantService
             throw;
         }
     }
+
+    private Task<int> CountActiveParticipantsAsync(int sessionId, int? excludedParticipantId = null) =>
+        _context.SessionParticipants.CountAsync(p =>
+            p.SessionId == sessionId && p.Id != excludedParticipantId &&
+            p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate");
 
     private async Task EnsureClientAllowedAsync(Session session, int clientId)
     {

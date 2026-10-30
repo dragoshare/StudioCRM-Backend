@@ -540,6 +540,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         // Public reservations are managed by the booking API, not the Outlook attendee list.
         if (!session.IsPubliclyBookable && !ConsultationSessions.IsConsultation(session.PlannedSessionType))
             await SyncSessionParticipantsFromOutlookAsync(session, evt);
+        // A second attendee added in Outlook turns a planned 1:1 into 2:1, otherwise a manual completion settles it as 1:1.
+        if (!participantsBefore.SequenceEqual(await ParticipantIdsAsync(session.Id)))
+            PersonalSessionType.FollowParticipants(session, await _context.SessionParticipants.CountAsync(p =>
+                p.SessionId == session.Id && p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"));
 
         var newTitle = session.Title;
         if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(

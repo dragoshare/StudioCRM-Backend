@@ -53,6 +53,8 @@ public class OutlookTitleWriteBackTests
         // Beata added in Outlook: CRM title follows and is written to Outlook once.
         await Update(anna.Email);
         Assert.Equal(["Anna K + Beata N"], handler.Subjects);
+        // 30.10: the planned type stayed 1:1, so the manual completion settled two clients as 1:1.
+        Assert.Equal("TwoToOne", session.PlannedSessionType);
 
         // Echo of our own PATCH: same attendees, nothing written.
         evt.Subject = "Anna K + Beata N";
