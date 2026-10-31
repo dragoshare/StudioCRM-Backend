@@ -75,7 +75,7 @@ public partial class ClientPackageService
             CanCorrect = p.BillingMode == PackageBillingMode.SessionBased && blockers.Count == 0,
             CanCorrectPrice = p.BillingMode == PackageBillingMode.SessionBased && blockers.All(PriceCorrectionAllows),
             CanCorrectSessions = p.BillingMode == PackageBillingMode.SessionBased && blockers.All(SessionCountCorrectionAllows),
-            CanClose = blockers.Count == 0, Blockers = blockers
+            CanClose = blockers.All(b => IsPersonalSessionPackage(p) && SessionCountCorrectionAllows(b)), Blockers = blockers
         };
     }
 
@@ -96,6 +96,10 @@ public partial class ClientPackageService
     // A planned session only points at the cycle; its entry is taken when it is completed, from the cycle active then
     // and within its limit. Fewer entries (never below the used ones) leave later sessions to the next cycle.
     private static bool SessionCountCorrectionAllows(string blocker) => blocker is "UnfinishedSessions";
+
+    // Group entries may be held by planned enrollments, so only a personal session package closes over planned sessions.
+    private static bool IsPersonalSessionPackage(ClientPackage p) =>
+        p.BillingMode == PackageBillingMode.SessionBased && p.ExpectedBillingType != SessionBillingType.Group;
 
     internal const string SurplusToBalance = "ToBalance";
     internal const string SurplusKeptByStudio = "KeepByStudio";
@@ -210,7 +214,7 @@ public partial class ClientPackageService
             throw new InvalidOperationException("Choose KeepDue or WaiveDue.");
         await using var tx = await _context.Database.BeginTransactionAsync(IsolationLevel.Serializable);
         var p = await LoadManagedAsync(clientId, clientPackageId);
-        await EnsureChangeAsync(p, request.ExpectedVersion);
+        await EnsureChangeAsync(p, request.ExpectedVersion, IsPersonalSessionPackage(p) ? SessionCountCorrectionAllows : null);
         var before = State(p);
         if (request.FundsDisposition is not ("KeepFunds" or "Refund" or "Balance"))
             throw new InvalidOperationException("Choose KeepFunds, Refund or Balance.");
@@ -220,6 +224,15 @@ public partial class ClientPackageService
             throw new InvalidOperationException("Settlement amount must match the decision and cannot exceed payments allocated to this package.");
         if (request.FundsDisposition != "KeepFunds" && request.DebtDisposition != "WaiveDue")
             throw new InvalidOperationException("Resolve outstanding debt with WaiveDue before refunding or transferring funds.");
+        // 31.10: planned sessions stay in the schedule and are settled at completion from the package active then.
+        // They stop pointing at the closed cycle, which keeps no further entries for them.
+        if (IsPersonalSessionPackage(p))
+            foreach (var planned in await _context.SessionParticipants.Where(x => x.ClientPackageId == p.Id && !x.IsCountedFromPackage &&
+                         x.Session.Status != "Cancelled" && x.Session.Status != "Completed").ToListAsync())
+            {
+                planned.ClientPackageId = null;
+                planned.PackageId = null;
+            }
         if (request.DebtDisposition == "WaiveDue") p.TotalPrice = p.AmountPaid;
         var wasActive = p.IsActive;
         p.PeriodAutoRenewEnabled = false; p.IsActive = false; p.ClosureDisposition = request.DebtDisposition == "KeepDue" ? "ClosedWithDebt" : "Closed"; p.ClosedAt = DateTime.UtcNow; p.ClosureReason = request.Reason.Trim();

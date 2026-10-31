@@ -191,6 +191,36 @@ public class PackageManagementTests
         Assert.True(await db.ClientAuditEntries.AnyAsync(a => a.Action == "PackageCorrected"));
     }
 
+    // 31.10: closing a personal package with waived debt keeps the planned sessions; they are settled later from the next package.
+    [PostgresFact]
+    public async Task PersonalPackageClosesOverPlannedSessionsAndReleasesThem()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "close-owner@example.test" };
+        var location = new Location { Name = "Studio" };
+        var client = new Client { FirstName = "Anna", Location = location };
+        var template = new Package { Name = "8 semi", Price = 800, SessionsLimit = 8, BillingType = SessionBillingType.TwoToOne };
+        var pass = new ClientPackage { Client = client, Package = template, TotalSessions = 8, UsedSessions = 7, TotalPrice = 800, OriginalPrice = 800,
+            AmountPaid = 600, ExpectedUnitPrice = 100, PaymentStatus = PaymentStatus.PartiallyPaid, IsActive = true };
+        var start = DateTime.UtcNow.AddDays(3);
+        var planned = new Session { Title = "Anna K", Trainer = new Trainer { User = new User { Email = "close-trainer@example.test" } },
+            Location = location, StartAt = start, EndAt = start.AddHours(1), PlannedSessionType = "TwoToOne" };
+        var participant = new SessionParticipant { Session = planned, Client = client, ClientPackage = pass, Package = template };
+        db.AddRange(owner, pass, participant); await db.SaveChangesAsync();
+        var service = new ClientPackageService(db, new ClientLifecycleV2Tests.Staff(owner.Id), new Settings());
+        var preview = await service.GetManagementPreviewAsync(client.Id, pass.Id);
+        Assert.Equal(["UnfinishedSessions"], preview.Blockers);
+        Assert.True(preview.CanClose);
+
+        await service.CloseAsync(client.Id, pass.Id, new ClosePackageRequest
+        { ExpectedVersion = preview.Version, Reason = "Koniec pakietu", DebtDisposition = "WaiveDue", FundsDisposition = "KeepFunds" });
+
+        Assert.False(pass.IsActive); Assert.Equal("Closed", pass.ClosureDisposition); Assert.Equal(600m, pass.TotalPrice);
+        Assert.Null(participant.ClientPackageId); Assert.Null(participant.PackageId);
+        Assert.Equal("Planned", planned.Status);
+    }
+
     // 30.10: a client moves from Kłaj to Niepołomice and keeps her running cycle (used entry, price, debt).
     [PostgresFact]
     public async Task RunningPackageMovesToAnotherLocationKeepingEntriesAndPrice()
