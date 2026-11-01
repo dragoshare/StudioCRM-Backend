@@ -154,6 +154,16 @@ public class TrainerPortalController : ControllerBase
         });
     }
 
+    [HttpPost("clients")]
+    public async Task<ActionResult<ClientDto>> CreateClient(CreateClientDto request)
+    {
+        return await HandleAsync<ClientDto>(async () =>
+        {
+            var result = await _trainerPortalService.CreateClientAsync(request);
+            return CreatedAtAction(nameof(GetClient), new { clientId = result.Id }, result);
+        });
+    }
+
     [HttpPatch("clients/{clientId:int}")]
     public async Task<ActionResult<ClientDto>> UpdateClient(int clientId, UpdateClientDto request)
     {

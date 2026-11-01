@@ -4,6 +4,7 @@ using StudioCRM.Application.DTOs.Clients;
 using StudioCRM.Application.DTOs.Subscriptions;
 using StudioCRM.Application.DTOs.TrainingPlans;
 using StudioCRM.Application.Interfaces;
+using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
 using StudioCRM.Infrastructure.Persistence;
@@ -16,17 +17,20 @@ public partial class ClientService : IClientService
     private readonly ICurrentUserService _currentUser;
     private readonly IClientPaymentService _clientPaymentService;
     private readonly ISubscriptionService _subscriptionService;
+    private readonly IOutlookContactSyncQueue? _outlookContacts;
 
     public ClientService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         IClientPaymentService clientPaymentService,
-        ISubscriptionService subscriptionService)
+        ISubscriptionService subscriptionService,
+        IOutlookContactSyncQueue? outlookContacts = null)
     {
         _context = context;
         _currentUser = currentUser;
         _clientPaymentService = clientPaymentService;
         _subscriptionService = subscriptionService;
+        _outlookContacts = outlookContacts;
     }
 
     public async Task<ClientDto> CreateAsync(CreateClientDto request)
@@ -93,6 +97,7 @@ public partial class ClientService : IClientService
             UpdatedAt = DateTime.UtcNow
         });
         await _context.SaveChangesAsync();
+        QueueOutlookContact(client.Id);
 
         return await GetProjectedById(client.Id);
     }
@@ -240,6 +245,7 @@ public partial class ClientService : IClientService
 
         AuditClient(client, "ProfileUpdated", before);
         await _context.SaveChangesAsync();
+        QueueOutlookContact(client.Id);
 
         return await GetProjectedById(id);
     }
@@ -359,6 +365,7 @@ public partial class ClientService : IClientService
         AuditClient(client, "TrainerChanged", before);
 
         await _context.SaveChangesAsync();
+        QueueOutlookContact(client.Id);
         return true;
     }
 
@@ -380,7 +387,15 @@ public partial class ClientService : IClientService
         AuditClient(client, "Restored", before);
 
         await _context.SaveChangesAsync();
+        QueueOutlookContact(client.Id);
         return true;
+    }
+
+    // Outside a transaction the client is committed by now; inside one the worker may run first and push the old state.
+    private void QueueOutlookContact(int clientId)
+    {
+        if (_context.Database.CurrentTransaction == null)
+            _outlookContacts?.Enqueue(_context.OrganizationId, clientId);
     }
 
     public async Task<List<ClientDto>> GetDeletedAsync()

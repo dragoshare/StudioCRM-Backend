@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.TrainerPortal;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
@@ -55,6 +56,33 @@ public class TrainerClientSummaryTests
         Assert.Empty((await portal.GetClientsPageAsync(new PortalPageFilter { Search = "Hidden" })).Items);
         var missing = new TrainerPortalService(db, new PortalSecurityTests.Actor(int.MaxValue), clients, null!, null!);
         Assert.Empty(await missing.GetClientsAsync());
+    }
+
+    [PostgresFact]
+    public async Task TrainerCreatesClientRecordAssignedToThemselvesOnlyAtOwnLocation()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Studio" };
+        var foreignLocation = new Location { Name = "Elsewhere" };
+        var trainer = new Trainer { User = new User { Email = "create-trainer@test.invalid", IsActive = true } };
+        var other = new Trainer { User = new User { Email = "create-other@test.invalid", IsActive = true } };
+        db.AddRange(new TrainerLocation { Trainer = trainer, Location = location },
+            new TrainerLocation { Trainer = other, Location = foreignLocation });
+        await db.SaveChangesAsync();
+        var actor = new PortalSecurityTests.Actor(trainer.UserId);
+        var portal = new TrainerPortalService(db, actor, new ClientService(db, actor, null!, null!), null!, null!);
+
+        var created = await portal.CreateClientAsync(new() { FirstName = "Nowa", LastName = "Klientka", LocationId = location.Id });
+        Assert.Equal(trainer.Id, created.TrainerId);
+        Assert.Equal(created.Id, Assert.Single(await portal.GetClientsAsync()).ClientId);
+        Assert.True(await db.ClientLocationMemberships.AnyAsync(m => m.ClientId == created.Id && m.LocationId == location.Id && m.IsHomeLocation));
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => portal.CreateClientAsync(
+            new() { FirstName = "Cudza", LastName = "Klientka", LocationId = location.Id, TrainerId = other.Id }));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => portal.CreateClientAsync(
+            new() { FirstName = "Inna", LastName = "Lokalizacja", LocationId = foreignLocation.Id }));
+        Assert.Equal(1, await db.Clients.CountAsync());
     }
 
     [PostgresFact]
