@@ -137,6 +137,9 @@ public partial class TrainerPortalService : ITrainerPortalService
 
     public Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId) => _clientService.GetWorkspaceAsync(clientId);
 
+    // ClientService assigns the new client to the calling trainer and requires the trainer to work at its location.
+    public Task<ClientDto> CreateClientAsync(CreateClientDto request) => _clientService.CreateAsync(request);
+
     public Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request) => _clientService.UpdateAsync(clientId, request);
 
     public Task<bool> DeactivateClientAsync(int clientId) => _clientService.DeleteAsync(clientId);

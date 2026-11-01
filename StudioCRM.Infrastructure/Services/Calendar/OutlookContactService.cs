@@ -2,6 +2,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using StudioCRM.Application.Settings;
 using StudioCRM.Application.Interfaces;
@@ -18,19 +19,22 @@ public class OutlookContactService : IOutlookContactService
     private readonly IOutlookTokenService _tokenService;
     private readonly HttpClient _httpClient;
     private readonly OutlookSettings _settings;
+    private readonly ILogger<OutlookContactService>? _logger;
 
     public OutlookContactService(
         StudioCRMDbContext context,
         ICurrentUserService currentUser,
         IOutlookTokenService tokenService,
         HttpClient httpClient,
-        IOptions<OutlookSettings> settings)
+        IOptions<OutlookSettings> settings,
+        ILogger<OutlookContactService>? logger = null)
     {
         _context = context;
         _currentUser = currentUser;
         _tokenService = tokenService;
         _httpClient = httpClient;
         _settings = settings.Value;
+        _logger = logger;
     }
 
     public async Task<int> PrepareCalendarAddressesAsync()
@@ -111,16 +115,77 @@ public class OutlookContactService : IOutlookContactService
 
         foreach (var client in clients)
         {
-            var contact = client.TrainerId == trainer.Id
-                ? client
-                : new Client
-                {
-                    Id = client.Id, FirstName = client.FirstName, LastName = client.LastName,
-                    Email = client.Email, CalendarEmail = client.CalendarEmail
-                };
+            var contact = client.TrainerId == trainer.Id ? client : SharedContact(client);
             await UpsertOutlookContactAsync(integration.AccessToken, contact);
         }
     }
+
+    public async Task SyncClientToConnectedOutlooksAsync(int clientId)
+    {
+        var client = await _context.Clients
+            .Include(c => c.LocationMemberships)
+            .FirstOrDefaultAsync(c => c.Id == clientId && !c.IsDeleted);
+        if (client == null)
+            return;
+
+        var integrations = await _context.CalendarIntegrations
+            .Where(x => x.Provider == "Outlook" && x.IsActive && x.User.IsActive)
+            .OrderBy(x => x.Id)
+            .ToListAsync();
+        if (integrations.Count == 0)
+            return;
+
+        var clientLocationIds = client.LocationMemberships.Select(m => m.LocationId).Append(client.LocationId).Distinct().ToList();
+        var userIds = integrations.Select(x => x.UserId).Distinct().ToList();
+        var ownerIds = await OwnerUserIdsAsync(userIds);
+        var trainers = await _context.Trainers
+            .Where(t => userIds.Contains(t.UserId) && !t.IsDeleted)
+            .Select(t => new { t.Id, t.UserId, AtClientLocation = t.TrainerLocations.Any(l => clientLocationIds.Contains(l.LocationId)) })
+            .ToListAsync();
+        var hasContactEmail = _settings.UseCalendarEmails || !string.IsNullOrWhiteSpace(client.Email);
+
+        foreach (var integration in integrations)
+        {
+            var trainer = trainers.FirstOrDefault(t => t.UserId == integration.UserId);
+            // Same rules as SyncClientsAsync: owners and the client's own trainer get full details; other trainers
+            // of the client's locations only the technical calendar address, without the phone number.
+            Client? contact =
+                ownerIds.Contains(integration.UserId) || trainer?.Id == client.TrainerId ? (hasContactEmail ? client : null)
+                : trainer is { AtClientLocation: true } && _settings.UseCalendarEmails ? SharedContact(client)
+                : null;
+            if (contact == null)
+                continue;
+
+            try
+            {
+                await _tokenService.EnsureValidAccessTokenAsync(integration);
+                await UpsertOutlookContactAsync(integration.AccessToken, contact);
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Could not push client {ClientId} to Outlook contacts of integration {IntegrationId}.",
+                    client.Id, integration.Id);
+            }
+        }
+    }
+
+    private async Task<HashSet<int>> OwnerUserIdsAsync(List<int> userIds)
+    {
+        // Legacy organization keeps account roles; other organizations grant Owner per membership (see AuthService.Organizations).
+        var owners = _context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId
+            ? await _context.Users.Where(u => userIds.Contains(u.Id) && u.UserRoles.Any(r => r.Role.Name == "Owner"))
+                .Select(u => u.Id).ToListAsync()
+            : await _context.Set<OrganizationMembership>()
+                .Where(m => m.OrganizationId == _context.OrganizationId && m.IsOwner && userIds.Contains(m.UserId))
+                .Select(m => m.UserId).ToListAsync();
+        return owners.ToHashSet();
+    }
+
+    private static Client SharedContact(Client client) => new()
+    {
+        Id = client.Id, FirstName = client.FirstName, LastName = client.LastName,
+        Email = client.Email, CalendarEmail = client.CalendarEmail
+    };
 
     private async Task UpsertOutlookContactAsync(string accessToken, Client client)
     {

@@ -19,6 +19,12 @@ Owner/Trainer bearer authorization; portal personal lists use the logged-in trai
 | /api/Notifications/page | page=1/pageSize=25/category/isRead; PagedResultDto<NotificationDto> |
 | /api/Notifications/{id} | current user's NotificationDto; 404 otherwise |
 
+### POST /api/trainer-portal/clients (2026-11-01)
+
+Trainer creates a client record (kartoteka) without a login account. Body: `CreateClientDto` (same as Owner `POST /api/clients`); required `firstName`, `lastName`, `locationId`, optional `email`, `phoneNumber`, `goal`, `notes`, `trainingStartDate`, `nextSessionAt`. For a Trainer the client is always assigned to the logged-in trainer: `trainerId` may be omitted, any other trainer's id returns 400. `locationId` must be a location where the trainer works (400 otherwise). Result: 201 with `ClientDto`, `Location` header pointing to `GET /api/trainer-portal/clients/{id}`. The client then appears in `/clients` and `/clients/page`. Portal access is a separate step: `POST /api/trainer-portal/invitations`.
+
+Outlook contacts (2026-11-01): after creating or editing a client, changing its trainer or restoring it from the archive, the backend pushes that one client in the background to every connected Outlook in the organization: full contact for Owners and the client's trainer, technical calendar address only (no phone) for other trainers of the client's locations. The response does not wait for Outlook and Outlook errors do not fail the request; a new contact may take a few seconds to appear. `POST /api/outlook/contacts/sync-clients` remains as a manual full sync. Archived clients are not removed from Outlook.
+
 PortalPageFilter and notification paging reject page outside 1..100000 or pageSize outside 1..100. Payment pagination normalizes to safe bounds. See DTO definitions below for defaults/types/nullability. JSON property names use camelCase. Existing enum serialization is unchanged; string-typed fields remain strings. PagedResultDto contains items,totalCount,page,pageSize,totalPages.
 
 Errors: 400 invalid parameters/business validation; 401 absent/invalid/revoked JWT; 403 role/access denied; 404 missing or inaccessible object where access is masked; 409 database/concurrency conflict (including conflicting idempotency payload); 502 upstream HTTP failure. Existing controller-specific error bodies remain; do not assume all errors have identical shape.

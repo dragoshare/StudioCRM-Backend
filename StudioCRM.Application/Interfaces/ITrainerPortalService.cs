@@ -17,6 +17,7 @@ public interface ITrainerPortalService
     Task<TrainerParticipantProfileDto?> GetParticipantProfileAsync(int sessionId, int clientId);
     Task<ClientDto?> GetClientAsync(int clientId);
     Task<ClientWorkspaceDto?> GetClientWorkspaceAsync(int clientId);
+    Task<ClientDto> CreateClientAsync(CreateClientDto request);
     Task<ClientDto?> UpdateClientAsync(int clientId, UpdateClientDto request);
     Task<bool> DeactivateClientAsync(int clientId);
     Task<List<TrainerPortalSessionDto>> GetSessionsAsync(DateTime? from = null, DateTime? to = null);
