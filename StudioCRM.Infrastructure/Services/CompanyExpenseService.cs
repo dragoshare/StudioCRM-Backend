@@ -11,7 +11,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services;
 
-public class CompanyExpenseService : ICompanyExpenseService
+public partial class CompanyExpenseService : ICompanyExpenseService
 {
     private const int DefaultMaxExpenseAttachmentFileSizeMb = 15;
     private const int DefaultRecurringOccurrencesCount = 12;
@@ -318,6 +318,7 @@ public class CompanyExpenseService : ICompanyExpenseService
         var financialExpenses = filter.PaymentStatus == ExpensePaymentStatus.Cancelled
             ? expenses
             : expenses.Where(x => x.PaymentStatus != ExpensePaymentStatus.Cancelled).ToList();
+        financialExpenses.AddRange(await PaidZlecenieSettlementCostsAsync(filter, from, to));
         var grossAmount = financialExpenses.Sum(x => x.GrossAmount);
 
         return new ExpenseStatisticsDto
