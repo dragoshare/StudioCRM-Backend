@@ -32,7 +32,7 @@ internal static class OutlookImportDiagnosis
         {
             if (f.LinkedElsewhere)
                 return ("StaleCopy", $"Wydarzenie wskazuje sesję #{f.SessionId}, ale ta sesja jest połączona z wydarzeniem w innym kalendarzu. " +
-                    "To pozostałość po przeniesieniu: usunięcie jej w Outlooku anuluje zaplanowaną sesję, a zmiana terminu ją przesunie.");
+                    "To pozostałość po przeniesieniu: CRM nie zmienia sesji według tej kopii, można ją usunąć w Outlooku.");
             if (!f.SessionExists)
                 return ("SessionMissing", $"Wydarzenie wskazuje sesję #{f.SessionId}, której nie ma w CRM.");
             if (string.Equals(f.SessionStatus, "Cancelled", StringComparison.OrdinalIgnoreCase))

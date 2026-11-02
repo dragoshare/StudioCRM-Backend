@@ -29,13 +29,13 @@ public class OutlookImportDiagnosisTests
     }
 
     [Fact]
-    public void LeftoverCopyInAnotherCalendarWarnsThatDeletingItCancelsTheSession()
+    public void LeftoverCopyInAnotherCalendarCanBeDeletedWithoutTouchingTheSession()
     {
         var (code, explanation) = OutlookImportDiagnosis.Decide(
             Facts(sessionId: 586, sessionExists: true, status: "Planned", linkedElsewhere: true));
         Assert.Equal("StaleCopy", code);
         Assert.Contains("#586", explanation);
-        Assert.Contains("anuluje", explanation);
+        Assert.Contains("nie zmienia sesji", explanation);
     }
 
     [Fact]

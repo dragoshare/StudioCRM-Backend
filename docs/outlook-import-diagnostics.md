@@ -20,8 +20,8 @@ w CRM (`importedEventId`, `lastImportedAt`, `sessionId`, `sessionStatus`, `sessi
 | `code` | Znaczenie | Co zrobić |
 | --- | --- | --- |
 | `Linked` | Połączone z sesją CRM `sessionId`. | Nic. |
-| `LinkedCancelled` | Połączone z anulowaną sesją. | Przywróć sesję w CRM albo usuń wydarzenie. |
-| `StaleCopy` | Wskazuje sesję, której wydarzenie jest w innym kalendarzu (pozostałość po przeniesieniu). | **Nie usuwaj i nie przesuwaj** w Outlooku: usunięcie anuluje zaplanowaną sesję, przesunięcie ją przesunie. Wymaga poprawki w CRM. |
+| `LinkedCancelled` | Połączone z anulowaną sesją. | Przywróć sesję w CRM albo usuń wydarzenie. Pozostałość sprzed poprawki 2.11.2026 usuwa `DELETE /api/outlook/sync-session/{sessionId}`. |
+| `StaleCopy` | Wskazuje sesję, której wydarzenie jest w innym kalendarzu (pozostałość po przeniesieniu). | Usuń kopię w Outlooku: CRM nie przesuwa ani nie anuluje sesji według kopii (przy usunięciu tylko odpina ją od sesji). Anulowanie lub usunięcie sesji w CRM usuwa także takie kopie. |
 | `SessionMissing` | Wskazuje sesję, której nie ma w CRM. | Uzgodnienie kalendarza. |
 | `UnknownLocation` | Lokalizacja nie pasuje do aktywnej lokalizacji CRM; pomijane bez ostrzeżenia. | Popraw lokalizację w Outlooku. |
 | `NotReceived` | CRM nie ma wydarzenia (nie dotarło powiadomienie albo jego obsługa się nie powiodła). | `POST /api/outlook/reconcile` z `trainerId`. |

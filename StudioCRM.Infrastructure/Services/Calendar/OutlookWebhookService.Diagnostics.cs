@@ -100,8 +100,8 @@ public partial class OutlookWebhookService
                 SessionStatus = session?.Status,
                 SessionTrainerName = session?.Trainer,
                 // The session's own event is in another calendar (or is another event): this row is a leftover.
-                LinkedElsewhere = sessionId.HasValue && sessionLinks.Count > 0 && !sessionLinks.Any(l =>
-                    l.CalendarIntegrationId == integration.Id && l.ExternalEventId == externalEventId),
+                LinkedElsewhere = sessionId.HasValue && OutlookEventCopy.IsLeftover(
+                    sessionLinks.Select(l => (l.CalendarIntegrationId, l.ExternalEventId)), integration.Id, externalEventId),
                 Warnings = ReadDiagnosticWarnings(row?.MappingWarningsJson)
             };
             (item.Code, item.Explanation) = OutlookImportDiagnosis.Decide(new OutlookImportDiagnosis.Facts(

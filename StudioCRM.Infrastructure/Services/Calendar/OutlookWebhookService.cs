@@ -508,6 +508,9 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         await using var transaction = await _context.Database.BeginTransactionAsync();
         if (!evt.SessionId.HasValue) return;
         await SessionWriteLock.AcquireAsync(_context, evt.SessionId.Value);
+        // A leftover copy in another calendar (the session moved) neither moves nor reports on the session.
+        if (OutlookEventCopy.IsLeftover(await SessionLinksAsync(evt.SessionId.Value), integration.Id, externalEventId))
+            return;
         var session = await _context.Sessions
             .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
@@ -1115,6 +1118,24 @@ public partial class OutlookWebhookService : IOutlookWebhookService
 
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)
     {
+        await using var transaction = _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+        // CRM deletes the old event of a session it moves to another calendar while still holding the session lock;
+        // waiting for it lets the check below see the event already unlinked.
+        var rowSessionIds = await _context.ExternalCalendarEvents
+            .Where(x =>
+                x.CalendarIntegrationId == integrationId &&
+                x.SessionId.HasValue &&
+                (x.ExternalEventId == externalEventId || x.SeriesMasterId == externalEventId))
+            .Select(x => x.SessionId!.Value)
+            .ToListAsync();
+        var linkSessionIds = await _context.CalendarEventLinks
+            .Where(x => x.CalendarIntegrationId == integrationId && x.ExternalEventId == externalEventId)
+            .Select(x => x.SessionId)
+            .ToListAsync();
+        await SessionWriteLock.AcquireSessionsAsync(_context, rowSessionIds.Concat(linkSessionIds));
+
         var existing = await _context.ExternalCalendarEvents
             .FirstOrDefaultAsync(x =>
                 x.CalendarIntegrationId == integrationId &&
@@ -1148,18 +1169,35 @@ public partial class OutlookWebhookService : IOutlookWebhookService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var sessionIds = deletedEvents
-            .Where(x => x.SessionId.HasValue)
-            .Select(x => x.SessionId!.Value)
-            .Distinct()
-            .ToList();
-
         var links = await _context.CalendarEventLinks
             .Where(x =>
                 x.CalendarIntegrationId == integrationId &&
                 x.Provider == "Outlook" &&
                 deletedExternalEventIds.Contains(x.ExternalEventId))
             .ToListAsync();
+
+        // A deleted leftover copy (the session's own event is in another calendar) only lets go of the session.
+        var linkedSessionIds = deletedEvents.Where(x => x.SessionId.HasValue).Select(x => x.SessionId!.Value).Distinct().ToList();
+        var sessionLinks = await _context.CalendarEventLinks
+            .Where(x => x.Provider == "Outlook" && linkedSessionIds.Contains(x.SessionId))
+            .Select(x => new { x.SessionId, x.CalendarIntegrationId, x.ExternalEventId })
+            .ToListAsync();
+        var leftovers = deletedEvents
+            .Where(x => x.SessionId.HasValue && OutlookEventCopy.IsLeftover(
+                sessionLinks.Where(l => l.SessionId == x.SessionId).Select(l => (l.CalendarIntegrationId, l.ExternalEventId)),
+                integrationId, x.ExternalEventId))
+            .ToList();
+        foreach (var leftover in leftovers)
+        {
+            leftover.SessionId = null;
+            leftover.IsConvertedToSession = false;
+        }
+
+        var sessionIds = deletedEvents
+            .Where(x => x.SessionId.HasValue)
+            .Select(x => x.SessionId!.Value)
+            .Distinct()
+            .ToList();
 
         sessionIds.AddRange(links.Select(x => x.SessionId));
         sessionIds = sessionIds
@@ -1209,7 +1247,17 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         _context.CalendarEventLinks.RemoveRange(links.Where(link => !keptSessionIds.Contains(link.SessionId)));
 
         await _context.SaveChangesAsync();
+        if (transaction is not null)
+            await transaction.CommitAsync();
     }
+
+    private async Task<List<(int CalendarIntegrationId, string ExternalEventId)>> SessionLinksAsync(int sessionId) =>
+        (await _context.CalendarEventLinks
+            .Where(x => x.SessionId == sessionId && x.Provider == "Outlook")
+            .Select(x => new { x.CalendarIntegrationId, x.ExternalEventId })
+            .ToListAsync())
+        .Select(x => (x.CalendarIntegrationId, x.ExternalEventId))
+        .ToList();
 
     // The Outlook event row that carries the review issue; created when CRM only had the link.
     private async Task<ExternalCalendarEvent> DeletedEventForSessionAsync(
