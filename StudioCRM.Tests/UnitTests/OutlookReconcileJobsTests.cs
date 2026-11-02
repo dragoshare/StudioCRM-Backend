@@ -105,6 +105,7 @@ public class OutlookReconcileJobsTests
         public OutlookReconciliationRequestDto? Request { get; private set; }
 
         public FakeReconcile For(RequestOrganizationContext organization) { context = organization; return this; }
+        public Task<OutlookImportDiagnosticsDto> DiagnoseImportAsync(OutlookImportDiagnosticsRequestDto request) => throw new NotSupportedException();
 
         public async Task<OutlookReconciliationResultDto> ReconcileAsync(OutlookReconciliationRequestDto request, OutlookReconcileActor actor)
         {

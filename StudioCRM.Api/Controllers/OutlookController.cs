@@ -263,6 +263,16 @@ public class OutlookController : ControllerBase
         return Ok(await _externalEventService.GetImportedEventsAsync());
     }
 
+    // Owner only, read-only: each Outlook event of the trainer in the range with its CRM state and the reason
+    // it was (not) imported. Contract: docs/outlook-import-diagnostics.md.
+    [HttpGet("diagnostics")]
+    [ProducesResponseType(typeof(OutlookImportDiagnosticsDto), StatusCodes.Status200OK)]
+    [Authorize(Roles = "Owner")]
+    public async Task<IActionResult> GetImportDiagnostics([FromQuery] OutlookImportDiagnosticsRequestDto request)
+    {
+        return Ok(await _webhookService.DiagnoseImportAsync(request));
+    }
+
     [HttpGet("issues")]
     [ProducesResponseType(typeof(List<OutlookMappingIssueDto>), StatusCodes.Status200OK)]
     [Authorize(Roles = "Trainer,Owner")]

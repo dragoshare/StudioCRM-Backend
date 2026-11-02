@@ -13,7 +13,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services.Calendar;
 
-public class OutlookWebhookService : IOutlookWebhookService
+public partial class OutlookWebhookService : IOutlookWebhookService
 {
     private const string OutlookStudioTimeZone = "Central European Standard Time";
 
