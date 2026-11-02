@@ -302,16 +302,38 @@ public partial class OutlookWebhookService : IOutlookWebhookService
                     EndAt = group.Max(x => x.EndAt)
                 })
                 .FirstOrDefaultAsync();
+            var instancesStart = knownSeriesRange?.StartAt.AddDays(-7) ?? DateTime.UtcNow.AddDays(-14);
+            var instancesEnd = knownSeriesRange?.EndAt.AddDays(7) ?? DateTime.UtcNow.AddMonths(3);
             var instances = await GetEventInstancesAsync(
                 integration,
                 externalEventId,
-                knownSeriesRange?.StartAt.AddDays(-7) ?? DateTime.UtcNow.AddDays(-14),
-                knownSeriesRange?.EndAt.AddDays(7) ?? DateTime.UtcNow.AddMonths(3));
+                instancesStart,
+                instancesEnd);
 
             foreach (var instanceId in instances)
             {
                 if (!string.IsNullOrWhiteSpace(instanceId) && instanceId != externalEventId)
                     await ImportOrUpdateEventAsync(integration, instanceId);
+            }
+
+            // Deleting one occurrence only notifies an update of the series master, so a known occurrence missing
+            // from the instances is re-read: Outlook answers 404 for a deleted one (MarkDeletedAsync cancels its
+            // planned session) and returns a moved one, which is updated. No instances may mean a failed read: skip.
+            if (instances.Count > 0)
+            {
+                var returned = instances.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var knownInstanceIds = await _context.ExternalCalendarEvents
+                    .Where(x =>
+                        x.CalendarIntegrationId == integration.Id &&
+                        x.Provider == "Outlook" &&
+                        x.SeriesMasterId == externalEventId &&
+                        x.StartAt < instancesEnd &&
+                        x.EndAt > instancesStart &&
+                        !x.Subject.StartsWith("[DELETED]"))
+                    .Select(x => x.ExternalEventId)
+                    .ToListAsync();
+                foreach (var missingId in knownInstanceIds.Where(id => !returned.Contains(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    await ImportOrUpdateEventAsync(integration, missingId);
             }
 
             return;
