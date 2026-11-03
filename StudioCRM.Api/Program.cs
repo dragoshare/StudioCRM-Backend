@@ -193,6 +193,7 @@ builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookWebhookQue
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookWebhookWorker>();
 builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookReconcileJobs>();
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookReconcileWorker>();
+builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookAutoReconcileWorker>();
 builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookContactSyncQueue>();
 builder.Services.AddSingleton<IOutlookContactSyncQueue>(sp => sp.GetRequiredService<StudioCRM.Api.BackgroundServices.OutlookContactSyncQueue>());
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookContactSyncWorker>();

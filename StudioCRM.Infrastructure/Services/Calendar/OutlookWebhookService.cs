@@ -144,7 +144,7 @@ public partial class OutlookWebhookService : IOutlookWebhookService
                             link.SessionId == session.Id && link.Provider == "Outlook"))
                     .Select(session => session.Id)
                     .ToListAsync();
-                foreach (var sessionId in missingSingleSessionIds)
+                foreach (var sessionId in request.ImportOnly ? [] : missingSingleSessionIds)
                 {
                     await _calendarSyncService.SyncSessionAsync(sessionId);
                     result.CrmSessionsSyncedToOutlook++;
@@ -206,48 +206,70 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         if (!doc.RootElement.TryGetProperty("value", out var value))
             return;
 
+        var failures = new List<Exception>();
         foreach (var notification in value.EnumerateArray())
         {
-            var subscriptionId = notification.GetProperty("subscriptionId").GetString();
-
-            if (string.IsNullOrWhiteSpace(subscriptionId))
-                continue;
-
-            var subscription = await _context.CalendarSubscriptions
-                .Include(x => x.CalendarIntegration)
-                .FirstOrDefaultAsync(x =>
-                    x.SubscriptionId == subscriptionId &&
-                    x.IsActive);
-
-            if (subscription is null || !subscription.CalendarIntegration.IsActive || subscription.ExpiresAt <= DateTime.UtcNow ||
-                string.IsNullOrEmpty(subscription.ClientState) ||
-                !notification.TryGetProperty("clientState", out var clientState) || clientState.ValueKind != JsonValueKind.String ||
-                !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(subscription.ClientState), Encoding.UTF8.GetBytes(clientState.GetString() ?? "")))
-                continue;
-
-            var integration = subscription.CalendarIntegration;
-
-            var resource = notification.GetProperty("resource").GetString();
-
-            if (string.IsNullOrWhiteSpace(resource))
-                continue;
-
-            var externalEventId = ResolveExternalEventId(notification, resource);
-
-            if (string.IsNullOrWhiteSpace(externalEventId))
-                continue;
-
-            var changeType = notification.GetProperty("changeType").GetString();
-
-            if (changeType == "deleted")
+            // One failing event must not drop the rest of the batch: the webhook already answered, so Graph does
+            // not retry it and those changes would wait for a reconcile.
+            try
             {
-                await MarkDeletedAsync(integration.Id, externalEventId);
-                continue;
+                await HandleOneNotificationAsync(notification);
             }
-
-            await ImportOrUpdateEventAsync(integration, externalEventId);
+            catch (Exception ex)
+            {
+                failures.Add(ex);
+                // Discard the failed event's tracked changes before the next one saves.
+                _context.ChangeTracker.Clear();
+            }
         }
+
+        if (failures.Count == 1)
+            throw failures[0];
+        if (failures.Count > 1)
+            throw new AggregateException("Several Outlook notifications of one batch failed.", failures);
+    }
+
+    private async Task HandleOneNotificationAsync(JsonElement notification)
+    {
+        var subscriptionId = notification.GetProperty("subscriptionId").GetString();
+
+        if (string.IsNullOrWhiteSpace(subscriptionId))
+            return;
+
+        var subscription = await _context.CalendarSubscriptions
+            .Include(x => x.CalendarIntegration)
+            .FirstOrDefaultAsync(x =>
+                x.SubscriptionId == subscriptionId &&
+                x.IsActive);
+
+        if (subscription is null || !subscription.CalendarIntegration.IsActive || subscription.ExpiresAt <= DateTime.UtcNow ||
+            string.IsNullOrEmpty(subscription.ClientState) ||
+            !notification.TryGetProperty("clientState", out var clientState) || clientState.ValueKind != JsonValueKind.String ||
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(subscription.ClientState), Encoding.UTF8.GetBytes(clientState.GetString() ?? "")))
+            return;
+
+        var integration = subscription.CalendarIntegration;
+
+        var resource = notification.GetProperty("resource").GetString();
+
+        if (string.IsNullOrWhiteSpace(resource))
+            return;
+
+        var externalEventId = ResolveExternalEventId(notification, resource);
+
+        if (string.IsNullOrWhiteSpace(externalEventId))
+            return;
+
+        var changeType = notification.GetProperty("changeType").GetString();
+
+        if (changeType == "deleted")
+        {
+            await MarkDeletedAsync(integration.Id, externalEventId);
+            return;
+        }
+
+        await ImportOrUpdateEventAsync(integration, externalEventId);
     }
 
     private async Task ImportOrUpdateEventAsync(CalendarIntegration integration, string externalEventId)

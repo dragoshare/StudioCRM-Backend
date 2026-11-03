@@ -15,6 +15,16 @@ public class OutlookReconcileJobsTests
 {
     private static readonly Guid Org = Guid.NewGuid();
 
+    // Import-only is the background safety net's mode; an API request cannot switch it on.
+    [Fact]
+    public void ImportOnlyIsNotReadFromTheRequestBody()
+    {
+        var request = System.Text.Json.JsonSerializer.Deserialize<OutlookReconciliationRequestDto>(
+            "{\"importOnly\":true,\"ImportOnly\":true}",
+            new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web))!;
+        Assert.False(request.ImportOnly);
+    }
+
     [Fact]
     public void SecondClickWhileRunningReusesTheJobOfTheSameUser()
     {
