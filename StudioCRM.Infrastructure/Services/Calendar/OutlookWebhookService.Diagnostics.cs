@@ -91,7 +91,8 @@ public partial class OutlookWebhookService
                 Attendees = attendees,
                 CreatedByCrm = CrmOutlookEventMarker.IsCrmCreated(
                     root.TryGetProperty("transactionId", out var transactionId) && transactionId.ValueKind == JsonValueKind.String
-                        ? transactionId.GetString() : null),
+                        ? transactionId.GetString() : null,
+                    root.TryGetProperty("type", out var eventType) ? eventType.GetString() : null),
                 KnownLocation = await IsKnownCrmLocationAsync(locationName, locationEmail),
                 BeforeImportCutoff = OutlookImportCutoff.IsBefore(startAt, cutoff),
                 ImportedEventId = row?.Id,

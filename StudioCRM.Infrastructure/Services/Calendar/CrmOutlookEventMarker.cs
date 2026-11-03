@@ -12,4 +12,11 @@ public static class CrmOutlookEventMarker
 
     public static bool IsCrmCreated(string? transactionId) =>
         transactionId is not null && transactionId.StartsWith(Prefix, StringComparison.Ordinal);
+
+    // CRM marks only single events; its own series are created without a transactionId. An occurrence that carries
+    // the marker belongs to a series the trainer made in Outlook out of a CRM event (Anna K, 5.11.2026), so it is
+    // the trainer's own event and must be imported.
+    public static bool IsCrmCreated(string? transactionId, string? eventType) =>
+        IsCrmCreated(transactionId) &&
+        (eventType is null || string.Equals(eventType, "singleInstance", StringComparison.OrdinalIgnoreCase));
 }

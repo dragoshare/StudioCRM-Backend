@@ -366,7 +366,8 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         var createdByCrm = CrmOutlookEventMarker.IsCrmCreated(
             root.TryGetProperty("transactionId", out var transactionId) && transactionId.ValueKind == JsonValueKind.String
                 ? transactionId.GetString()
-                : null);
+                : null,
+            root.TryGetProperty("type", out var eventType) ? eventType.GetString() : null);
 
         var attendeeEmails = ReadAttendeeEmails(root);
         var categories = ReadCategories(root);
