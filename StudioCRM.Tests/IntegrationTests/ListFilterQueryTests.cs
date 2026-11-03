@@ -95,4 +95,40 @@ public class ListFilterQueryTests
         await Assert.ThrowsAsync<System.ComponentModel.DataAnnotations.ValidationException>(() =>
             billing.GetPaymentsAsync(new ClientPaymentFilterDto { AmountMin = 300, AmountMax = 100 }));
     }
+
+    [PostgresFact]
+    public async Task PaymentListFiltersByClientTrainerAndStudioCalendarMonth()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var owner = new User { Email = "month-owner@test.invalid" };
+        var location = new Location { Name = "Studio" };
+        var karolina = new Trainer { User = new User { Email = "month-karolina@test.invalid" } };
+        var bartosz = new Trainer { User = new User { Email = "month-bartosz@test.invalid" } };
+        var hers = new Client { FirstName = "Ala", LastName = "K", Trainer = karolina, Location = location };
+        var his = new Client { FirstName = "Ola", LastName = "B", Trainer = bartosz, Location = location };
+        ClientPayment Pay(Client client, DateTime paidUtc) => new()
+        {
+            Client = client, Amount = 100, Method = PaymentMethod.Cash, Status = ClientPaymentStatus.Confirmed,
+            Source = ClientPaymentSource.StaffEntry, PaymentDate = paidUtc
+        };
+        // 1.11 00:30 in Warsaw is 31.10 23:30 UTC; 30.11 23:30 in Warsaw is 30.11 22:30 UTC; 1.12 00:00 in Warsaw is excluded.
+        var firstNight = Pay(hers, new DateTime(2026, 10, 31, 23, 30, 0, DateTimeKind.Utc));
+        var lastNight = Pay(hers, new DateTime(2026, 11, 30, 22, 30, 0, DateTimeKind.Utc));
+        var october = Pay(hers, new DateTime(2026, 10, 31, 22, 30, 0, DateTimeKind.Utc));
+        var december = Pay(hers, new DateTime(2026, 11, 30, 23, 0, 0, DateTimeKind.Utc));
+        var otherTrainer = Pay(his, new DateTime(2026, 11, 3, 10, 0, 0, DateTimeKind.Utc));
+        db.AddRange(owner, firstNight, lastNight, october, december, otherTrainer);
+        await db.SaveChangesAsync();
+        var billing = new ClientPaymentService(db, new PortalSecurityTests.Actor(owner.Id, "Owner"), null!, Options.Create(new TpaySettings()));
+        async Task<List<int>> Ids(ClientPaymentFilterDto filter) => (await billing.GetPaymentsAsync(filter)).Items.Select(p => p.Id).OrderBy(id => id).ToList();
+
+        Assert.Equal(new[] { firstNight.Id, lastNight.Id, otherTrainer.Id }.OrderBy(id => id), await Ids(new ClientPaymentFilterDto { Month = "2026-11" }));
+        Assert.Equal(new[] { firstNight.Id, lastNight.Id }.OrderBy(id => id), await Ids(new ClientPaymentFilterDto { Month = "2026-11", TrainerId = karolina.Id }));
+        Assert.Equal([otherTrainer.Id], await Ids(new ClientPaymentFilterDto { TrainerId = bartosz.Id }));
+        Assert.Equal([october.Id], await Ids(new ClientPaymentFilterDto { Month = "2026-10" }));
+        Assert.Equal([december.Id], await Ids(new ClientPaymentFilterDto { Month = "2026-12" }));
+        await Assert.ThrowsAsync<System.ComponentModel.DataAnnotations.ValidationException>(() =>
+            billing.GetPaymentsAsync(new ClientPaymentFilterDto { Month = "2026-11", From = new DateTime(2026, 11, 1) }));
+    }
 }

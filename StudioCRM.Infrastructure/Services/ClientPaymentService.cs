@@ -1071,6 +1071,15 @@ public partial class ClientPaymentService : IClientPaymentService, ITpayPaymentS
         if (filter.ClientId.HasValue)
             query = query.Where(p => p.ClientId == filter.ClientId.Value);
 
+        if (filter.TrainerId.HasValue)
+            query = query.Where(p => p.Client.TrainerId == filter.TrainerId.Value);
+
+        if (!string.IsNullOrWhiteSpace(filter.Month))
+        {
+            var (monthStart, monthEnd) = StudioCRM.Application.Common.StudioMonth.Range(filter.Month);
+            query = query.Where(p => p.PaymentDate >= monthStart && p.PaymentDate < monthEnd);
+        }
+
         if (filter.LocationId.HasValue)
         {
             var locationId = filter.LocationId.Value;
