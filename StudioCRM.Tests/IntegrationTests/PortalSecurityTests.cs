@@ -135,6 +135,34 @@ public class PortalSecurityTests
     }
 
     [PostgresFact]
+    public async Task TrainerIssuesAndCancelsReceiptsOnlyForOwnClients()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Receipts", City = "Test" };
+        var trainer = new Trainer { User = new User { Email = "trainer@test.invalid" } };
+        var own = new Client { FirstName = "Own", LastName = "Client", Trainer = trainer, Location = location };
+        var other = new Client { FirstName = "Other", LastName = "Client", Trainer = new Trainer { User = new User { Email = "other@test.invalid" } }, Location = location };
+        var ownPayment = new ClientPayment { Client = own, Amount = 550, Status = ClientPaymentStatus.Confirmed, Source = ClientPaymentSource.StaffEntry, ReceiptStatus = ReceiptStatus.ManualRequired };
+        var otherPayment = new ClientPayment { Client = other, Amount = 500, Status = ClientPaymentStatus.Confirmed, Source = ClientPaymentSource.StaffEntry, ReceiptStatus = ReceiptStatus.ManualRequired };
+        db.AddRange(ownPayment, otherPayment);
+        await db.SaveChangesAsync();
+        var service = Payments(db, new Actor(trainer.UserId));
+
+        Assert.Equal(ownPayment.Id, Assert.Single(await service.GetPendingReceiptsAsync()).Id);
+        var issued = await service.IssueReceiptAsync(ownPayment.Id, new IssueReceiptRequest { ReceiptNumber = "KASA/1" });
+        Assert.Equal(nameof(ReceiptStatus.Issued), issued.ReceiptStatus);
+        Assert.Equal("KASA/1", issued.ReceiptNumber);
+        Assert.Equal(trainer.UserId, issued.ReceiptIssuedByUserId);
+        Assert.Empty(await service.GetPendingReceiptsAsync());
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.IssueReceiptAsync(ownPayment.Id, new IssueReceiptRequest()));
+        Assert.Equal(nameof(ReceiptStatus.Cancelled), (await service.CancelReceiptAsync(ownPayment.Id)).ReceiptStatus);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => service.IssueReceiptAsync(otherPayment.Id, new IssueReceiptRequest()));
+        Assert.Equal(ReceiptStatus.ManualRequired, (await db.ClientPayments.AsNoTracking().SingleAsync(p => p.Id == otherPayment.Id)).ReceiptStatus);
+    }
+
+    [PostgresFact]
     public async Task ParallelConfirmOfStandalonePaymentCreditsBalanceOnce()
     {
         await using var database = await TestDatabase.CreateAsync();
