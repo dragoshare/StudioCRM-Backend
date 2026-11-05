@@ -185,6 +185,7 @@ public partial class AuthService : IAuthService
                 Email = user.Email,
                 BillingStatus = "Pending",
                 Status = "Inactive",
+                TrainingStartDate = StudioMonth.TodayAsStoredDate(now),
                 SubscriptionAutoRenewEnabled = true,
                 CreatedAt = now,
                 UpdatedAt = now
@@ -287,6 +288,7 @@ public partial class AuthService : IAuthService
             BillingStatus = "Pending",
             Source = "PublicGroupSignup",
             Status = "Inactive",
+            TrainingStartDate = StudioMonth.TodayAsStoredDate(now),
             SubscriptionAutoRenewEnabled = false,
             CreatedAt = now,
             UpdatedAt = now

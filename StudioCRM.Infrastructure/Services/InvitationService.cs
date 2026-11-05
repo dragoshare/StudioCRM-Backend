@@ -1,3 +1,4 @@
+using StudioCRM.Application.Common;
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -517,6 +518,7 @@ public class InvitationService : IInvitationService
             Email = invitation.Email,
             LocationId = invitation.LocationId,
             Status = "Inactive",
+            TrainingStartDate = StudioMonth.TodayAsStoredDate(DateTime.UtcNow),
             BillingStatus = "Pending",
             SubscriptionAutoRenewEnabled = true,
             CreatedAt = DateTime.UtcNow,

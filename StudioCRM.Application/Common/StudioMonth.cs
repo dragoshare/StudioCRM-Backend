@@ -17,6 +17,10 @@ public static class StudioMonth
         return (ToUtc(firstDay), ToUtc(firstDay.AddMonths(1)));
     }
 
+    // Today's studio calendar date in the storage convention for business dates (UTC midnight), e.g. Client.TrainingStartDate.
+    public static DateTime TodayAsStoredDate(DateTime utcNow) =>
+        DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utcNow, DateTimeKind.Utc), StudioTimeZone).Date, DateTimeKind.Utc);
+
     private static DateTime ToUtc(DateOnly day) =>
         TimeZoneInfo.ConvertTimeToUtc(day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified), StudioTimeZone);
 

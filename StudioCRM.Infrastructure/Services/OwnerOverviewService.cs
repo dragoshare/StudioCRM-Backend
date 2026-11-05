@@ -105,7 +105,8 @@ public class OwnerOverviewService(StudioCRMDbContext db, ICurrentUserService cur
         Owner(); await ValidateLocationAsync(locationId); if (limit < 1 || limit > 20) throw new InvalidOperationException("Limit must be 1..20.");
         var today = DateTime.SpecifyKind(TimeZoneInfo.ConvertTimeFromUtc(Now, Zone).Date, DateTimeKind.Utc);
         return await db.Clients.AsNoTracking().Where(c => (!locationId.HasValue || c.LocationId == locationId) && (c.TrainingStartDate == null || c.TrainingStartDate <= today))
-            .OrderByDescending(c => c.TrainingStartDate.HasValue).ThenByDescending(c => c.TrainingStartDate).ThenByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id)
+            // Profiles without a business joining date (e.g. created by trainers) still belong among the newest by their creation time; JoinedAt itself stays null.
+            .OrderByDescending(c => c.TrainingStartDate ?? c.CreatedAt).ThenByDescending(c => c.CreatedAt).ThenByDescending(c => c.Id)
             .Take(limit).Select(c => new RecentOwnerClientDto(c.Id, c.FirstName, c.LastName, c.FirstName + " " + c.LastName, c.TrainingStartDate, c.CreatedAt)).ToListAsync();
     }
     public async Task<OwnerAttentionDto> AttentionAsync(int? locationId = null)

@@ -1,3 +1,4 @@
+using StudioCRM.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
@@ -79,7 +80,8 @@ public partial class ClientService : IClientService
             BillingStatus = request.BillingStatus ?? "Pending",
             Status = "Inactive",
             NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
-            TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate),
+            // A newly added client starts today unless staff gave another date.
+            TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate) ?? StudioMonth.TodayAsStoredDate(DateTime.UtcNow),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.UserId
