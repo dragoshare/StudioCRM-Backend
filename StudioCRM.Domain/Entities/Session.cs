@@ -40,6 +40,11 @@ public class Session
 
     public DateTime? CompletedAt { get; set; }
 
+    // Last failed attempt of the automatic completion and its user-facing reason (Polish). Cleared when the session completes.
+    public DateTime? AutoCompletionFailedAt { get; set; }
+
+    public string? AutoCompletionError { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;

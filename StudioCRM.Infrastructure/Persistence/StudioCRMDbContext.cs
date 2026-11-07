@@ -838,6 +838,10 @@ public partial class StudioCRMDbContext : DbContext
             .HasMaxLength(120);
 
         modelBuilder.Entity<Session>()
+            .Property(s => s.AutoCompletionError)
+            .HasMaxLength(1000);
+
+        modelBuilder.Entity<Session>()
             .HasIndex(s => s.PublicSlug);
 
         modelBuilder.Entity<Session>()

@@ -253,6 +253,8 @@ public class SessionParticipantService : ISessionParticipantService
             session.ActualSessionType = ConsultationSessions.SessionType;
             session.ActualParticipantsCount = 0;
             session.CompletedAt ??= DateTime.UtcNow;
+            session.AutoCompletionFailedAt = null;
+            session.AutoCompletionError = null;
             session.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             return true;
@@ -368,7 +370,7 @@ public class SessionParticipantService : ISessionParticipantService
                         _context, activeClientPackage, actualBillingType, session.Id, sessionsCharged);
 
                     if (newUsedSessions > activeClientPackage.TotalSessions)
-                        throw new InvalidOperationException("Client package has no remaining sessions.");
+                        throw SessionPackageRejection.NoRemainingSessions(client, activeClientPackage, sessionsCharged);
 
                     var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
                     var perSessionDifference = SessionBalancePolicy.PerSession(activeClientPackage, actualBillingType,
@@ -421,8 +423,7 @@ public class SessionParticipantService : ISessionParticipantService
                 }
                 else
                 {
-                    throw new InvalidOperationException(
-                        $"Client {client.Id} does not have an active subscription package.");
+                    throw await SessionPackageRejection.NoUsablePackageAsync(_context, client, session, actualBillingType);
                 }
             }
             else
@@ -448,6 +449,8 @@ public class SessionParticipantService : ISessionParticipantService
         session.ActualSessionType = request.ActualSessionType;
         session.ActualParticipantsCount = presentCount;
         session.CompletedAt = DateTime.UtcNow;
+        session.AutoCompletionFailedAt = null;
+        session.AutoCompletionError = null;
         session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();

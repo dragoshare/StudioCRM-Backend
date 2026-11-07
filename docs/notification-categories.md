@@ -8,7 +8,7 @@ Kategorie są wyliczane z typu także dla historycznych powiadomień; nie ma mig
 | --- | --- | --- |
 | payments | Płatności | PaymentPendingConfirmation, PackagePaymentRequired, PackageEndedPaymentRequired |
 | packages | Pakiety | ClientWithoutActivePackage, PackageEndingSoon, RenewalCancellationRequested |
-| schedule | Grafik | SessionNotSyncedToOutlook |
+| schedule | Grafik | SessionNotSyncedToOutlook, SessionNotSettled |
 | invitations | Zaproszenia | InvitationPending, InvitationExpired, ClientInvitationAccepted |
 | trainers | Trenerzy | TrainerContractEndingSoon, TrainerContractNeedsRenewal, TrainerSettlementReminder |
 | system | System | LocationLimitExceeded oraz nieznane typy |

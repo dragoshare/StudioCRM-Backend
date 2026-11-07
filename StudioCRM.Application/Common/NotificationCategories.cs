@@ -30,6 +30,7 @@ public static class NotificationCategories
         ["PackageEndingSoon"] = "packages",
         ["RenewalCancellationRequested"] = "packages",
         ["SessionNotSyncedToOutlook"] = "schedule",
+        ["SessionNotSettled"] = "schedule",
         ["GroupClassBooked"] = "group_classes",
         ["GroupClassBookingCancelled"] = "group_classes",
         ["GroupClassCancelled"] = "group_classes",
