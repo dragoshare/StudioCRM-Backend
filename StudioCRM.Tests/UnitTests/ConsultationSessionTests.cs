@@ -1,5 +1,7 @@
 using StudioCRM.Application.Common;
+using StudioCRM.Application.DTOs.Sessions;
 using StudioCRM.Domain.Entities;
+using StudioCRM.Infrastructure.Services;
 
 namespace StudioCRM.Tests.UnitTests;
 
@@ -34,5 +36,19 @@ public class ConsultationSessionTests
     {
         Assert.Equal(crmTitle, ConsultationSessions.StripOutlookSubjectSuffix(subject));
         Assert.Equal(outlookSubject, ConsultationSessions.BuildOutlookSubject(subject));
+    }
+
+    // Editing a completed consultation (e.g. changing its trainer) completes it again without participants.
+    [Fact]
+    public void EditedCompletedConsultationIsCompletedWithoutParticipants()
+    {
+        var request = new UpdateSessionDto
+        {
+            PlannedSessionType = ConsultationSessions.SessionType, Participants = new(), CorrectionReason = "inny trener"
+        };
+        var completion = SessionService.BuildCompletionRequest(request);
+        Assert.Equal(ConsultationSessions.SessionType, completion.ActualSessionType);
+        Assert.Empty(completion.Participants);
+        Assert.Equal("inny trener", completion.CorrectionReason);
     }
 }

@@ -1496,8 +1496,11 @@ public class SessionService : ISessionService
         return normalizedStartAt.AddMinutes(settings.DefaultSessionDurationMinutes);
     }
 
-    private static CompleteSessionDto BuildCompletionRequest(UpdateSessionDto request)
+    internal static CompleteSessionDto BuildCompletionRequest(UpdateSessionDto request)
     {
+        if (ConsultationSessions.IsConsultation(request.PlannedSessionType))
+            return new CompleteSessionDto { ActualSessionType = ConsultationSessions.SessionType, CorrectionReason = request.CorrectionReason };
+
         var actualSessionType = ResolveActualSessionTypeForCompletion(request);
 
         return new CompleteSessionDto
