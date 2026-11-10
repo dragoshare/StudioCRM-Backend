@@ -37,6 +37,21 @@ public class TrainerGroupRateTests
         Assert.Equal("Hourly", item.RateType);
     }
 
+    // 30.10: 4:1 is paid in whole złoty rounded down; other types keep grosze.
+    [Theory]
+    [InlineData("FourToOne", 70, 186)]
+    [InlineData("FourToOne", 75, 199)]
+    [InlineData("ThreeToOne", 75, 165)]
+    [InlineData("TwoToOne", 73, 116.8)]
+    public void FourToOneAmountIsRoundedDownToWholeZloty(string type, int hourlyRate, double expected)
+    {
+        var rates = new List<TrainerRate> { new() { TrainerId = 1, SessionType = "Hourly", Rate = hourlyRate, ValidFrom = Start.AddDays(-1) } };
+        var session = MakeSession(type, 60);
+        var item = Assert.Single(TrainerSettlementService.BuildSettlementItems([session], rates, new()));
+        Assert.Equal((decimal)expected, item.Amount);
+        Assert.Equal(item.Amount, TrainerCostAnalysisService.BuildSessionRow(session, rates, []).PotentialTrainerCostAmount);
+    }
+
     [Fact]
     public void PublicGroupWithOneParticipantStillUsesFlatRate()
     {

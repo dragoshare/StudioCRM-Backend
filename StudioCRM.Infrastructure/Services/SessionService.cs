@@ -737,7 +737,7 @@ public class SessionService : ISessionService
             recurringGroupId, createdSessions.Count, databaseStopwatch.ElapsedMilliseconds);
         var outlookSync = await TrySyncSessionSeriesToOutlookAsync(recurringGroupId, request.Recurrence);
 
-        if (!outlookSync.IsSynced)
+        if (!outlookSync.IsSynced && _context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId)
         {
             await RemoveFailedNewSeriesAsync(recurringGroupId);
             throw new InvalidOperationException(
@@ -874,7 +874,7 @@ public class SessionService : ISessionService
                 "A series containing completed or accounted sessions cannot be deleted as a whole.");
         }
 
-        var outlookDeleted = await _outlookCalendarSyncService.DeleteSessionSeriesAsync(recurringGroupId);
+        var outlookDeleted = _context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId || await _outlookCalendarSyncService.DeleteSessionSeriesAsync(recurringGroupId);
 
         await using var transaction = await _context.Database.BeginTransactionAsync();
         try
@@ -1241,6 +1241,8 @@ public class SessionService : ISessionService
         List<CreateSessionParticipantDto> participants,
         int? excludedSessionId)
     {
+        if (isPubliclyBookable && _context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId)
+            throw new InvalidOperationException("Public booking is not enabled for this organization yet.");
         if (endAt <= startAt)
             throw new InvalidOperationException("End date must be later than start date.");
 
@@ -1572,6 +1574,7 @@ public class SessionService : ISessionService
 
     private async Task TrySyncSessionToOutlookAsync(int sessionId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return;
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -1588,6 +1591,7 @@ public class SessionService : ISessionService
         string recurringGroupId,
         SessionRecurrenceDto recurrence)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return (false, "Outlook is not enabled for this organization; series saved in CRM.");
         var stopwatch = System.Diagnostics.Stopwatch.StartNew();
         try
         {
@@ -1632,6 +1636,7 @@ public class SessionService : ISessionService
 
     private async Task TryDeleteSessionFromOutlookAsync(int sessionId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return;
         try
         {
             await _outlookCalendarSyncService.DeleteSessionEventAsync(sessionId);
@@ -1808,6 +1813,7 @@ public class SessionService : ISessionService
         DateTime requestedStartAt,
         SessionRecurrenceDto recurrence)
     {
+
         var frequency = NormalizeSeriesFrequency(recurrence.Frequency);
         if (recurrence.Interval is < 1 or > 12)
             throw new InvalidOperationException("Recurrence interval must be between 1 and 12.");

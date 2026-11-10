@@ -45,6 +45,7 @@ public class OperationalAlertService : IOperationalAlertService
         alerts.AddRange(await BuildCompletedPackageWithoutRenewalAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildRenewalCancellationAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildOutlookSyncAlertsAsync(filter, trainerId));
+        alerts.AddRange(await BuildUnsettledSessionAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildLocationLimitAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildTrainerContractAlertsAsync(filter));
         alerts.AddRange(await BuildAcceptedClientAlertsAsync(filter, trainerId));
@@ -297,6 +298,7 @@ public class OperationalAlertService : IOperationalAlertService
         OperationalAlertFilterDto filter,
         int? trainerId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return [];
         var now = DateTime.UtcNow;
         var query = _context.Sessions
             .Include(s => s.Location)
@@ -331,6 +333,57 @@ public class OperationalAlertService : IOperationalAlertService
             })
             .ToListAsync();
     }
+
+    // A finished session that the automatic completion could not settle (e.g. an expired package). The reason is the one
+    // recorded by the worker; the trainer sees their own sessions and can ask the owner to fix the package.
+    private async Task<List<OperationalAlertDto>> BuildUnsettledSessionAlertsAsync(
+        OperationalAlertFilterDto filter,
+        int? trainerId)
+    {
+        var now = DateTime.UtcNow;
+        var overdue = now.AddHours(-2);
+        var oldest = now.AddDays(-45);
+        var query = _context.Sessions
+            .Where(s =>
+                !s.IsDeleted &&
+                s.Status != "Completed" && s.Status != "Cancelled" &&
+                s.EndAt >= oldest &&
+                (s.AutoCompletionFailedAt != null || s.EndAt <= overdue));
+
+        query = ApplySessionScope(query, filter.LocationId, trainerId);
+
+        var rows = await query
+            .OrderBy(s => s.EndAt)
+            .Take(50)
+            .Select(s => new
+            {
+                s.Id, s.Title, s.StartAt, s.EndAt, s.TrainerId, s.LocationId, s.AutoCompletionError, s.AutoCompletionFailedAt,
+                TrainerName = s.Trainer.User.FirstName + " " + s.Trainer.User.LastName,
+                LocationName = s.Location.Name
+            })
+            .ToListAsync();
+
+        var trainerHint = _currentUser.IsOwner ? "" : " Jeśli nie możesz tego zmienić, poproś właściciela studia.";
+        return rows.Select(s => new OperationalAlertDto
+        {
+            Type = "SessionNotSettled",
+            Severity = "Warning",
+            Title = $"Sesja z {StudioDateTime(s.StartAt)} nie została rozliczona",
+            Message = (s.AutoCompletionError ?? "Sesja zakończyła się, ale nie została jeszcze rozliczona. Zakończ ją ręcznie.") + trainerHint,
+            SessionId = s.Id,
+            TrainerId = s.TrainerId,
+            TrainerName = s.TrainerName,
+            LocationId = s.LocationId,
+            LocationName = s.LocationName,
+            CreatedAt = s.AutoCompletionFailedAt ?? s.EndAt,
+            DueAt = s.EndAt,
+            ActionUrl = $"/sessions/{s.Id}/workspace"
+        }).ToList();
+    }
+
+    private static string StudioDateTime(DateTime utc) =>
+        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), GetStudioTimeZone())
+            .ToString("dd.MM.yyyy HH:mm", System.Globalization.CultureInfo.InvariantCulture);
 
     private async Task<List<OperationalAlertDto>> BuildLocationLimitAlertsAsync(
         OperationalAlertFilterDto filter,

@@ -23,4 +23,16 @@ public class CrmOutlookEventMarkerTests
     {
         Assert.False(CrmOutlookEventMarker.IsCrmCreated(transactionId));
     }
+
+    // A CRM event turned into a series in Outlook: its occurrences inherit the marker but are the trainer's own.
+    [Theory]
+    [InlineData("singleInstance", true)]
+    [InlineData(null, true)]
+    [InlineData("occurrence", false)]
+    [InlineData("exception", false)]
+    [InlineData("seriesMaster", false)]
+    public void OnlyASingleEventKeepsTheCrmMarker(string? eventType, bool crmCreated)
+    {
+        Assert.Equal(crmCreated, CrmOutlookEventMarker.IsCrmCreated(CrmOutlookEventMarker.Create(275), eventType));
+    }
 }

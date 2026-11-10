@@ -11,6 +11,11 @@ public class OutlookReconciliationRequestDto
 
     // Owner only: reconcile just this trainer's Outlook.
     public int? TrainerId { get; set; }
+
+    // Background safety net only (never from the API): bring Outlook changes into CRM without pushing CRM sessions
+    // that have no event to Outlook.
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool ImportOnly { get; set; }
 }
 
 public class OutlookReconciliationResultDto

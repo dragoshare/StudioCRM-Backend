@@ -30,6 +30,7 @@ public class OutlookTitleWriteBackTests
         var beata = new Client { FirstName = "Beata", LastName = "Nowak", Email = "beata-title@test.invalid", Trainer = trainer, Location = location };
         var start = DateTime.UtcNow.AddDays(2);
         var session = new Session { Title = "Anna K", Trainer = trainer, Location = location, StartAt = start, EndAt = start.AddHours(1), PlannedSessionType = "OneToOne" };
+        db.Add(new UserRole { User = trainer.User, Role = new Role { Name = "Trainer" } });
         db.AddRange(integration, anna, beata, session, new TrainerLocation { Trainer = trainer, Location = location },
             new SessionParticipant { Session = session, Client = anna });
         await db.SaveChangesAsync();
@@ -52,6 +53,8 @@ public class OutlookTitleWriteBackTests
         // Beata added in Outlook: CRM title follows and is written to Outlook once.
         await Update(anna.Email);
         Assert.Equal(["Anna K + Beata N"], handler.Subjects);
+        // 30.10: the planned type stayed 1:1, so the manual completion settled two clients as 1:1.
+        Assert.Equal("TwoToOne", session.PlannedSessionType);
 
         // Echo of our own PATCH: same attendees, nothing written.
         evt.Subject = "Anna K + Beata N";

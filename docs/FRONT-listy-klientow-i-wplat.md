@@ -73,6 +73,8 @@ Rola: Owner; wszystkie wpłaty organizacji. Te same parametry (wspólny `ClientP
 | `pageSize` | int | 25 | wartość spoza 1..100 jest przycinana |
 | `search` | string ≤100 | — | imię+nazwisko lub email klienta |
 | `clientId`, `locationId`, `legalEntityId` | int | — | |
+| `trainerId` | int | — | **nowy (2026-11-03)**; trener przypisany do klienta (`Client.TrainerId`) — wpłata sama nie ma trenera. Lista do wyboru: `GET /api/trainers` (`id`, `fullName`) |
+| `month` | `RRRR-MM` | — | **nowy (2026-11-03)**; miesiąc kalendarzowy `paymentDate` w strefie studia (Europe/Warsaw), np. `2026-11` = od 1.11 00:00 do 1.12 00:00 czasu polskiego. Nie łączyć z `from`/`to` (400). Zły format: 400 |
 | `method` | `PaymentMethod` 1..4 | — | **nowy**; nieznana liczba: 400 |
 | `status` | `ClientPaymentStatus` 1..5 | — | |
 | `source` | `ClientPaymentSource` 1..3 | — | |
@@ -94,9 +96,18 @@ Sortowanie i filtr dat używają daty wpłaty (`paymentDate`, korygowanej przez 
 
 Błędy walidacji: 400. Dla walidacji modelu (zakres, `sort`, `method`) odpowiedź ma format `ValidationProblemDetails` (`errors` per pole), np. `errors.AmountMin = ["AmountMin cannot be greater than AmountMax."]`.
 
+### Widok „Płatności” w panelu Ownera (2026-11-03)
+
+- **Domyślnie bieżący miesiąc:** przy wejściu front wysyła `month` = bieżący miesiąc w czasie polskim (np. 3.11.2026 → `month=2026-11`, czyli wpłaty od 1.11 do dziś). Backend nie zmienia swojego domyślnego zakresu (bez `month`/`from`/`to` zwraca wszystko), bo z tego filtra korzystają też inne listy.
+- **Wybór miesiąca:** przełącznik miesięcy (‹ listopad 2026 ›) zmienia `month`; „Dowolny zakres” przechodzi na `from`/`to` i usuwa `month`.
+- **Trener:** lista z `GET /api/trainers`, wysyłana jako `trainerId`; „Wszyscy trenerzy” = brak parametru.
+- **Gęstszy widok** to zmiana wyłącznie po stronie frontu (jeden wiersz na wpłatę, mniejsze odstępy, akcje w menu); backend już zwraca wszystko w `ClientPaymentDto`. Przy gęstszym widoku można wysyłać `pageSize` do 100.
+
 ### Przykłady
 
 ```http
+GET /api/billing/payments?month=2026-11
+GET /api/billing/payments?month=2026-11&trainerId=3&sort=amountDesc
 GET /api/billing/payments?method=3&sort=amountDesc
 GET /api/billing/payments?amountMin=100&amountMax=500&from=2026-10-01T00:00:00Z&to=2026-10-31T23:59:59Z
 GET /api/billing/payments?status=1&method=2&sort=paymentDate&page=1&pageSize=50

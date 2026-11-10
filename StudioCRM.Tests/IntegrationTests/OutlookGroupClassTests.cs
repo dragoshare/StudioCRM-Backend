@@ -22,6 +22,7 @@ public class OutlookGroupClassTests
         var members = Enumerable.Range(1, 5).Select(i => Member($"member{i}")).ToList();
         var outsider = Member("outsider");
         db.AddRange(location, trainer, integration, outsider, new TrainerLocation { Trainer = trainer, Location = location });
+        db.Add(new StudioCRM.Domain.Entities.UserRole { User = trainer.User, Role = new Role { Name = "Trainer" } });
         db.AddRange(members);
         db.AddRange(members.Select(m => new ClientLocationMembership { Client = m, Location = location, GroupAccessEnabled = true }));
         var personal = new ClientPackage { Client = members[0], Package = new Package { Name = "Personal" }, Name = "Personal", TotalSessions = 8, PurchaseDate = DateTime.UtcNow.AddDays(-1), ExpectedBillingType = SessionBillingType.OneToOne };

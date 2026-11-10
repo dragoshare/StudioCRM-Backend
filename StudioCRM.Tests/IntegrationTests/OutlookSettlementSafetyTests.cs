@@ -183,6 +183,7 @@ public class OutlookSettlementSafetyTests
             User = trainer.User, Provider = "Outlook", IsActive = true, Email = trainer.User.Email,
             AccessToken = "token", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1)
         };
+        db.Add(new UserRole { User = trainer.User, Role = new Role { Name = "Trainer" } });
         db.AddRange(trainer, location, integration, new TrainerLocation { Trainer = trainer, Location = location });
         await db.SaveChangesAsync();
         return (integration, trainer, location);

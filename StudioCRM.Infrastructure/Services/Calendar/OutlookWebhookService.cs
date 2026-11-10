@@ -13,7 +13,7 @@ using StudioCRM.Infrastructure.Persistence;
 
 namespace StudioCRM.Infrastructure.Services.Calendar;
 
-public class OutlookWebhookService : IOutlookWebhookService
+public partial class OutlookWebhookService : IOutlookWebhookService
 {
     private const string OutlookStudioTimeZone = "Central European Standard Time";
 
@@ -144,7 +144,7 @@ public class OutlookWebhookService : IOutlookWebhookService
                             link.SessionId == session.Id && link.Provider == "Outlook"))
                     .Select(session => session.Id)
                     .ToListAsync();
-                foreach (var sessionId in missingSingleSessionIds)
+                foreach (var sessionId in request.ImportOnly ? [] : missingSingleSessionIds)
                 {
                     await _calendarSyncService.SyncSessionAsync(sessionId);
                     result.CrmSessionsSyncedToOutlook++;
@@ -206,48 +206,70 @@ public class OutlookWebhookService : IOutlookWebhookService
         if (!doc.RootElement.TryGetProperty("value", out var value))
             return;
 
+        var failures = new List<Exception>();
         foreach (var notification in value.EnumerateArray())
         {
-            var subscriptionId = notification.GetProperty("subscriptionId").GetString();
-
-            if (string.IsNullOrWhiteSpace(subscriptionId))
-                continue;
-
-            var subscription = await _context.CalendarSubscriptions
-                .Include(x => x.CalendarIntegration)
-                .FirstOrDefaultAsync(x =>
-                    x.SubscriptionId == subscriptionId &&
-                    x.IsActive);
-
-            if (subscription is null || !subscription.CalendarIntegration.IsActive || subscription.ExpiresAt <= DateTime.UtcNow ||
-                string.IsNullOrEmpty(subscription.ClientState) ||
-                !notification.TryGetProperty("clientState", out var clientState) || clientState.ValueKind != JsonValueKind.String ||
-                !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-                    Encoding.UTF8.GetBytes(subscription.ClientState), Encoding.UTF8.GetBytes(clientState.GetString() ?? "")))
-                continue;
-
-            var integration = subscription.CalendarIntegration;
-
-            var resource = notification.GetProperty("resource").GetString();
-
-            if (string.IsNullOrWhiteSpace(resource))
-                continue;
-
-            var externalEventId = ResolveExternalEventId(notification, resource);
-
-            if (string.IsNullOrWhiteSpace(externalEventId))
-                continue;
-
-            var changeType = notification.GetProperty("changeType").GetString();
-
-            if (changeType == "deleted")
+            // One failing event must not drop the rest of the batch: the webhook already answered, so Graph does
+            // not retry it and those changes would wait for a reconcile.
+            try
             {
-                await MarkDeletedAsync(integration.Id, externalEventId);
-                continue;
+                await HandleOneNotificationAsync(notification);
             }
-
-            await ImportOrUpdateEventAsync(integration, externalEventId);
+            catch (Exception ex)
+            {
+                failures.Add(ex);
+                // Discard the failed event's tracked changes before the next one saves.
+                _context.ChangeTracker.Clear();
+            }
         }
+
+        if (failures.Count == 1)
+            throw failures[0];
+        if (failures.Count > 1)
+            throw new AggregateException("Several Outlook notifications of one batch failed.", failures);
+    }
+
+    private async Task HandleOneNotificationAsync(JsonElement notification)
+    {
+        var subscriptionId = notification.GetProperty("subscriptionId").GetString();
+
+        if (string.IsNullOrWhiteSpace(subscriptionId))
+            return;
+
+        var subscription = await _context.CalendarSubscriptions
+            .Include(x => x.CalendarIntegration)
+            .FirstOrDefaultAsync(x =>
+                x.SubscriptionId == subscriptionId &&
+                x.IsActive);
+
+        if (subscription is null || !subscription.CalendarIntegration.IsActive || subscription.ExpiresAt <= DateTime.UtcNow ||
+            string.IsNullOrEmpty(subscription.ClientState) ||
+            !notification.TryGetProperty("clientState", out var clientState) || clientState.ValueKind != JsonValueKind.String ||
+            !System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(subscription.ClientState), Encoding.UTF8.GetBytes(clientState.GetString() ?? "")))
+            return;
+
+        var integration = subscription.CalendarIntegration;
+
+        var resource = notification.GetProperty("resource").GetString();
+
+        if (string.IsNullOrWhiteSpace(resource))
+            return;
+
+        var externalEventId = ResolveExternalEventId(notification, resource);
+
+        if (string.IsNullOrWhiteSpace(externalEventId))
+            return;
+
+        var changeType = notification.GetProperty("changeType").GetString();
+
+        if (changeType == "deleted")
+        {
+            await MarkDeletedAsync(integration.Id, externalEventId);
+            return;
+        }
+
+        await ImportOrUpdateEventAsync(integration, externalEventId);
     }
 
     private async Task ImportOrUpdateEventAsync(CalendarIntegration integration, string externalEventId)
@@ -302,16 +324,38 @@ public class OutlookWebhookService : IOutlookWebhookService
                     EndAt = group.Max(x => x.EndAt)
                 })
                 .FirstOrDefaultAsync();
+            var instancesStart = knownSeriesRange?.StartAt.AddDays(-7) ?? DateTime.UtcNow.AddDays(-14);
+            var instancesEnd = knownSeriesRange?.EndAt.AddDays(7) ?? DateTime.UtcNow.AddMonths(3);
             var instances = await GetEventInstancesAsync(
                 integration,
                 externalEventId,
-                knownSeriesRange?.StartAt.AddDays(-7) ?? DateTime.UtcNow.AddDays(-14),
-                knownSeriesRange?.EndAt.AddDays(7) ?? DateTime.UtcNow.AddMonths(3));
+                instancesStart,
+                instancesEnd);
 
             foreach (var instanceId in instances)
             {
                 if (!string.IsNullOrWhiteSpace(instanceId) && instanceId != externalEventId)
                     await ImportOrUpdateEventAsync(integration, instanceId);
+            }
+
+            // Deleting one occurrence only notifies an update of the series master, so a known occurrence missing
+            // from the instances is re-read: Outlook answers 404 for a deleted one (MarkDeletedAsync cancels its
+            // planned session) and returns a moved one, which is updated. No instances may mean a failed read: skip.
+            if (instances.Count > 0)
+            {
+                var returned = instances.ToHashSet(StringComparer.OrdinalIgnoreCase);
+                var knownInstanceIds = await _context.ExternalCalendarEvents
+                    .Where(x =>
+                        x.CalendarIntegrationId == integration.Id &&
+                        x.Provider == "Outlook" &&
+                        x.SeriesMasterId == externalEventId &&
+                        x.StartAt < instancesEnd &&
+                        x.EndAt > instancesStart &&
+                        !x.Subject.StartsWith("[DELETED]"))
+                    .Select(x => x.ExternalEventId)
+                    .ToListAsync();
+                foreach (var missingId in knownInstanceIds.Where(id => !returned.Contains(id)).Distinct(StringComparer.OrdinalIgnoreCase))
+                    await ImportOrUpdateEventAsync(integration, missingId);
             }
 
             return;
@@ -344,7 +388,8 @@ public class OutlookWebhookService : IOutlookWebhookService
         var createdByCrm = CrmOutlookEventMarker.IsCrmCreated(
             root.TryGetProperty("transactionId", out var transactionId) && transactionId.ValueKind == JsonValueKind.String
                 ? transactionId.GetString()
-                : null);
+                : null,
+            root.TryGetProperty("type", out var eventType) ? eventType.GetString() : null);
 
         var attendeeEmails = ReadAttendeeEmails(root);
         var categories = ReadCategories(root);
@@ -486,6 +531,9 @@ public class OutlookWebhookService : IOutlookWebhookService
         await using var transaction = await _context.Database.BeginTransactionAsync();
         if (!evt.SessionId.HasValue) return;
         await SessionWriteLock.AcquireAsync(_context, evt.SessionId.Value);
+        // A leftover copy in another calendar (the session moved) neither moves nor reports on the session.
+        if (OutlookEventCopy.IsLeftover(await SessionLinksAsync(evt.SessionId.Value), integration.Id, externalEventId))
+            return;
         var session = await _context.Sessions
             .Include(s => s.Location)
             .FirstOrDefaultAsync(s => s.Id == evt.SessionId);
@@ -527,8 +575,9 @@ public class OutlookWebhookService : IOutlookWebhookService
 
         var categoryTrainer = await OutlookTrainerCategoryResolver.ResolveAsync(
             _context, evt.CategoriesJson, session.LocationId);
-        if (categoryTrainer.Trainer != null && !await OutlookImportAccess.CanManageAsync(_context, integration.UserId, categoryTrainer.Trainer.Id, session.LocationId))
-            throw new InvalidOperationException("Calendar account cannot reassign this trainer.");
+        // 30.10: a trainer hands her session over by setting the other trainer's category in her own calendar. The
+        // account already manages this session (checked above) and the resolver accepts only an active trainer of the
+        // session's location. Throwing here rolled the hand-over back and dropped the rest of the notification batch.
         var categoryWarning = OutlookTrainerCategoryResolver.ApplyToSession(
             session, categoryTrainer.Trainer, categoryTrainer.Warning);
         var warnings = JsonSerializer.Deserialize<List<string>>(evt.MappingWarningsJson ?? "[]") ?? new();
@@ -540,6 +589,10 @@ public class OutlookWebhookService : IOutlookWebhookService
         // Public reservations are managed by the booking API, not the Outlook attendee list.
         if (!session.IsPubliclyBookable && !ConsultationSessions.IsConsultation(session.PlannedSessionType))
             await SyncSessionParticipantsFromOutlookAsync(session, evt);
+        // A second attendee added in Outlook turns a planned 1:1 into 2:1, otherwise a manual completion settles it as 1:1.
+        if (!participantsBefore.SequenceEqual(await ParticipantIdsAsync(session.Id)))
+            PersonalSessionType.FollowParticipants(session, await _context.SessionParticipants.CountAsync(p =>
+                p.SessionId == session.Id && p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate"));
 
         var newTitle = session.Title;
         if (StudioCRM.Application.Common.SessionTitleBuilder.ShouldDeriveFromParticipants(
@@ -1088,6 +1141,24 @@ public class OutlookWebhookService : IOutlookWebhookService
 
     private async Task MarkDeletedAsync(int integrationId, string externalEventId)
     {
+        await using var transaction = _context.Database.CurrentTransaction == null
+            ? await _context.Database.BeginTransactionAsync()
+            : null;
+        // CRM deletes the old event of a session it moves to another calendar while still holding the session lock;
+        // waiting for it lets the check below see the event already unlinked.
+        var rowSessionIds = await _context.ExternalCalendarEvents
+            .Where(x =>
+                x.CalendarIntegrationId == integrationId &&
+                x.SessionId.HasValue &&
+                (x.ExternalEventId == externalEventId || x.SeriesMasterId == externalEventId))
+            .Select(x => x.SessionId!.Value)
+            .ToListAsync();
+        var linkSessionIds = await _context.CalendarEventLinks
+            .Where(x => x.CalendarIntegrationId == integrationId && x.ExternalEventId == externalEventId)
+            .Select(x => x.SessionId)
+            .ToListAsync();
+        await SessionWriteLock.AcquireSessionsAsync(_context, rowSessionIds.Concat(linkSessionIds));
+
         var existing = await _context.ExternalCalendarEvents
             .FirstOrDefaultAsync(x =>
                 x.CalendarIntegrationId == integrationId &&
@@ -1121,18 +1192,35 @@ public class OutlookWebhookService : IOutlookWebhookService
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToList();
 
-        var sessionIds = deletedEvents
-            .Where(x => x.SessionId.HasValue)
-            .Select(x => x.SessionId!.Value)
-            .Distinct()
-            .ToList();
-
         var links = await _context.CalendarEventLinks
             .Where(x =>
                 x.CalendarIntegrationId == integrationId &&
                 x.Provider == "Outlook" &&
                 deletedExternalEventIds.Contains(x.ExternalEventId))
             .ToListAsync();
+
+        // A deleted leftover copy (the session's own event is in another calendar) only lets go of the session.
+        var linkedSessionIds = deletedEvents.Where(x => x.SessionId.HasValue).Select(x => x.SessionId!.Value).Distinct().ToList();
+        var sessionLinks = await _context.CalendarEventLinks
+            .Where(x => x.Provider == "Outlook" && linkedSessionIds.Contains(x.SessionId))
+            .Select(x => new { x.SessionId, x.CalendarIntegrationId, x.ExternalEventId })
+            .ToListAsync();
+        var leftovers = deletedEvents
+            .Where(x => x.SessionId.HasValue && OutlookEventCopy.IsLeftover(
+                sessionLinks.Where(l => l.SessionId == x.SessionId).Select(l => (l.CalendarIntegrationId, l.ExternalEventId)),
+                integrationId, x.ExternalEventId))
+            .ToList();
+        foreach (var leftover in leftovers)
+        {
+            leftover.SessionId = null;
+            leftover.IsConvertedToSession = false;
+        }
+
+        var sessionIds = deletedEvents
+            .Where(x => x.SessionId.HasValue)
+            .Select(x => x.SessionId!.Value)
+            .Distinct()
+            .ToList();
 
         sessionIds.AddRange(links.Select(x => x.SessionId));
         sessionIds = sessionIds
@@ -1182,7 +1270,17 @@ public class OutlookWebhookService : IOutlookWebhookService
         _context.CalendarEventLinks.RemoveRange(links.Where(link => !keptSessionIds.Contains(link.SessionId)));
 
         await _context.SaveChangesAsync();
+        if (transaction is not null)
+            await transaction.CommitAsync();
     }
+
+    private async Task<List<(int CalendarIntegrationId, string ExternalEventId)>> SessionLinksAsync(int sessionId) =>
+        (await _context.CalendarEventLinks
+            .Where(x => x.SessionId == sessionId && x.Provider == "Outlook")
+            .Select(x => new { x.CalendarIntegrationId, x.ExternalEventId })
+            .ToListAsync())
+        .Select(x => (x.CalendarIntegrationId, x.ExternalEventId))
+        .ToList();
 
     // The Outlook event row that carries the review issue; created when CRM only had the link.
     private async Task<ExternalCalendarEvent> DeletedEventForSessionAsync(

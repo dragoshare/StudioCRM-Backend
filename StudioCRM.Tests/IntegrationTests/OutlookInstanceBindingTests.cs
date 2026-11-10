@@ -66,6 +66,25 @@ public class OutlookInstanceBindingTests
         Assert.False(await OutlookInstanceBinding.IsAllowedAsync(db, Production));
     }
 
+    [PostgresFact]
+    public async Task OtherOrganizationCannotReuseCachedLegacyBindingOrClaimItsOwn()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var legacy = database.Context();
+        Assert.True(await OutlookInstanceBinding.IsAllowedAsync(legacy, Production));
+        var profile = new OrganizationBrandingProfile { Id = Guid.NewGuid(), Name = "Demo" };
+        var org = new Organization { Id = Guid.NewGuid(), Name = "Demo", Slug = "binding-demo", Status = "Active", BrandingProfileId = profile.Id };
+        legacy.AddRange(profile, org); await legacy.SaveChangesAsync();
+        await using var other = database.Context(organizationId: org.Id);
+        Assert.False(await OutlookInstanceBinding.IsAllowedAsync(other, Production));
+        Assert.Empty(await other.SystemSettings.ToListAsync());
+        var handler = new CountingHandler();
+        var tokens = new OutlookTokenService(other, Options.Create(new OutlookSettings { WebhookUrl = Production }), new HttpClient(handler));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => tokens.EnsureValidAccessTokenAsync(new CalendarIntegration
+        { IsActive = true, AccessToken = "valid", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1) }, true));
+        Assert.Equal(0, handler.Calls);
+        Assert.Single(await legacy.SystemSettings.Where(s => s.Key == OutlookInstanceBinding.SettingKey).ToListAsync());
+    }
     private sealed class CountingHandler : HttpMessageHandler
     {
         public int Calls;

@@ -420,6 +420,31 @@ public class TrainerPortalController : ControllerBase
             Ok(await _clientPaymentService.RejectAsync(paymentId, request)));
     }
 
+    [HttpGet("receipts/pending")]
+    public async Task<ActionResult<List<ClientPaymentDto>>> GetPendingReceipts()
+    {
+        return await HandleAsync<List<ClientPaymentDto>>(async () =>
+            Ok(await _clientPaymentService.GetPendingReceiptsAsync()));
+    }
+
+    [HttpPost("payments/{paymentId:int}/receipt/issue")]
+    public async Task<ActionResult<ClientPaymentDto>> IssueReceipt(
+        int paymentId,
+        [FromBody] IssueReceiptRequest? request)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.IssueReceiptAsync(
+                paymentId,
+                request ?? new IssueReceiptRequest())));
+    }
+
+    [HttpPost("payments/{paymentId:int}/receipt/cancel")]
+    public async Task<ActionResult<ClientPaymentDto>> CancelReceipt(int paymentId)
+    {
+        return await HandleAsync<ClientPaymentDto>(async () =>
+            Ok(await _clientPaymentService.CancelReceiptAsync(paymentId)));
+    }
+
     [HttpGet("sessions")]
     public async Task<ActionResult<List<TrainerPortalSessionDto>>> GetSessions([FromQuery] DateTime? from = null, [FromQuery] DateTime? to = null)
     {

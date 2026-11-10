@@ -128,3 +128,16 @@ Nie należy lokalnie odejmować ani dodawać wejść. Odpowiedzi backendu są ź
 ## Serie
 
 Korekta rozliczenia dotyczy pojedynczego wystąpienia serii. Front nie powinien automatycznie przenosić zmiany statusu lub listy obecności na pozostałe zrealizowane wystąpienia. Edycja reguły serii i korekta rozliczenia konkretnej sesji to dwa osobne działania w UI.
+
+## Dlaczego sesja się nie rozliczyła (od 07.11.2026)
+
+**Ręczne zakończenie** (`POST /api/sessions/{id}/complete`): przy braku pakietu backend zwraca 400 `{ message, code }`. `message` jest gotowym polskim powodem z nazwiskiem klienta, nazwą pakietu i datami. Pokaż go w okienku błędu w całości zamiast ogólnego „nie można zrealizować sesji”.
+
+| code | Kiedy | Przykład message |
+| --- | --- | --- |
+| `NoUsablePackage` | uczestnik ma odliczać wejście, ale żaden pakiet nie pasuje | „Anna Nowak: pakiet „Pakiet 8 treningów” był ważny do 31.10.2026, a sesja odbyła się 03.11.2026. Przedłuż ważność pakietu albo przypisz nowy.” |
+| `PackageHasNoRemainingSessions` | pakiet nie ma wolnych wejść | „Anna Nowak: w pakiecie „…” nie ma wolnych wejść (wykorzystano 8/8, sesja wymaga 1). Odnów pakiet albo zwiększ liczbę wejść.” |
+
+Inne powody `NoUsablePackage`: brak jakiegokolwiek pakietu danego rodzaju, pakiet zamknięty, nieopłacony pakiet grupowy, pakiet innej lokalizacji, pakiet wykorzystany lub nieaktywny.
+
+**Automatyczne zakończenie**: gdy worker nie może rozliczyć sesji, zapisuje powód w sesji i ponawia próbę co 15 minut. Właściciel (wszystkie sesje) i trener (własne sesje) dostają alert/powiadomienie typu `SessionNotSettled` (kategoria `schedule`, `relatedEntityType = session`, `actionUrl = /sessions/{id}/workspace`). `message` zawiera powód, a w wersji dla trenera dopisek „Jeśli nie możesz tego zmienić, poproś właściciela studia.” Alert pojawia się także dla sesji zakończonej ponad 2 godziny temu i nadal nierozliczonej (z ostatnich 45 dni). Znika automatycznie po rozliczeniu sesji, ręcznym lub przez worker po poprawieniu pakietu.

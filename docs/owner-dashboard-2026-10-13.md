@@ -102,7 +102,7 @@ type RecentClient = {
 };
 ```
 
-Sortowanie od najnowszej znanej daty dołączenia; profile z brakiem daty trafiają na koniec, między sobą od najnowszego CreatedAt. Wykluczeni są klienci zarchiwizowani i z przyszłą datą rozpoczęcia. Gdy joinedAt=null, pokaż „Brak daty”. Lista jest bieżąca, niezależna od period kafelków. Inicjały awatara i format daty to prezentacja po stronie frontu.
+Sortowanie malejąco po dacie dołączenia (TrainingStartDate), a dla profili bez tej daty po CreatedAt — dzięki temu nowe kartoteki bez uzupełnionej daty rozpoczęcia (np. założone przez trenera) też pojawiają się na liście. Przy remisie decyduje nowszy CreatedAt. joinedAt nadal pozostaje null, gdy brak TrainingStartDate (CreatedAt nie jest podstawiany jako data dołączenia). Wykluczeni są klienci zarchiwizowani i z przyszłą datą rozpoczęcia. Gdy joinedAt=null, pokaż datę createdAt jako „dodano DD.MM.RRRR” (nie jako datę dołączenia). Lista jest bieżąca, niezależna od period kafelków. Inicjały awatara i format daty to prezentacja po stronie frontu.
 
 Na wizualizacji znajduje się również „Średni czas wdrożenia nowego klienta: 2 dni”. Backend nie ma dat początku/końca procesu wdrożenia; tej wartości nie zwracamy. Usuń tę etykietę lub ukryj ją do czasu dodania rzeczywistych danych procesu.
 

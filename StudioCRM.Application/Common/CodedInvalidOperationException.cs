@@ -32,6 +32,9 @@ public static class SessionCorrectionErrorCodes
     public const string OtherActivePackage = "OtherActivePackage";
     public const string CorrectionReasonTooLong = "CorrectionReasonTooLong";
     public const string InvalidAttendanceStatus = "InvalidAttendanceStatus";
+    // Completing a session: a participant marked to use an entry has no package that can be used (reason in message).
+    public const string NoUsablePackage = "NoUsablePackage";
+    public const string PackageHasNoRemainingSessions = "PackageHasNoRemainingSessions";
 }
 
 // Attendance values accepted when an owner settles or corrects a session. Only Present uses an entry

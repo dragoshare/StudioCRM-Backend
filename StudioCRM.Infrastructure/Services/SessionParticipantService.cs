@@ -120,7 +120,7 @@ public class SessionParticipantService : ISessionParticipantService
         };
 
         await _context.SessionParticipants.AddAsync(participant);
-
+        PersonalSessionType.FollowParticipants(session, await CountActiveParticipantsAsync(sessionId) + 1);
 
         session.UpdatedAt = DateTime.UtcNow;
 
@@ -149,6 +149,8 @@ public class SessionParticipantService : ISessionParticipantService
             throw new InvalidOperationException("Cannot remove participant from completed session.");
 
         _context.SessionParticipants.Remove(participant);
+        PersonalSessionType.FollowParticipants(participant.Session,
+            await CountActiveParticipantsAsync(sessionId, excludedParticipantId: participant.Id));
         await _context.SaveChangesAsync();
         await transaction.CommitAsync();
 
@@ -204,6 +206,11 @@ public class SessionParticipantService : ISessionParticipantService
         }
     }
 
+    private Task<int> CountActiveParticipantsAsync(int sessionId, int? excludedParticipantId = null) =>
+        _context.SessionParticipants.CountAsync(p =>
+            p.SessionId == sessionId && p.Id != excludedParticipantId &&
+            p.AttendanceStatus != "CancelledInTime" && p.AttendanceStatus != "CancelledLate");
+
     private async Task EnsureClientAllowedAsync(Session session, int clientId)
     {
         if (_currentUser.IsOwner) return;
@@ -246,6 +253,8 @@ public class SessionParticipantService : ISessionParticipantService
             session.ActualSessionType = ConsultationSessions.SessionType;
             session.ActualParticipantsCount = 0;
             session.CompletedAt ??= DateTime.UtcNow;
+            session.AutoCompletionFailedAt = null;
+            session.AutoCompletionError = null;
             session.UpdatedAt = DateTime.UtcNow;
             await _context.SaveChangesAsync();
             return true;
@@ -361,7 +370,7 @@ public class SessionParticipantService : ISessionParticipantService
                         _context, activeClientPackage, actualBillingType, session.Id, sessionsCharged);
 
                     if (newUsedSessions > activeClientPackage.TotalSessions)
-                        throw new InvalidOperationException("Client package has no remaining sessions.");
+                        throw SessionPackageRejection.NoRemainingSessions(client, activeClientPackage, sessionsCharged);
 
                     var expectedUnitPrice = activeClientPackage.ExpectedUnitPrice;
                     var perSessionDifference = SessionBalancePolicy.PerSession(activeClientPackage, actualBillingType,
@@ -414,8 +423,7 @@ public class SessionParticipantService : ISessionParticipantService
                 }
                 else
                 {
-                    throw new InvalidOperationException(
-                        $"Client {client.Id} does not have an active subscription package.");
+                    throw await SessionPackageRejection.NoUsablePackageAsync(_context, client, session, actualBillingType);
                 }
             }
             else
@@ -441,6 +449,8 @@ public class SessionParticipantService : ISessionParticipantService
         session.ActualSessionType = request.ActualSessionType;
         session.ActualParticipantsCount = presentCount;
         session.CompletedAt = DateTime.UtcNow;
+        session.AutoCompletionFailedAt = null;
+        session.AutoCompletionError = null;
         session.UpdatedAt = DateTime.UtcNow;
 
         await _context.SaveChangesAsync();
@@ -468,6 +478,7 @@ public class SessionParticipantService : ISessionParticipantService
 
     private async Task TrySyncSessionToOutlookAsync(int sessionId)
     {
+        if (_context.OrganizationId != StudioCRMDbContext.LegacyOrganizationId) return;
         try
         {
             await _outlookCalendarSyncService.SyncSessionAsync(sessionId);

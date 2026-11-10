@@ -18,4 +18,11 @@ internal static class SessionWriteLock
         foreach (var packageId in packages)
             await context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74121, {packageId})");
     }
+
+    // Only the session level, in id order: for writes that change the sessions but none of their clients or packages.
+    internal static async Task AcquireSessionsAsync(StudioCRMDbContext context, IEnumerable<int> sessionIds)
+    {
+        foreach (var sessionId in sessionIds.Distinct().OrderBy(id => id))
+            await context.Database.ExecuteSqlInterpolatedAsync($"SELECT pg_advisory_xact_lock(74102, {sessionId})");
+    }
 }

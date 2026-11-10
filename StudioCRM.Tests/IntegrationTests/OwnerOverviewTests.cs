@@ -59,8 +59,22 @@ public class OwnerOverviewTests
             new Client { FirstName = "Future", Location = location, TrainingStartDate = At(10, 20).Date });
         await db.SaveChangesAsync();
         var rows = await Service(db).RecentClientsAsync(4);
-        Assert.Equal(2, rows.Count); Assert.Equal("Joined", rows[0].FirstName); Assert.Null(rows[1].JoinedAt);
-        Assert.Equal(Now, rows[1].CreatedAt);
+        Assert.Equal(2, rows.Count); Assert.Equal("Unknown", rows[0].FirstName); Assert.Null(rows[0].JoinedAt);
+        Assert.Equal(Now, rows[0].CreatedAt); Assert.Equal("Joined", rows[1].FirstName);
+    }
+
+    [PostgresFact]
+    public async Task RecentClientsShowNewProfilesWithoutJoiningDateBeforeOlderJoinedClients()
+    {
+        await using var database = await TestDatabase.CreateAsync(); await using var db = database.Context();
+        var location = new Location { Name = "Recent" };
+        db.AddRange(Enumerable.Range(1, 4).Select(day => new Client { FirstName = $"Joined {day}", Location = location, TrainingStartDate = At(9, day).Date, CreatedAt = At(9, day) }));
+        db.AddRange(new Client { FirstName = "Created by trainer", Location = location, CreatedAt = At(10, 12) },
+            new Client { FirstName = "Older without date", Location = location, CreatedAt = At(8, 1) });
+        await db.SaveChangesAsync();
+        var rows = await Service(db).RecentClientsAsync(4);
+        Assert.Equal(["Created by trainer", "Joined 4", "Joined 3", "Joined 2"], rows.Select(r => r.FirstName));
+        Assert.Null(rows[0].JoinedAt);
     }
 
     [PostgresFact]

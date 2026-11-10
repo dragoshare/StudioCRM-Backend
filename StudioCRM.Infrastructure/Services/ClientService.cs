@@ -1,3 +1,4 @@
+using StudioCRM.Application.Common;
 using Microsoft.EntityFrameworkCore;
 using StudioCRM.Application.DTOs.Billing;
 using StudioCRM.Application.DTOs.Clients;
@@ -79,7 +80,8 @@ public partial class ClientService : IClientService
             BillingStatus = request.BillingStatus ?? "Pending",
             Status = "Inactive",
             NextSessionAt = NormalizeNullableDateTime(request.NextSessionAt),
-            TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate),
+            // A newly added client starts today unless staff gave another date.
+            TrainingStartDate = NormalizeNullableDate(request.TrainingStartDate) ?? StudioMonth.TodayAsStoredDate(DateTime.UtcNow),
             CreatedAt = DateTime.UtcNow,
             UpdatedAt = DateTime.UtcNow,
             CreatedBy = _currentUser.UserId
@@ -689,7 +691,8 @@ public partial class ClientService : IClientService
                 cp.ClientId == clientId &&
                 cp.IsActive &&
                 cp.Package.LocationId.HasValue &&
-                cp.Package.LocationId.Value != locationId);
+                // A running cycle moved by the owner to the new location (package correction) no longer blocks.
+                (cp.LocationId ?? cp.Package.LocationId.Value) != locationId);
 
         if (hasMismatchedActivePackage)
             throw new InvalidOperationException("Client has an active package from another location. Change the package before changing the client's location.");

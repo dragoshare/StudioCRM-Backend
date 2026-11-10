@@ -263,7 +263,8 @@ public partial class StudioCRMDbContext : DbContext
                 .IsRequired()
                 .HasMaxLength(500);
 
-            entity.HasIndex(s => s.Key)
+            entity.Property<Guid>("OrganizationId");
+            entity.HasIndex("OrganizationId", nameof(SystemSetting.Key))
                 .IsUnique();
 
             entity.HasData(
@@ -835,6 +836,10 @@ public partial class StudioCRMDbContext : DbContext
         modelBuilder.Entity<Session>()
             .Property(s => s.PublicSlug)
             .HasMaxLength(120);
+
+        modelBuilder.Entity<Session>()
+            .Property(s => s.AutoCompletionError)
+            .HasMaxLength(1000);
 
         modelBuilder.Entity<Session>()
             .HasIndex(s => s.PublicSlug);

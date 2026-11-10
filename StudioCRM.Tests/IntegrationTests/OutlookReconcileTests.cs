@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using StudioCRM.Application.DTOs.Calendar;
 using StudioCRM.Application.Interfaces.Calendar;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Infrastructure.Services.Calendar;
@@ -25,7 +26,7 @@ public class OutlookReconcileTests
             User = owner, Provider = "Outlook", IsActive = true, Email = owner.Email,
             AccessToken = "token", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1)
         };
-        db.AddRange(owner, integration);
+        db.AddRange(owner, integration, new Location { Name = "Reconcile studio" });
         await db.SaveChangesAsync();
 
         var start = DateTime.UtcNow.Date.AddDays(3).AddHours(9);
@@ -35,7 +36,7 @@ public class OutlookReconcileTests
             categories = new[] { "Prywatne" }, transactionId = (string?)null,
             start = new { dateTime = start.AddDays(i).ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
             end = new { dateTime = start.AddDays(i).AddHours(1).ToString("yyyy-MM-ddTHH:mm:ss.fffffff"), timeZone = "UTC" },
-            location = new { displayName = "" },
+            location = new { displayName = "Reconcile studio" },
             organizer = new { emailAddress = new { address = owner.Email } },
             attendees = Array.Empty<object>()
         }).ToArray();
@@ -86,6 +87,37 @@ public class OutlookReconcileTests
         Assert.Equal(1, single.Count("/me/calendarView"));
         await Assert.ThrowsAsync<UnauthorizedAccessException>(() =>
             Service(Empty(), trainer.UserId, "Trainer").ReconcileAsync(new() { TrainerId = trainer.Id }));
+    }
+
+    // The background safety-net reconcile only brings Outlook changes in: a CRM session without an event is not pushed
+    // to Outlook (that would e-mail attendees from a job nobody started).
+    [PostgresFact]
+    public async Task ImportOnlyReconcileDoesNotPushSessionsToOutlook()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var trainer = new Trainer { User = new User { Email = "import-only@example.test" } };
+        var location = new Location { Name = "Reconcile studio" };
+        var integration = new CalendarIntegration
+        {
+            User = trainer.User, Provider = "Outlook", IsActive = true, Email = trainer.User.Email,
+            AccessToken = "token", RefreshToken = "refresh", AccessTokenExpiresAt = DateTime.UtcNow.AddHours(1)
+        };
+        var start = DateTime.UtcNow.Date.AddDays(2).AddHours(10);
+        db.AddRange(trainer, location, integration,
+            new Session { Title = "Bez wydarzenia", Trainer = trainer, Location = location, Status = "Planned", StartAt = start, EndAt = start.AddHours(1) });
+        await db.SaveChangesAsync();
+        var handler = new GraphHandler(request => request.RequestUri!.AbsolutePath.EndsWith("/me/calendarView")
+            ? JsonSerializer.Serialize(new { value = Array.Empty<object>() }) : null);
+        // No calendar sync service: a push to Outlook would fail and show up in the errors.
+        var service = new OutlookWebhookService(db, new HttpClient(handler), new ConfigurationBuilder().AddInMemoryCollection().Build(),
+            new NoRefresh(), null!, new PortalSecurityTests.Actor(trainer.UserId, "Owner"));
+
+        var result = await service.ReconcileAsync(new() { PastDays = 1, FutureDays = 14, ImportOnly = true },
+            new OutlookReconcileActor(0, IsOwner: true, IsTrainer: false));
+
+        Assert.Empty(result.Errors);
+        Assert.Equal((1, 0), (result.IntegrationsProcessed, result.CrmSessionsSyncedToOutlook));
     }
 
     private sealed class NoRefresh : IOutlookTokenService

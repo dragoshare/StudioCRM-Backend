@@ -47,6 +47,7 @@ builder.Services.Configure<AppSettings>(
     builder.Configuration.GetSection("App"));
 builder.Services.Configure<TpaySettings>(builder.Configuration.GetSection("Tpay"));
 builder.Services.AddMemoryCache();
+builder.Services.AddSingleton<OrganizationJobRunner>();
 builder.Services.AddHttpClient<ITpayConnectionService, TpayConnectionService>(client =>
     client.Timeout = TimeSpan.FromSeconds(20))
     .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
@@ -192,6 +193,7 @@ builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookWebhookQue
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookWebhookWorker>();
 builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookReconcileJobs>();
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookReconcileWorker>();
+builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookAutoReconcileWorker>();
 builder.Services.AddSingleton<StudioCRM.Api.BackgroundServices.OutlookContactSyncQueue>();
 builder.Services.AddSingleton<IOutlookContactSyncQueue>(sp => sp.GetRequiredService<StudioCRM.Api.BackgroundServices.OutlookContactSyncQueue>());
 builder.Services.AddHostedService<StudioCRM.Api.BackgroundServices.OutlookContactSyncWorker>();

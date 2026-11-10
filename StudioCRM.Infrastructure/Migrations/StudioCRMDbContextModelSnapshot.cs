@@ -2339,6 +2339,13 @@ namespace StudioCRM.Infrastructure.Migrations
                     b.Property<string>("ActualSessionType")
                         .HasColumnType("text");
 
+                    b.Property<string>("AutoCompletionError")
+                        .HasMaxLength(1000)
+                        .HasColumnType("character varying(1000)");
+
+                    b.Property<DateTime?>("AutoCompletionFailedAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<int>("CancellationClosesBeforeMinutes")
                         .HasColumnType("integer");
 
@@ -2631,10 +2638,10 @@ namespace StudioCRM.Infrastructure.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("Key")
-                        .IsUnique();
-
                     b.HasIndex("OrganizationId");
+
+                    b.HasIndex("OrganizationId", "Key")
+                        .IsUnique();
 
                     b.ToTable("SystemSettings");
 

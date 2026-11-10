@@ -26,21 +26,13 @@ public class SessionAutoCompletionWorker : BackgroundService
         {
             try
             {
-                using var scope = _serviceProvider.CreateScope();
-
-                var completionService = scope.ServiceProvider
-                    .GetRequiredService<ISessionAutoCompletionService>();
-
-                var result = await completionService.CompleteFinishedSessionsAsync(stoppingToken);
-
-                if (result.CompletedCount > 0 || result.FailedCount > 0)
+                await _serviceProvider.GetRequiredService<OrganizationJobRunner>().RunAsync(async (services, ct) =>
                 {
-                    _logger.LogInformation(
-                        "Session auto-completion finished. Completed: {CompletedCount}, skipped: {SkippedCount}, failed: {FailedCount}.",
-                        result.CompletedCount,
-                        result.SkippedCount,
-                        result.FailedCount);
-                }
+                    var result = await services.GetRequiredService<ISessionAutoCompletionService>().CompleteFinishedSessionsAsync(ct);
+                    if (result.CompletedCount > 0 || result.FailedCount > 0)
+                        _logger.LogInformation("Session auto-completion: {CompletedCount} completed, {FailedCount} failed.", result.CompletedCount, result.FailedCount);
+                }, stoppingToken);
+
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

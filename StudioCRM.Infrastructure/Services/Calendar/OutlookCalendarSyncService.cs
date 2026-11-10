@@ -70,6 +70,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         }
 
         await EnsureAccessTokenAsync(integration);
+        (CalendarIntegration Integration, string ExternalEventId)? movedFrom = null;
 
         if (existingLink is null)
         {
@@ -117,9 +118,15 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         {
             if (existingLink.CalendarIntegrationId != integration.Id)
             {
-                await DeleteLinkedEventAsync(existingLink);
-
+                // The new event first: a failed create leaves the session in the old calendar, not in none.
                 var externalEventId = await CreateEventAsync(session, integration.AccessToken);
+
+                // 2.11 (#1051): the old calendar's import row kept the session, so changing or deleting the leftover
+                // copy there moved or cancelled the session. It is unlinked before the old event is deleted.
+                movedFrom = (existingLink.CalendarIntegration
+                        ?? await _context.CalendarIntegrations.FirstAsync(x => x.Id == existingLink.CalendarIntegrationId),
+                    existingLink.ExternalEventId);
+                await UnlinkImportedEventAsync(session.Id, existingLink.CalendarIntegrationId, existingLink.ExternalEventId);
 
                 existingLink.CalendarIntegrationId = integration.Id;
                 existingLink.ExternalEventId = externalEventId;
@@ -141,6 +148,38 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         }
 
         await _context.SaveChangesAsync();
+
+        if (movedFrom is { } previous && previous.Integration.IsActive)
+        {
+            try
+            {
+                await DeleteEventAsync(previous.Integration, previous.ExternalEventId);
+            }
+            catch (Exception ex)
+            {
+                // The session already lives in the new calendar; the unlinked copy can no longer change it.
+                _logger.LogWarning(ex, "Could not delete the previous Outlook event of moved session {SessionId}.", session.Id);
+            }
+        }
+    }
+
+    private async Task UnlinkImportedEventAsync(int sessionId, int calendarIntegrationId, string externalEventId)
+    {
+        var rows = await _context.ExternalCalendarEvents
+            .Where(x =>
+                x.SessionId == sessionId &&
+                x.CalendarIntegrationId == calendarIntegrationId &&
+                x.ExternalEventId == externalEventId)
+            .ToListAsync();
+        rows.ForEach(UnlinkDeletedEvent);
+    }
+
+    private static void UnlinkDeletedEvent(ExternalCalendarEvent calendarEvent)
+    {
+        if (!calendarEvent.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
+            calendarEvent.Subject = "[DELETED] " + calendarEvent.Subject;
+        calendarEvent.SessionId = null;
+        calendarEvent.IsConvertedToSession = false;
     }
 
     public async Task SyncSessionSeriesAsync(
@@ -353,17 +392,36 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
             .FirstOrDefaultAsync(x =>
                 x.SessionId == sessionId &&
                 x.Provider == "Outlook");
+        // A session moved to another trainer's calendar can still have its old event there: every Outlook event
+        // pointing at the session goes, not only the linked one.
+        var importedEvents = await _context.ExternalCalendarEvents
+            .Include(x => x.CalendarIntegration)
+            .Where(x => x.SessionId == sessionId && x.Provider == "Outlook")
+            .ToListAsync();
 
-        if (link is null)
-            return;
+        var targets = importedEvents
+            .Where(x => x.ExternalEventId != string.Empty && !x.Subject.StartsWith("[DELETED]"))
+            .Select(x => (Integration: x.CalendarIntegration, x.ExternalEventId))
+            .ToList();
+        if (link is not null)
+        {
+            // Unchanged: a link to a disconnected calendar stays, the event cannot be deleted from here.
+            if (link.CalendarIntegration.IsActive)
+                targets.Insert(0, (link.CalendarIntegration, link.ExternalEventId));
+            else
+                link = null;
+        }
 
-        var integration = link.CalendarIntegration;
+        foreach (var target in targets
+            .Where(x => x.Integration.IsActive)
+            .DistinctBy(x => (x.Integration.Id, x.ExternalEventId)))
+        {
+            await DeleteEventAsync(target.Integration, target.ExternalEventId);
+        }
 
-        if (!integration.IsActive)
-            return;
-
-        await DeleteLinkedEventAsync(link);
-        _context.CalendarEventLinks.Remove(link);
+        if (link is not null)
+            _context.CalendarEventLinks.Remove(link);
+        importedEvents.ForEach(UnlinkDeletedEvent);
         await _context.SaveChangesAsync();
     }
 
@@ -424,13 +482,7 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
         }
 
         _context.CalendarEventLinks.RemoveRange(links);
-        foreach (var calendarEvent in externalEvents)
-        {
-            if (!calendarEvent.Subject.StartsWith("[DELETED]", StringComparison.OrdinalIgnoreCase))
-                calendarEvent.Subject = "[DELETED] " + calendarEvent.Subject;
-            calendarEvent.SessionId = null;
-            calendarEvent.IsConvertedToSession = false;
-        }
+        externalEvents.ForEach(UnlinkDeletedEvent);
 
         await _context.SaveChangesAsync();
         return deletedRemoteEvent;
@@ -790,18 +842,6 @@ public class OutlookCalendarSyncService : IOutlookCalendarSyncService
                 x.UserId == userId &&
                 x.Provider == "Outlook" &&
                 x.IsActive);
-    }
-
-    private async Task DeleteLinkedEventAsync(CalendarEventLink link)
-    {
-        var integration = link.CalendarIntegration
-            ?? await _context.CalendarIntegrations
-                .FirstOrDefaultAsync(x => x.Id == link.CalendarIntegrationId);
-
-        if (integration is null || !integration.IsActive)
-            return;
-
-        await DeleteEventAsync(integration, link.ExternalEventId);
     }
 
     private async Task DeleteEventAsync(CalendarIntegration integration, string externalEventId)

@@ -453,7 +453,9 @@ public class ClientPortalService : IClientPortalService
         return await _context.Users
             .Include(u => u.UserRoles)
                 .ThenInclude(ur => ur.Role)
-            .Where(u => u.IsActive && u.UserRoles.Any(ur => ur.Role.Name == "Owner"))
+            .Where(u => u.IsActive && (_context.OrganizationId == StudioCRMDbContext.LegacyOrganizationId
+                ? u.UserRoles.Any(ur => ur.Role.Name == "Owner")
+                : _context.Set<OrganizationMembership>().Any(m => m.OrganizationId == _context.OrganizationId && m.UserId == u.Id && m.IsOwner)))
             .OrderBy(u => u.Id)
             .Select(u => new ClientOwnerContactDto
             {

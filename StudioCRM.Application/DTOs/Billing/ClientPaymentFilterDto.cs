@@ -10,6 +10,8 @@ public class ClientPaymentFilterDto : IValidatableObject
     [StringLength(100)]
     public string? Search { get; set; }
     public int? ClientId { get; set; }
+    // Trainer assigned to the client (Client.TrainerId); payments themselves have no trainer.
+    public int? TrainerId { get; set; }
     public int? LocationId { get; set; }
     public int? LegalEntityId { get; set; }
     public ClientPaymentStatus? Status { get; set; }
@@ -20,6 +22,9 @@ public class ClientPaymentFilterDto : IValidatableObject
     // From/To and the date sorts use PaymentDate (date of the payment), not CreatedAt.
     public DateTime? From { get; set; }
     public DateTime? To { get; set; }
+    // Calendar month of PaymentDate in the studio time zone, e.g. "2026-11". Not together with From/To.
+    [RegularExpression(@"^\d{4}-(0[1-9]|1[0-2])$")]
+    public string? Month { get; set; }
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
     public decimal? AmountMin { get; set; }
     [Range(typeof(decimal), "0", "79228162514264337593543950335")]
@@ -53,6 +58,8 @@ public class ClientPaymentFilterDto : IValidatableObject
     {
         if (AmountMin > AmountMax)
             yield return new ValidationResult("AmountMin cannot be greater than AmountMax.", new[] { nameof(AmountMin), nameof(AmountMax) });
+        if (!string.IsNullOrWhiteSpace(Month) && (From.HasValue || To.HasValue))
+            yield return new ValidationResult("Use either Month or From/To.", new[] { nameof(Month), nameof(From), nameof(To) });
         if (From > To)
             yield return new ValidationResult("From cannot be later than To.", new[] { nameof(From), nameof(To) });
         if (Method.HasValue && !Enum.IsDefined(Method.Value))

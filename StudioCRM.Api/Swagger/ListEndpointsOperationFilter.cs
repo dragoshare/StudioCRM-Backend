@@ -32,6 +32,8 @@ public class ListEndpointsOperationFilter : IOperationFilter
         ["Status"] = "1 = PendingConfirmation, 2 = Confirmed, 3 = Rejected, 4 = Cancelled, 5 = Reversed.",
         ["Source"] = "1 = ClientRequest, 2 = StaffEntry, 3 = PaymentGateway.",
         ["ReceiptStatus"] = "0 = None, 1 = Issued, 2 = Cancelled, 3 = Pending, 4 = ManualRequired, 5 = Failed.",
+        ["TrainerId"] = "Trener przypisany do klienta (Client.TrainerId). Lista trenerów: GET /api/trainers.",
+        ["Month"] = "Miesiąc kalendarzowy daty wpłaty w strefie studia (Europe/Warsaw), format RRRR-MM, np. 2026-11. Nie łączyć z From/To (400).",
         ["From"] = "Data wpłaty (PaymentDate) od, włącznie. ISO 8601; bez strefy traktowane jako UTC. Musi być <= To.",
         ["To"] = "Data wpłaty (PaymentDate) do, włącznie. ISO 8601; bez strefy traktowane jako UTC.",
         ["AmountMin"] = "Kwota brutto (Amount) od, włącznie, >= 0. Musi być <= AmountMax.",

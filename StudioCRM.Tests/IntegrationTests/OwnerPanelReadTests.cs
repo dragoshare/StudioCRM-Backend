@@ -202,7 +202,10 @@ public class OwnerPanelReadTests
         ClientPackage Cycle(Client c, int total, int used, PackageBillingMode mode = PackageBillingMode.SessionBased) => new()
         {
             Client = c, Package = new Package { Name = "P" }, Name = "P", BillingMode = mode, TotalSessions = total, UsedSessions = used,
-            PurchaseDate = DateTime.UtcNow, Location = location
+            PurchaseDate = DateTime.UtcNow, Location = location,
+            PeriodDurationDays = mode == PackageBillingMode.PeriodBased ? 30 : 0,
+            PeriodStartsAt = mode == PackageBillingMode.PeriodBased ? DateTime.UtcNow.Date : null,
+            ValidUntil = mode == PackageBillingMode.PeriodBased ? DateTime.UtcNow.Date.AddDays(30) : null
         };
         db.AddRange(Cycle(half, 10, 5), Cycle(full, 4, 4), Cycle(period, 0, 0, PackageBillingMode.PeriodBased));
         db.Add(none);

@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
+using StudioCRM.Application.Common;
 using StudioCRM.Application.DTOs.SessionParticipants;
 using StudioCRM.Domain.Entities;
 using StudioCRM.Domain.Enums;
@@ -32,13 +33,14 @@ public class AutoCompletionDiagnosisTests
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
         var service = new SessionParticipantService(db, null!, null!, null!, NullLogger<SessionParticipantService>.Instance);
-        var error = await Assert.ThrowsAsync<InvalidOperationException>(() => service.CompleteSessionAutomaticallyAsync(failed.Id,
+        var error = await Assert.ThrowsAnyAsync<InvalidOperationException>(() => service.CompleteSessionAutomaticallyAsync(failed.Id,
             new CompleteSessionDto { ActualSessionType = "TwoToOne", Participants = new()
             {
                 new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true, SessionsCharged = 1 },
                 new() { ClientId = missing.Id, AttendanceStatus = "Present", CountsAgainstPackage = true, SessionsCharged = 1 }
             }}));
-        Assert.Contains("does not have an active subscription package", error.Message);
+        Assert.Equal("No package: klient nie ma żadnego pakietu indywidualnego/semi. Przypisz pakiet albo rozlicz sesję bez odliczania wejścia.", error.Message);
+        Assert.Equal(SessionCorrectionErrorCodes.NoUsablePackage, Assert.IsType<CodedInvalidOperationException>(error).Code);
         await using (var check = database.Context())
             Assert.Equal(0, (await check.ClientPackages.SingleAsync()).UsedSessions);
 
@@ -59,5 +61,30 @@ public class AutoCompletionDiagnosisTests
             Assert.Equal("Planned", p.AttendanceStatus);
         });
         Assert.Equal("Completed", (await final.Sessions.SingleAsync(s => s.Id == next.Id)).Status);
+    }
+    [PostgresFact]
+    public async Task CompletionNamesTheExpiredPackageAndDates()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Expired studio" };
+        var trainer = new Trainer { User = new User { Email = "expired@example.test" } };
+        var client = new Client { FirstName = "Marta", LastName = "Nowak", Location = location };
+        var start = new DateTime(2026, 11, 3, 9, 0, 0, DateTimeKind.Utc);
+        db.Add(new ClientPackage { Client = client, Package = new Package { Name = "Pakiet 8", BillingType = SessionBillingType.TwoToOne, Price = 800, SessionsLimit = 8 },
+            Name = "Pakiet 8 treningów", TotalSessions = 8, UsedSessions = 7, ExpectedBillingType = SessionBillingType.TwoToOne, ExpectedUnitPrice = 100,
+            IsActive = true, PurchaseDate = start.AddDays(-60), ValidUntil = new DateTime(2026, 10, 31, 22, 59, 59, DateTimeKind.Utc) });
+        var session = new Session { Trainer = trainer, Location = location, StartAt = start, EndAt = start.AddHours(1) };
+        db.Add(new SessionParticipant { Session = session, Client = client });
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        var service = new SessionParticipantService(db, null!, null!, null!, NullLogger<SessionParticipantService>.Instance);
+        var error = await Assert.ThrowsAsync<CodedInvalidOperationException>(() => service.CompleteSessionAutomaticallyAsync(session.Id,
+            new CompleteSessionDto { ActualSessionType = "OneToOne", Participants = new()
+            {
+                new() { ClientId = client.Id, AttendanceStatus = "Present", CountsAgainstPackage = true, SessionsCharged = 1 }
+            }}));
+        Assert.Equal(SessionCorrectionErrorCodes.NoUsablePackage, error.Code);
+        Assert.Equal("Marta Nowak: pakiet „Pakiet 8 treningów” był ważny do 31.10.2026, a sesja odbyła się 03.11.2026. Przedłuż ważność pakietu albo przypisz nowy.", error.Message);
     }
 }

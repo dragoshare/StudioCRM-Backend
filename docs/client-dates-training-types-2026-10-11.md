@@ -2,7 +2,7 @@
 
 ## Data dołączenia
 
-GET /api/Clients/filter zwraca ClientDto.trainingStartDate (DateTime?, ISO 8601 lub null): ręcznie podana data rozpoczęcia treningów. To istniejące pole biznesowe do pokazania daty rozpoczęcia współpracy. GET/PATCH klienta używa tego samego pola; CreateClientDto i UpdateClientDto przyjmują trainingStartDate. Nie dodano drugiego pola ani migracji.
+GET /api/Clients/filter zwraca ClientDto.trainingStartDate (DateTime?, ISO 8601 lub null): ręcznie podana data rozpoczęcia treningów. To istniejące pole biznesowe do pokazania daty rozpoczęcia współpracy. GET/PATCH klienta używa tego samego pola; CreateClientDto i UpdateClientDto przyjmują trainingStartDate. Nie dodano drugiego pola ani migracji. Od 05.11.2026: gdy przy tworzeniu klienta (POST /api/Clients, także z portalu trenera, rejestracja i zaproszenie) nie podano trainingStartDate, backend ustawia dzisiejszą datę studia (Europe/Warsaw). Front może pokazać to jako domyślną wartość pola; przy wprowadzaniu dawnego klienta należy podać rzeczywistą datę.
 
 createdAt to techniczny czas utworzenia rekordu klienta, także importu. Nie jest wiarygodną datą dołączenia do studia. Nie stosuj go jako ukrytego fallbacku. Osobnego ogólnego joinedAt klienta nie ma. ClientLocationMembership.JoinedAt opisuje przypisanie do lokalizacji, nie pierwsze dołączenie do studia.
 

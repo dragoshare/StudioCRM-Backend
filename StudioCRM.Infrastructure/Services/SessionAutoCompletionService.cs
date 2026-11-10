@@ -37,13 +37,18 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
         var now = DateTime.UtcNow;
         var result = new SessionAutoCompletionResult();
 
+        // A session that failed recently waits before the next attempt and goes after the others,
+        // so a few sessions that keep failing cannot hold up the whole batch.
+        var retryFailedBefore = now - FailedRetryDelay;
         var sessionIds = await _context.Sessions
             .AsNoTracking()
             .Where(s =>
                 !s.IsDeleted &&
                 s.EndAt <= now &&
-                !FinishedStatuses.Contains(s.Status))
-            .OrderBy(s => s.EndAt)
+                !FinishedStatuses.Contains(s.Status) &&
+                (s.AutoCompletionFailedAt == null || s.AutoCompletionFailedAt <= retryFailedBefore))
+            .OrderBy(s => s.AutoCompletionFailedAt != null)
+            .ThenBy(s => s.EndAt)
             .Select(s => s.Id)
             .Take(50)
             .ToListAsync(cancellationToken);
@@ -52,11 +57,12 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var request = await BuildCompletionRequestAsync(sessionId, cancellationToken);
+            var (request, skipReason) = await BuildCompletionRequestAsync(sessionId, cancellationToken);
 
             if (request is null)
             {
                 result.SkippedCount++;
+                if (skipReason != null) await RecordFailureAsync(sessionId, skipReason, now, cancellationToken);
                 continue;
             }
 
@@ -73,13 +79,41 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
             {
                 result.FailedCount++;
                 _logger.LogWarning(ex, "Automatic session completion failed for session {SessionId}.", sessionId);
+                // Business rejections already carry a user-facing reason; anything else is a technical error.
+                await RecordFailureAsync(sessionId, ex is InvalidOperationException
+                    ? ex.Message
+                    : "Błąd techniczny automatycznego rozliczenia. Spróbuj zakończyć sesję ręcznie albo zgłoś problem.", now, cancellationToken);
             }
         }
 
         return result;
     }
 
-    private async Task<CompleteSessionDto?> BuildCompletionRequestAsync(
+    private static readonly TimeSpan FailedRetryDelay = TimeSpan.FromMinutes(15);
+
+    // Stores the reason on the session (shown to the owner and the trainer as an alert). Never fails the batch.
+    private async Task RecordFailureAsync(int sessionId, string reason, DateTime now, CancellationToken cancellationToken)
+    {
+        try
+        {
+            _context.ChangeTracker.Clear();
+            var session = await _context.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
+            if (session is null || FinishedStatuses.Contains(session.Status)) return;
+            session.AutoCompletionFailedAt = now;
+            session.AutoCompletionError = reason.Length > 1000 ? reason[..1000] : reason;
+            await _context.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Could not record the automatic completion failure of session {SessionId}.", sessionId);
+        }
+        finally
+        {
+            _context.ChangeTracker.Clear();
+        }
+    }
+
+    private async Task<(CompleteSessionDto? Request, string? SkipReason)> BuildCompletionRequestAsync(
         int sessionId,
         CancellationToken cancellationToken)
     {
@@ -89,10 +123,10 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
             .FirstOrDefaultAsync(s => s.Id == sessionId, cancellationToken);
 
         if (session is null || FinishedStatuses.Contains(session.Status))
-            return null;
+            return (null, null);
 
         if (ConsultationSessions.IsConsultation(session.PlannedSessionType))
-            return new CompleteSessionDto { ActualSessionType = ConsultationSessions.SessionType };
+            return (new CompleteSessionDto { ActualSessionType = ConsultationSessions.SessionType }, null);
 
         var billableParticipants = session.Participants
             .Where(IsAutoCompletableParticipant)
@@ -100,7 +134,7 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
 
         // A group class that took place is completed even with nobody enrolled in CRM (trainer paid the group rate).
         if (billableParticipants.Count == 0 && !GroupBookingPolicy.IsGroup(session))
-            return null;
+            return (null, "Sesja nie ma obecnych uczestników. Dodaj uczestników i zakończ ją ręcznie albo ją odwołaj.");
 
         var actualSessionType = GroupBookingPolicy.IsGroup(session)
             ? SessionBillingType.Group : ResolveActualSessionType(billableParticipants.Count);
@@ -112,16 +146,16 @@ public class SessionAutoCompletionService : ISessionAutoCompletionService
                 sessionId,
                 billableParticipants.Count);
 
-            return null;
+            return (null, $"Sesja ma {billableParticipants.Count} uczestników, więc nie da się automatycznie ustalić typu treningu (1–4 osoby). Zakończ ją ręcznie.");
         }
 
-        return new CompleteSessionDto
+        return (new CompleteSessionDto
         {
             ActualSessionType = actualSessionType.Value.ToString(),
             Participants = session.Participants
                 .Select(MapParticipant)
                 .ToList()
-        };
+        }, null);
     }
 
     private static bool IsAutoCompletableParticipant(SessionParticipant participant)
