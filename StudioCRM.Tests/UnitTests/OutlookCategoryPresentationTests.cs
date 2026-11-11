@@ -10,11 +10,11 @@ public class OutlookCategoryPresentationTests
     {
         var session = new Session
         {
-            OutlookCategoriesJson = "[\"Maria Chojnacka\"]",
-            Trainer = new Trainer { OutlookCategoryName = "Maria Chojnacka", OutlookCategoryColor = "preset9" }
+            OutlookCategoriesJson = "[\"Anna Nowak\"]",
+            Trainer = new Trainer { OutlookCategoryName = "Anna Nowak", OutlookCategoryColor = "preset9" }
         };
         var result = OutlookCategoryPresentation.Read(session);
-        Assert.Equal("Maria Chojnacka", result.Primary);
+        Assert.Equal("Anna Nowak", result.Primary);
         Assert.Equal("preset9", result.PrimaryColor);
     }
 
@@ -23,9 +23,9 @@ public class OutlookCategoryPresentationTests
     {
         var session = new Session
         {
-            OutlookCategoriesJson = "[\"Szymon Gorzula\",\"Konsultacje\"]",
-            OutlookCategoryColorsJson = "[{\"Name\":\"Szymon Gorzula\",\"Color\":\"preset7\"}]",
-            PrimaryOutlookCategory = "Szymon Gorzula"
+            OutlookCategoriesJson = "[\"Jan Kowalski\",\"Konsultacje\"]",
+            OutlookCategoryColorsJson = "[{\"Name\":\"Jan Kowalski\",\"Color\":\"preset7\"}]",
+            PrimaryOutlookCategory = "Jan Kowalski"
         };
         var result = OutlookCategoryPresentation.Read(session);
         Assert.Equal("preset7", result.PrimaryColor);
@@ -41,10 +41,10 @@ public class OutlookCategoryPresentationTests
     {
         var session = new Session
         {
-            OutlookCategoriesJson = "[\"Karolina Wróbel\",\"Konsultacje\"]",
-            OutlookCategoryColorsJson = $"[{{\"Name\":\"Karolina Wróbel\",\"Color\":{storedColor}}},{{\"Name\":\"Konsultacje\",\"Color\":\"preset3\"}}]",
-            PrimaryOutlookCategory = "Karolina Wróbel",
-            Trainer = new Trainer { OutlookCategoryName = "Karolina Wróbel", OutlookCategoryColor = "preset10" }
+            OutlookCategoriesJson = "[\"Ewa Król\",\"Konsultacje\"]",
+            OutlookCategoryColorsJson = $"[{{\"Name\":\"Ewa Król\",\"Color\":{storedColor}}},{{\"Name\":\"Konsultacje\",\"Color\":\"preset3\"}}]",
+            PrimaryOutlookCategory = "Ewa Król",
+            Trainer = new Trainer { OutlookCategoryName = "Ewa Król", OutlookCategoryColor = "preset10" }
         };
         var result = OutlookCategoryPresentation.Read(session);
         Assert.Equal("preset10", result.PrimaryColor);

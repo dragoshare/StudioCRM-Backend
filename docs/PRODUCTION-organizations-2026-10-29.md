@@ -6,7 +6,7 @@ Do brancha codex/platform-organizations włączono main 55c6be4 (ponowny import 
 
 ## Baza i przygotowanie
 
-- Produkcyjny projekt: cngkbpbkpgreehrigdye.
+- Produkcyjny projekt: <projekt produkcyjny>.
 - Świeży backup public wykonano 29.10; 1055122 bajty, zapis SHA256, sprawdzony pg_restore --list.
 - Odtworzono go w osobnej lokalnej bazie, bez uruchamiania API, workerów ani Graph.
 - Jedyna oczekująca migracja: 20261018072226_ScopeStudioSettingKeys.

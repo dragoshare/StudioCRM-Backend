@@ -8,9 +8,9 @@ namespace StudioCRM.Tests.UnitTests;
 public class ConsultationSessionTests
 {
     [Theory]
-    [InlineData("[\"Aleksandra Szcząchor\",\"Konsultacje\"]", true)]
+    [InlineData("[\"Anna Nowak\",\"Konsultacje\"]", true)]
     [InlineData("[\"konsultacje \"]", true)]
-    [InlineData("[\"Aleksandra Szcząchor\"]", false)]
+    [InlineData("[\"Anna Nowak\"]", false)]
     [InlineData("not json", false)]
     [InlineData(null, false)]
     public void ConsultationIsRecognisedByOutlookCategory(string? categoriesJson, bool expected)

@@ -22,3 +22,6 @@ appsettings.Local.json
 # OS files
 Thumbs.db
 .DS_Store
+
+# Lokalne importy z danymi klientów — nigdy nie commitować
+import-pazdziernik/

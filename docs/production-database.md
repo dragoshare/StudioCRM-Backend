@@ -2,7 +2,7 @@
 
 ## Stan przygotowania
 
-- `DefaultConnection` wskazuje projekt Supabase `cngkbpbkpgreehrigdye`.
+- `DefaultConnection` wskazuje projekt Supabase `<projekt produkcyjny>`.
 - Poprzednie 29 tabel CRM zapisano w schemacie `archive_preprod_20260911`.
 - Schemat `public` utworzono ponownie z 46 aktualnych migracji.
 - Baza zawiera 3 role aplikacyjne, 0 użytkowników i 0 danych demonstracyjnych.
