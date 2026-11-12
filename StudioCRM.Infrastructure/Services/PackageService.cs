@@ -284,13 +284,14 @@ public class PackageService : IPackageService
 
     // Lista do wyboru: najpierw pakiety na wejścia wg typu (1:1, 2:1, 3:1, 4:1, grupowe),
     // potem pozostałe okresowe, następnie wszystkie hybrydowe razem, a na końcu osobna sekcja „Wspierający”;
-    // w obrębie typu wg lokalizacji (wspólne na końcu), nazwy i ceny.
+    // w obrębie typu rosnąco wg liczby wejść (4, 8, 12, …), potem lokalizacji (wspólne na końcu), nazwy i ceny.
     internal static IQueryable<Package> OrderForPicker(IQueryable<Package> query)
         => query
             .OrderBy(p => p.Name.ToLower().Contains(SupportingNameMarker))
             .ThenBy(p => p.Name.ToLower().Contains(HybridNameMarker))
             .ThenBy(p => p.BillingMode)
             .ThenBy(p => p.BillingType)
+            .ThenBy(p => p.SessionsLimit)
             .ThenBy(p => p.LocationId == null)
             .ThenBy(p => p.Location != null ? p.Location.Name : null)
             .ThenBy(p => p.Name)
