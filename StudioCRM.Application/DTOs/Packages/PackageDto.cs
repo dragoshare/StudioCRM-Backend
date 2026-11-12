@@ -23,6 +23,10 @@ public class PackageDto
     public bool IsPubliclyAvailable { get; set; }
     public string? PublicSlug { get; set; }
     public bool IsActive { get; set; }
+    /// <summary>Pakiet „Wspierający” (rozpoznawany po nazwie); na listach wyboru jest w osobnej sekcji na końcu.</summary>
+    public bool IsSupporting { get; set; }
+    /// <summary>Pakiet hybrydowy (rozpoznawany po nazwie); na listach wyboru wszystkie hybrydowe są obok siebie, po treningach na wejścia.</summary>
+    public bool IsHybrid { get; set; }
 
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }

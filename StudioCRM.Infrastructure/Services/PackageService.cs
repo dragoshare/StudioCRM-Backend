@@ -35,7 +35,7 @@ public class PackageService : IPackageService
         var items = await OrderForPicker(query).Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(p => new PackageOptionDto { BillingMode = p.BillingMode, Id = p.Id, Name = p.Name, LocationId = p.LocationId,
                 Price = p.Price, Currency = p.Currency, PackageType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "PeriodBased" : StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(p.BillingType),
-                BillingType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "" : p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive }).ToListAsync();
+                BillingType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "" : p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive, IsSupporting = p.Name.ToLower().Contains(SupportingNameMarker), IsHybrid = p.Name.ToLower().Contains(HybridNameMarker) }).ToListAsync();
         return new() { Items = items, TotalCount = total, Page = filter.Page, PageSize = filter.PageSize, TotalPages = (int)Math.Ceiling(total / (double)filter.PageSize) };
     }
 
@@ -279,11 +279,17 @@ public class PackageService : IPackageService
             .ToListAsync();
     }
 
+    private const string SupportingNameMarker = "wspieraj";
+    private const string HybridNameMarker = "hybryd";
+
     // Lista do wyboru: najpierw pakiety na wejścia wg typu (1:1, 2:1, 3:1, 4:1, grupowe),
-    // potem pakiety okresowe; w obrębie typu wg lokalizacji (wspólne na końcu), nazwy i ceny.
+    // potem pozostałe okresowe, następnie wszystkie hybrydowe razem, a na końcu osobna sekcja „Wspierający”;
+    // w obrębie typu wg lokalizacji (wspólne na końcu), nazwy i ceny.
     internal static IQueryable<Package> OrderForPicker(IQueryable<Package> query)
         => query
-            .OrderBy(p => p.BillingMode)
+            .OrderBy(p => p.Name.ToLower().Contains(SupportingNameMarker))
+            .ThenBy(p => p.Name.ToLower().Contains(HybridNameMarker))
+            .ThenBy(p => p.BillingMode)
             .ThenBy(p => p.BillingType)
             .ThenBy(p => p.LocationId == null)
             .ThenBy(p => p.Location != null ? p.Location.Name : null)
@@ -320,6 +326,8 @@ public class PackageService : IPackageService
             IsPubliclyAvailable = package.IsPubliclyAvailable,
             PublicSlug = package.PublicSlug,
             IsActive = package.IsActive,
+            IsSupporting = package.Name.ToLower().Contains(SupportingNameMarker),
+            IsHybrid = package.Name.ToLower().Contains(HybridNameMarker),
             CreatedAt = package.CreatedAt,
             UpdatedAt = package.UpdatedAt,
             CreatedBy = package.CreatedBy
