@@ -32,7 +32,7 @@ public class PackageService : IPackageService
             query = query.Where(p => p.Name.ToLower().Contains(term));
         }
         var total = await query.CountAsync();
-        var items = await query.OrderBy(p => p.Name).ThenBy(p => p.Id).Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
+        var items = await OrderForPicker(query).Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(p => new PackageOptionDto { BillingMode = p.BillingMode, Id = p.Id, Name = p.Name, LocationId = p.LocationId,
                 Price = p.Price, Currency = p.Currency, PackageType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "PeriodBased" : StudioCRM.Application.Common.PackageTypeMapper.FromBillingType(p.BillingType),
                 BillingType = p.BillingMode == StudioCRM.Domain.Enums.PackageBillingMode.PeriodBased ? "" : p.BillingType.ToString(), ParticipantsCount = p.ParticipantsCount, SessionsLimit = p.SessionsLimit, IsActive = p.IsActive }).ToListAsync();
@@ -90,8 +90,7 @@ public class PackageService : IPackageService
         }
 
         if (isActive.HasValue) query = query.Where(p => p.IsActive == isActive);
-        return await query
-            .OrderByDescending(p => p.CreatedAt)
+        return await OrderForPicker(query)
             .Select(p => MapToDto(p))
             .ToListAsync();
     }
@@ -279,6 +278,18 @@ public class PackageService : IPackageService
             })
             .ToListAsync();
     }
+
+    // Lista do wyboru: najpierw pakiety na wejścia wg typu (1:1, 2:1, 3:1, 4:1, grupowe),
+    // potem pakiety okresowe; w obrębie typu wg lokalizacji (wspólne na końcu), nazwy i ceny.
+    internal static IQueryable<Package> OrderForPicker(IQueryable<Package> query)
+        => query
+            .OrderBy(p => p.BillingMode)
+            .ThenBy(p => p.BillingType)
+            .ThenBy(p => p.LocationId == null)
+            .ThenBy(p => p.Location != null ? p.Location.Name : null)
+            .ThenBy(p => p.Name)
+            .ThenBy(p => p.Price)
+            .ThenBy(p => p.Id);
 
     private IQueryable<Package> VisiblePackages()
     {
