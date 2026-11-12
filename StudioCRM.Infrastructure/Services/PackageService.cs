@@ -281,13 +281,18 @@ public class PackageService : IPackageService
 
     private const string SupportingNameMarker = "wspieraj";
     private const string HybridNameMarker = "hybryd";
+    private const string StandardNamePrefix = "pakiet";
 
     // Lista do wyboru: najpierw pakiety na wejścia wg typu (1:1, 2:1, 3:1, 4:1, grupowe),
-    // potem pozostałe okresowe, następnie wszystkie hybrydowe razem, a na końcu osobna sekcja „Wspierający”;
+    // potem pozostałe okresowe, następnie wszystkie hybrydowe razem, osobna sekcja „Wspierający”,
+    // a na samym dole pakiety o niestandardowych nazwach (nie zaczynają się od „Pakiet”);
     // w obrębie typu rosnąco wg liczby wejść (4, 8, 12, …), potem lokalizacji (wspólne na końcu), nazwy i ceny.
     internal static IQueryable<Package> OrderForPicker(IQueryable<Package> query)
         => query
-            .OrderBy(p => p.Name.ToLower().Contains(SupportingNameMarker))
+            .OrderBy(p => !p.Name.ToLower().StartsWith(StandardNamePrefix)
+                && !p.Name.ToLower().Contains(HybridNameMarker)
+                && !p.Name.ToLower().Contains(SupportingNameMarker))
+            .ThenBy(p => p.Name.ToLower().Contains(SupportingNameMarker))
             .ThenBy(p => p.Name.ToLower().Contains(HybridNameMarker))
             .ThenBy(p => p.BillingMode)
             .ThenBy(p => p.BillingType)
