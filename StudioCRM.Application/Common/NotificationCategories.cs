@@ -15,6 +15,7 @@ public static class NotificationCategories
         new NotificationCategoryDto("schedule", "Grafik"),
         new NotificationCategoryDto("invitations", "Zaproszenia"),
         new NotificationCategoryDto("trainers", "Trenerzy"),
+        new NotificationCategoryDto("milestones", "Nagrody"),
         new NotificationCategoryDto(Fallback, "System")
     });
 
@@ -43,6 +44,7 @@ public static class NotificationCategories
         ["TrainerContractNeedsRenewal"] = "trainers",
         ["TrainerContractEndingSoon"] = "trainers",
         ["TrainerSettlementReminder"] = "trainers",
+        ["MilestoneRewardPending"] = "milestones",
         ["LocationLimitExceeded"] = Fallback
     };
 

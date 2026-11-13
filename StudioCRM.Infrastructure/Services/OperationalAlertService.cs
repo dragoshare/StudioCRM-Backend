@@ -13,6 +13,7 @@ public class OperationalAlertService : IOperationalAlertService
     private const int ContractReminderDays = 30;
     private const int ContractRenewalWarningDays = 14;
     private const int AcceptedClientAlertDays = 7;
+    internal const int MilestoneRewardAlertDays = 30;
     private const int SettlementReminderStartDay = 25;
     private const int SettlementReminderCarryOverDays = 5;
     private const string WindowsStudioTimeZone = "Central European Standard Time";
@@ -51,6 +52,7 @@ public class OperationalAlertService : IOperationalAlertService
         alerts.AddRange(await BuildAcceptedClientAlertsAsync(filter, trainerId));
         alerts.AddRange(await BuildTrainerSettlementReminderAlertsAsync(filter));
         alerts.AddRange(await BuildInvitationAlertsAsync(filter, trainerId));
+        alerts.AddRange(await BuildMilestoneRewardAlertsAsync(filter));
 
         if (!string.IsNullOrWhiteSpace(filter.Type))
             alerts = alerts
@@ -895,6 +897,61 @@ public class OperationalAlertService : IOperationalAlertService
 
     private string ClientPaymentsUrl(int clientId) =>
         $"{(_currentUser.IsOwner ? "/owner" : "/trainer")}/clients/{clientId}/payments";
+
+    // Only for the trainer the client is assigned to (also an Owner who has a trainer profile); never organization-wide.
+    // Anti-spam: only milestones reached in the last MilestoneRewardAlertDays and clients that are not Inactive.
+    // Older unclaimed rewards stay on rewards-pending and the client list sort. Claiming the reward resolves the alert.
+    private async Task<List<OperationalAlertDto>> BuildMilestoneRewardAlertsAsync(OperationalAlertFilterDto filter)
+    {
+        if (!_currentUser.UserId.HasValue || (!_currentUser.IsTrainer && !_currentUser.IsOwner))
+            return new List<OperationalAlertDto>();
+        var trainerId = await _context.Trainers.Where(t => t.UserId == _currentUser.UserId.Value)
+            .Select(t => (int?)t.Id).FirstOrDefaultAsync();
+        if (trainerId is null)
+            return new List<OperationalAlertDto>();
+
+        var today = DateTime.UtcNow.Date;
+        var windowStart = today.AddDays(-MilestoneRewardAlertDays);
+        var definitions = await _context.MilestoneDefinitions.AsNoTracking().Where(d => d.IsActive)
+            .OrderBy(d => d.RequiredMonths).ThenBy(d => d.Id)
+            .Select(d => new { d.Id, d.Name, d.RewardName, d.RequiredMonths }).ToListAsync();
+        var alerts = new List<OperationalAlertDto>();
+        foreach (var definition in definitions)
+        {
+            // Reached in (windowStart, today]: start < bound(today) and not start < bound(windowStart).
+            var reachedBy = ClientMilestoneRewards.StartBefore(today, definition.RequiredMonths);
+            var reachedBefore = ClientMilestoneRewards.StartBefore(windowStart, definition.RequiredMonths);
+            var query = _context.Clients.AsNoTracking().Where(c =>
+                c.TrainerId == trainerId.Value && c.Status != "Inactive" &&
+                (c.TrainingStartDate ?? c.CreatedAt) < reachedBy && (c.TrainingStartDate ?? c.CreatedAt) >= reachedBefore &&
+                !_context.ClientMilestones.Any(m => m.ClientId == c.Id && m.MilestoneDefinitionId == definition.Id && m.IsRewardClaimed));
+            if (filter.LocationId.HasValue)
+                query = query.Where(c => c.LocationId == filter.LocationId.Value);
+            var clients = await query.OrderBy(c => c.Id).Take(50)
+                .Select(c => new { c.Id, c.FirstName, c.LastName, c.LocationId, LocationName = c.Location.Name, Start = c.TrainingStartDate ?? c.CreatedAt })
+                .ToListAsync();
+            alerts.AddRange(clients.Select(c =>
+            {
+                var achievedAt = DateTime.SpecifyKind(c.Start.Date.AddMonths(definition.RequiredMonths), DateTimeKind.Utc);
+                var name = $"{c.FirstName} {c.LastName}".Trim();
+                return new OperationalAlertDto
+                {
+                    Type = "MilestoneRewardPending",
+                    Severity = "Info",
+                    Title = "Nagroda do wydania",
+                    Message = $"{name}: {definition.Name} — {definition.RewardName}",
+                    ClientId = c.Id,
+                    ClientName = name,
+                    MilestoneDefinitionId = definition.Id,
+                    LocationId = c.LocationId,
+                    LocationName = c.LocationName,
+                    CreatedAt = achievedAt,
+                    ActionUrl = $"/clients/{c.Id}/workspace"
+                };
+            }));
+        }
+        return alerts;
+    }
 
     private async Task<int?> GetCurrentTrainerIdAsync()
     {

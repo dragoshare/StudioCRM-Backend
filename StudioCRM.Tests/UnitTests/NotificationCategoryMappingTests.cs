@@ -18,4 +18,11 @@ public class NotificationCategoryMappingTests
     {
         Assert.Equal(expectedCategory, NotificationCategories.Resolve(type));
     }
+
+    [Fact]
+    public void MilestoneRewardAlertHasItsOwnCategory()
+    {
+        Assert.Equal("milestones", NotificationCategories.Resolve("MilestoneRewardPending"));
+        Assert.Equal("milestones", NotificationCategories.Normalize("Milestones"));
+    }
 }

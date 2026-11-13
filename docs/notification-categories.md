@@ -11,6 +11,7 @@ Kategorie są wyliczane z typu także dla historycznych powiadomień; nie ma mig
 | schedule | Grafik | SessionNotSyncedToOutlook, SessionNotSettled |
 | invitations | Zaproszenia | InvitationPending, InvitationExpired, ClientInvitationAccepted |
 | trainers | Trenerzy | TrainerContractEndingSoon, TrainerContractNeedsRenewal, TrainerSettlementReminder |
+| milestones | Nagrody | MilestoneRewardPending (od 2026-11-13, patrz `FRONT-powiadomienia-nagrody-milestone.md`) |
 | system | System | LocationLimitExceeded oraz nieznane typy |
 
 Każde powiadomienie należy do jednej kategorii. Wezwanie do opłacenia zakończonego
@@ -55,6 +56,7 @@ Przykładowa odpowiedź:
     "schedule": 0,
     "invitations": 1,
     "trainers": 0,
+    "milestones": 0,
     "system": 1
   }
 }

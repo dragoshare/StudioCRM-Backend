@@ -315,6 +315,8 @@ public class NotificationService : INotificationService
         var relatedKey = relatedEntityId.HasValue
             ? $"{relatedEntityType}:{relatedEntityId.Value}"
             : $"{alert.Year}:{alert.Month}:{alert.LocationId}:{alert.Title}:{alert.Message}";
+        if (alert.MilestoneDefinitionId.HasValue)
+            relatedKey += $":milestone:{alert.MilestoneDefinitionId.Value}";
 
         var sourceKey = $"operational:{alert.Type}:{relatedKey}";
         if (sourceKey.Length <= 280)

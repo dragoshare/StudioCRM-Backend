@@ -25,6 +25,8 @@ public class OperationalAlertDto
     public int? InvitationId { get; set; }
     public int? TrainerContractId { get; set; }
     public int? SettlementId { get; set; }
+    // MilestoneRewardPending: one alert (and notification) per client and milestone.
+    public int? MilestoneDefinitionId { get; set; }
     public int? Year { get; set; }
     public int? Month { get; set; }
     public int? LocationId { get; set; }
