@@ -21,9 +21,16 @@ public static class OutlookTrainerCategoryResolver
     public static async Task<(Trainer? Trainer, string? Warning)> ResolveAsync(
         StudioCRMDbContext context, string? categoriesJson, int locationId)
     {
+        List<string> names;
+        try { names = JsonSerializer.Deserialize<List<string>>(categoriesJson ?? "[]") ?? new(); }
+        catch (JsonException) { return Resolve(categoriesJson, locationId, Array.Empty<Trainer>()); }
+        var lowered = names.Where(c => !string.IsNullOrWhiteSpace(c)).Select(c => c.Trim().ToLower()).Distinct().ToList();
+        // Only trainers named by the event's categories (usually none or one), not every trainer with their account.
+        if (lowered.Count == 0) return (null, null);
         var trainers = await context.Trainers.Include(t => t.User)
             .Include(t => t.TrainerLocations)
-            .Where(t => t.OutlookCategoryName != null).ToListAsync();
+            .Where(t => t.OutlookCategoryName != null && lowered.Contains(t.OutlookCategoryName.Trim().ToLower()))
+            .ToListAsync();
         return Resolve(categoriesJson, locationId, trainers);
     }
 

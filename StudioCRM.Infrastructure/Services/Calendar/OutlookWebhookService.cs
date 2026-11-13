@@ -412,6 +412,29 @@ public partial class OutlookWebhookService : IOutlookWebhookService
                 x.CalendarIntegrationId == integration.Id &&
                 x.ExternalEventId == externalEventId);
 
+        var attendeesJson = JsonSerializer.Serialize(attendeeEmails);
+        var categoriesJson = JsonSerializer.Serialize(categories);
+        var categoryColorsJson = JsonSerializer.Serialize(categoryColors);
+
+        // Reconcile and repeated webhooks deliver mostly unchanged events. Re-writing them (and re-applying them to
+        // the linked session under locks) was the dominant database traffic, so an unchanged event is skipped.
+        var unchanged = existing is not null &&
+            existing.Subject == subjectValue &&
+            existing.BodyPreview == bodyPreviewValue &&
+            existing.LocationName == locationNameValue &&
+            existing.LocationEmail == resolvedLocationEmail &&
+            existing.OrganizerEmail == organizerEmailValue &&
+            existing.StartAt == startAtValue &&
+            existing.EndAt == endAtValue &&
+            existing.AttendeesJson == attendeesJson &&
+            existing.CategoriesJson == categoriesJson &&
+            existing.CategoryColorsJson == categoryColorsJson &&
+            existing.SeriesMasterId == seriesMasterId &&
+            existing.IsRecurring == isRecurring;
+
+        if (unchanged && existing!.SessionId != null && !await LinkedSessionNeedsOutlookUpdateAsync(existing))
+            return;
+
         if (existing is null)
         {
             existing = new ExternalCalendarEvent
@@ -426,25 +449,29 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         }
 
         var previousAttendeesJson = existing.AttendeesJson;
-        existing.Subject = subjectValue;
-        existing.BodyPreview = bodyPreviewValue;
-        existing.LocationName = locationNameValue;
-        existing.LocationEmail = resolvedLocationEmail;
-        existing.OrganizerEmail = organizerEmailValue;
-        existing.StartAt = startAtValue;
-        existing.EndAt = endAtValue;
-        existing.AttendeesJson = JsonSerializer.Serialize(attendeeEmails);
-        existing.CategoriesJson = JsonSerializer.Serialize(categories);
-        existing.CategoryColorsJson = JsonSerializer.Serialize(categoryColors);
-        existing.SeriesMasterId = seriesMasterId;
-        existing.IsRecurring = isRecurring;
-        existing.ImportedAt = DateTime.UtcNow;
         // The session this event was converted into (or attached to, at the same time) was deleted in CRM: the
         // foreign key cleared SessionId but not the flag, which kept the event out of the import for good.
-        if (existing.SessionId == null && existing.IsConvertedToSession)
-            existing.IsConvertedToSession = false;
+        var clearConvertedFlag = existing.SessionId == null && existing.IsConvertedToSession;
+        if (!unchanged || clearConvertedFlag)
+        {
+            existing.Subject = subjectValue;
+            existing.BodyPreview = bodyPreviewValue;
+            existing.LocationName = locationNameValue;
+            existing.LocationEmail = resolvedLocationEmail;
+            existing.OrganizerEmail = organizerEmailValue;
+            existing.StartAt = startAtValue;
+            existing.EndAt = endAtValue;
+            existing.AttendeesJson = attendeesJson;
+            existing.CategoriesJson = categoriesJson;
+            existing.CategoryColorsJson = categoryColorsJson;
+            existing.SeriesMasterId = seriesMasterId;
+            existing.IsRecurring = isRecurring;
+            existing.ImportedAt = DateTime.UtcNow;
+            if (clearConvertedFlag)
+                existing.IsConvertedToSession = false;
 
-        await _context.SaveChangesAsync();
+            await _context.SaveChangesAsync();
+        }
 
         if (existing.SessionId != null)
         {
@@ -521,6 +548,66 @@ public partial class OutlookWebhookService : IOutlookWebhookService
             .Distinct()
             .ToList();
     }
+
+    // For an Outlook event identical to the stored one: re-applying it to the session changes nothing unless the
+    // session does not reflect it yet (an earlier apply failed) or an attendee became a CRM client in the meantime.
+    private async Task<bool> LinkedSessionNeedsOutlookUpdateAsync(ExternalCalendarEvent evt)
+    {
+        var session = await _context.Sessions
+            .Where(s => s.Id == evt.SessionId)
+            .Select(s => new
+            {
+                s.Status,
+                s.StartAt,
+                s.EndAt,
+                s.OutlookCategoriesJson,
+                s.IsPubliclyBookable,
+                s.PlannedSessionType,
+                ParticipantEmails = s.Participants.Select(p => new { p.Client.Email, p.Client.CalendarEmail }).ToList()
+            })
+            .FirstOrDefaultAsync();
+
+        if (session == null || session.Status != "Planned")
+            return false;
+        if (session.StartAt != evt.StartAt || session.EndAt != evt.EndAt || session.OutlookCategoriesJson != evt.CategoriesJson)
+            return true;
+        if (session.IsPubliclyBookable || ConsultationSessions.IsConsultation(session.PlannedSessionType))
+            return false;
+
+        var known = session.ParticipantEmails
+            .SelectMany(p => new[] { p.Email, p.CalendarEmail })
+            .Where(e => !string.IsNullOrWhiteSpace(e))
+            .Select(e => e!.Trim().ToLowerInvariant())
+            .ToHashSet();
+        var locationEmails = (await ActiveLocationsAsync())
+            .Where(l => l.CalendarEmail != null)
+            .Select(l => l.CalendarEmail!.Trim().ToLowerInvariant())
+            .ToHashSet();
+        var organizer = (evt.OrganizerEmail ?? string.Empty).Trim().ToLowerInvariant();
+        var unmatched = ReadAttendeeEmailsFromJson(evt.AttendeesJson)
+            .Select(e => e.Trim().ToLowerInvariant())
+            .Where(e => e.Length > 0 && e != organizer && !locationEmails.Contains(e) && !known.Contains(e))
+            .Distinct()
+            .ToList();
+        if (unmatched.Count == 0)
+            return false;
+
+        return await _context.Clients.AnyAsync(c => !c.IsDeleted &&
+            (unmatched.Contains(c.Email.ToLower()) ||
+             (c.CalendarEmail != null && unmatched.Contains(c.CalendarEmail.ToLower()))));
+    }
+
+    private sealed record LocationRef(string Name, string? CalendarEmail);
+
+    // Active locations, read once per service scope (one webhook batch or one reconcile job) instead of per event.
+    private List<LocationRef>? _activeLocations;
+
+    private async Task<List<LocationRef>> ActiveLocationsAsync() =>
+        _activeLocations ??= await _context.Locations
+            .Where(l => l.IsActive)
+            .OrderBy(l => l.Id)
+            .Select(l => new LocationRef(l.Name, l.CalendarEmail))
+            .ToListAsync();
 
     private async Task UpdateSessionFromOutlookAsync(
         CalendarIntegration integration,
@@ -797,17 +884,14 @@ public partial class OutlookWebhookService : IOutlookWebhookService
             .Trim()
             .ToLowerInvariant();
 
-        return await _context.Locations
-            .AnyAsync(l =>
-                l.IsActive &&
-                (
-                    (!string.IsNullOrWhiteSpace(normalizedLocationEmail) &&
-                     l.CalendarEmail != null &&
-                     l.CalendarEmail.ToLower() == normalizedLocationEmail)
-                    ||
-                    (!string.IsNullOrWhiteSpace(normalizedLocationName) &&
-                     normalizedLocationName.Contains(l.Name.ToLower()))
-                ));
+        return (await ActiveLocationsAsync())
+            .Any(l =>
+                (!string.IsNullOrWhiteSpace(normalizedLocationEmail) &&
+                 l.CalendarEmail != null &&
+                 l.CalendarEmail.ToLowerInvariant() == normalizedLocationEmail)
+                ||
+                (!string.IsNullOrWhiteSpace(normalizedLocationName) &&
+                 normalizedLocationName.Contains(l.Name.ToLowerInvariant())));
     }
 
     // The only write from the Outlook -> CRM direction. Every event update e-mails the attendees, so it runs only
@@ -857,26 +941,23 @@ public partial class OutlookWebhookService : IOutlookWebhookService
         string? locationName,
         string? locationEmailFromGraph)
     {
+        var locations = await ActiveLocationsAsync();
+
         if (!string.IsNullOrWhiteSpace(locationEmailFromGraph))
         {
             var normalizedGraphLocationEmail = locationEmailFromGraph.Trim().ToLowerInvariant();
 
-            var exists = await _context.Locations.AnyAsync(l =>
-                l.IsActive &&
+            var exists = locations.Any(l =>
                 l.CalendarEmail != null &&
-                l.CalendarEmail.ToLower() == normalizedGraphLocationEmail);
+                l.CalendarEmail.ToLowerInvariant() == normalizedGraphLocationEmail);
 
             if (exists)
                 return normalizedGraphLocationEmail;
         }
 
-        var locationEmails = await _context.Locations
-            .Where(l => l.IsActive && l.CalendarEmail != null)
-            .Select(l => l.CalendarEmail!)
-            .ToListAsync();
-
-        var normalizedLocationEmails = locationEmails
-            .Select(x => x.Trim().ToLowerInvariant())
+        var normalizedLocationEmails = locations
+            .Where(l => l.CalendarEmail != null)
+            .Select(l => l.CalendarEmail!.Trim().ToLowerInvariant())
             .ToList();
 
         var locationFromAttendees = attendeeEmails
@@ -891,13 +972,10 @@ public partial class OutlookWebhookService : IOutlookWebhookService
 
         var normalizedLocationName = locationName.Trim().ToLowerInvariant();
 
-        var location = await _context.Locations
-            .FirstOrDefaultAsync(l =>
-                l.IsActive &&
-                (
-                    normalizedLocationName.Contains(l.Name.ToLower()) ||
-                    l.Name.ToLower().Contains(normalizedLocationName)
-                ));
+        var location = locations
+            .FirstOrDefault(l =>
+                normalizedLocationName.Contains(l.Name.ToLowerInvariant()) ||
+                l.Name.ToLowerInvariant().Contains(normalizedLocationName));
 
         return location?.CalendarEmail;
     }
