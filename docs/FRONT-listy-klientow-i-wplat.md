@@ -29,6 +29,7 @@ Role: Owner, Trainer. Zwraca **wyłącznie klientów przypisanych do profilu tre
 | `locationId` | int | — | główna lokalizacja klienta (`locationId` w wierszu) |
 | `status` | `New`, `Active`, `Inactive` | — | dokładne dopasowanie (wielkość liter ma znaczenie), max 30 znaków; nieznana wartość daje pustą listę |
 | `hasActivePackage` | `true` / `false` | — (wszyscy) | **nowy**; `true` = klient ma co najmniej jeden aktywny, niezamknięty pakiet (dokładnie te, które trafiają do `activePackages`, także okresowy i grupowy); `false` = `activePackages` jest puste |
+| `hasAmountDue` | `true` / `false` | — (wszyscy) | `true` = tylko klienci z `totalAmountDue > 0`; `false` lub brak = bez filtra (2026-11-13) |
 | `sort` | patrz niżej | `name` | nieznana wartość: 400 |
 
 `status=Active` to nie to samo co `hasActivePackage=true`: `Client.Status` jest zapisanym stanem klienta, a `hasActivePackage` liczy się z bieżących pakietów. Do filtrów „z aktywnym pakietem / bez aktywnego pakietu” używaj `hasActivePackage`.
@@ -47,6 +48,8 @@ Każde sortowanie ma dogrywkę po `clientId`, więc stronicowanie jest stabilne.
 | `balanceDesc` | `currentBalance` malejąco (najpierw nadpłaty), `clientId` |
 | `packageUsage` | wykorzystanie rosnąco, `clientId` |
 | `packageUsageDesc` | wykorzystanie malejąco, `clientId` |
+| `amountDue` | `totalAmountDue` rosnąco, `clientId` (2026-11-13) |
+| `amountDueDesc` | `totalAmountDue` malejąco (najpierw największy dług), `clientId` malejąco (2026-11-13) |
 
 - `currentBalance` jest liczone tak samo jak w polu wiersza: suma transakcji salda bez `PaymentCredit` i `PaymentReversal`. Dodatnie = kredyt klienta, ujemne = dopłata.
 - Wykorzystanie = `activePackageUsedSessions / activePackageTotalSessions`, czyli pakiet osobisty lub semi pokazywany w płaskich polach `activePackage*`. Klienci bez takiego pakietu (brak pakietu, tylko okresowy albo tylko grupowy) są **na końcu w obu kierunkach**. Pakiet z `totalSessions = 0` ma wykorzystanie 0.

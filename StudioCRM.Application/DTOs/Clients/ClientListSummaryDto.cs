@@ -19,6 +19,11 @@ public class ClientListSummaryDto
 
     public decimal CurrentBalance { get; set; }
 
+    // Same value as ClientBillingSummaryDto.TotalAmountDue: unpaid part of all the client's packages.
+    public decimal TotalAmountDue { get; set; }
+
+    public string AmountDueCurrency { get; set; } = "PLN";
+
     public List<ClientListPackageDto> ActivePackages { get; set; } = new();
 }
 

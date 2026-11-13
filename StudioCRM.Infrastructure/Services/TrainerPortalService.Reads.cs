@@ -43,6 +43,7 @@ public partial class TrainerPortalService
             query = query.Where(c => (c.FirstName + " " + c.LastName).ToLower().Contains(term) || c.Email.ToLower().Contains(term));
         }
         if (filter.HasActivePackage.HasValue) query = WhereHasActivePackage(_context, query, filter.HasActivePackage.Value);
+        if (filter.HasAmountDue == true) query = WhereHasAmountDue(_context, query);
         var count = await query.CountAsync();
         var ordered = OrderPortalClients(_context, query, filter.Sort);
         var items = await ordered.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
@@ -99,7 +100,11 @@ public partial class TrainerPortalService
     internal static IQueryable<Client> WhereHasActivePackage(StudioCRMDbContext db, IQueryable<Client> query, bool hasActive) =>
         query.Where(c => db.ClientPackages.Any(p => p.ClientId == c.Id && p.IsActive && p.ClosureDisposition == null) == hasActive);
 
-    // Balance and usage mirror ClientListSummaryReader: settlement balance without payment credit/reversal,
+    // Same set as ClientListSummaryReader TotalAmountDue > 0.
+    internal static IQueryable<Client> WhereHasAmountDue(StudioCRMDbContext db, IQueryable<Client> query) =>
+        query.Where(c => db.ClientPackages.Any(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid));
+
+    // Balance, usage and amount due mirror ClientListSummaryReader: settlement balance without payment credit/reversal,
     // and UsedSessions/TotalSessions of the personal/semi package shown in the flat ActivePackage* fields.
     internal static IOrderedQueryable<Client> OrderPortalClients(StudioCRMDbContext db, IQueryable<Client> query, string sort)
     {
@@ -114,6 +119,10 @@ public partial class TrainerPortalService
             .OrderByDescending(p => p.ActivatedAt ?? p.PurchaseDate).ThenByDescending(p => p.Id)
             .Select(p => (decimal?)(p.TotalSessions > 0 ? (decimal)p.UsedSessions / p.TotalSessions : 0m))
             .FirstOrDefault();
+        // Amount due = sum of max(0, TotalPrice - AmountPaid) over all the client's packages (TotalAmountDue).
+        Expression<Func<Client, decimal>> amountDue = c => db.ClientPackages
+            .Where(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid)
+            .Sum(p => p.TotalPrice - p.AmountPaid);
         return sort switch
         {
             "nameDesc" => query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName).ThenBy(c => c.Id),
@@ -124,6 +133,8 @@ public partial class TrainerPortalService
             // Clients without a personal/semi package go last in both directions.
             "packageUsage" => query.OrderByDescending(hasPersonal).ThenBy(usage).ThenBy(c => c.Id),
             "packageUsageDesc" => query.OrderByDescending(hasPersonal).ThenByDescending(usage).ThenBy(c => c.Id),
+            "amountDue" => query.OrderBy(amountDue).ThenBy(c => c.Id),
+            "amountDueDesc" => query.OrderByDescending(amountDue).ThenByDescending(c => c.Id),
             _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id)
         };
     }

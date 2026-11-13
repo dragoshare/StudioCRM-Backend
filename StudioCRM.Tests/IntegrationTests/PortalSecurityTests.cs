@@ -107,6 +107,36 @@ public class PortalSecurityTests
     }
 
     [PostgresFact]
+    public async Task TrainerAmountDueSortAndFilterNeverIncludeOtherTrainersClients()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Shared", City = "Test" };
+        var trainer = new Trainer { User = new User { Email = "due-own@test.invalid" } };
+        var other = new Trainer { User = new User { Email = "due-other@test.invalid" } };
+        var own = new Client { FirstName = "Own", LastName = "Debtor", Trainer = trainer, Location = location };
+        var foreign = new Client { FirstName = "Foreign", LastName = "Debtor", Trainer = other, Location = location };
+        var unassigned = new Client { FirstName = "Nobody", LastName = "Debtor", Location = location };
+        db.AddRange(
+            new ClientPackage { Client = own, Package = new Package { Name = "P" }, Name = "P", TotalSessions = 4, TotalPrice = 100 },
+            new ClientPackage { Client = foreign, Package = new Package { Name = "P" }, Name = "P", TotalSessions = 4, TotalPrice = 9000 },
+            new ClientPackage { Client = unassigned, Package = new Package { Name = "P" }, Name = "P", TotalSessions = 4, TotalPrice = 8000 });
+        await db.SaveChangesAsync();
+        var user = new Actor(trainer.UserId);
+        var portal = new TrainerPortalService(db, user, new ClientService(db, user, null!, null!), null!, null!);
+
+        foreach (var filter in new[] { new PortalPageFilter { Sort = "amountDueDesc" }, new PortalPageFilter { HasAmountDue = true } })
+        {
+            var page = await portal.GetClientsPageAsync(filter);
+            Assert.Equal(1, page.TotalCount);
+            var row = Assert.Single(page.Items);
+            Assert.Equal((own.Id, 100m), (row.ClientId, row.TotalAmountDue));
+        }
+        var stranger = new TrainerPortalService(db, new Actor(int.MaxValue), null!, null!, null!);
+        Assert.Empty((await stranger.GetClientsPageAsync(new PortalPageFilter { HasAmountDue = true })).Items);
+    }
+
+    [PostgresFact]
     public async Task BillingSummaryMatchesLegacyTotalsAndPendingPaymentsAreScoped()
     {
         await using var database = await TestDatabase.CreateAsync();

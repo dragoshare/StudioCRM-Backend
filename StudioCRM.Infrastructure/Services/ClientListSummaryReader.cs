@@ -31,9 +31,20 @@ internal static class ClientListSummaryReader
             .Where(t => ids.Contains(t.ClientId) && t.Type != BalanceTransactionType.PaymentCredit && t.Type != BalanceTransactionType.PaymentReversal)
             .GroupBy(t => t.ClientId).Select(g => new { Id = g.Key, Balance = g.Sum(t => t.Amount) })
             .ToDictionaryAsync(x => x.Id, x => x.Balance);
+        // Same definition as ClientBillingSummaryDto.TotalAmountDue and the amountDue sort.
+        var due = await db.ClientPackages.AsNoTracking()
+            .Where(p => ids.Contains(p.ClientId) && p.TotalPrice > p.AmountPaid)
+            .GroupBy(p => p.ClientId)
+            .Select(g => new { ClientId = g.Key, Amount = g.Sum(p => p.TotalPrice - p.AmountPaid), Currency = g.Max(p => p.Currency) })
+            .ToDictionaryAsync(x => x.ClientId);
         foreach (var (id, summary) in clients)
         {
             summary.CurrentBalance = balances.GetValueOrDefault(id);
+            if (due.TryGetValue(id, out var owed))
+            {
+                summary.TotalAmountDue = owed.Amount;
+                summary.AmountDueCurrency = owed.Currency ?? "PLN";
+            }
             summary.ActivePackages = new();
             foreach (var package in byClient[id])
             {

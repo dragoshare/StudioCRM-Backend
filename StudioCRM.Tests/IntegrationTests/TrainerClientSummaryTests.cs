@@ -59,6 +59,43 @@ public class TrainerClientSummaryTests
     }
 
     [PostgresFact]
+    public async Task PageShowsOwnerAmountDueAndSortsAndFiltersByIt()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Studio" };
+        var trainer = new Trainer { User = new User { Email = "due-trainer@test.invalid" } };
+        var big = new Client { FirstName = "A", LastName = "Big", Trainer = trainer, Location = location };
+        var small = new Client { FirstName = "B", LastName = "Small", Trainer = trainer, Location = location };
+        var paid = new Client { FirstName = "C", LastName = "Paid", Trainer = trainer, Location = location };
+        ClientPackage Bought(Client client, decimal total, decimal amountPaid, bool active = true) => new()
+        {
+            Client = client, Package = new Package { Name = "P" }, Name = "P", TotalSessions = 4,
+            TotalPrice = total, AmountPaid = amountPaid, IsActive = active, Location = location
+        };
+        // Overpaid packages do not offset debts; closed (inactive) packages still count, as on the Owner list.
+        db.AddRange(Bought(big, 500, 100), Bought(big, 300, 0, active: false), Bought(small, 200, 150),
+            Bought(small, 100, 160, active: false), Bought(paid, 400, 400));
+        await db.SaveChangesAsync();
+        var actor = new PortalSecurityTests.Actor(trainer.UserId);
+        var portal = new TrainerPortalService(db, actor, new ClientService(db, actor, null!, null!), null!, null!);
+
+        var asc = await portal.GetClientsPageAsync(new PortalPageFilter { Sort = "amountDue" });
+        Assert.Equal([paid.Id, small.Id, big.Id], asc.Items.Select(c => c.ClientId));
+        Assert.Equal([0m, 50m, 700m], asc.Items.Select(c => c.TotalAmountDue));
+        Assert.All(asc.Items, c => Assert.Equal("PLN", c.AmountDueCurrency));
+        var desc = await portal.GetClientsPageAsync(new PortalPageFilter { Sort = "amountDueDesc", PageSize = 1 });
+        Assert.Equal(3, desc.TotalCount); Assert.Equal(big.Id, Assert.Single(desc.Items).ClientId);
+        var due = await portal.GetClientsPageAsync(new PortalPageFilter { HasAmountDue = true });
+        Assert.Equal([big.Id, small.Id], due.Items.Select(c => c.ClientId));
+
+        var owner = await new ClientService(db, new PortalSecurityTests.Actor(999, "Owner"), null!, null!)
+            .GetPageAsync(new() { Sort = "amountDue", PageSize = 10 });
+        Assert.Equal(owner.Items.Select(c => (c.Id, c.TotalAmountDue)), asc.Items.Select(c => (c.ClientId, c.TotalAmountDue)));
+        Assert.Throws<System.ComponentModel.DataAnnotations.ValidationException>(() => new PortalPageFilter { Sort = "trainer" }.Validate());
+    }
+
+    [PostgresFact]
     public async Task TrainerCreatesClientRecordAssignedToThemselvesOnlyAtOwnLocation()
     {
         await using var database = await TestDatabase.CreateAsync();

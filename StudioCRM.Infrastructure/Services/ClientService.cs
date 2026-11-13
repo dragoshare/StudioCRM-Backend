@@ -656,23 +656,10 @@ public partial class ClientService : IClientService
         return query.Where(c => false);
     }
 
+    // TotalAmountDue/AmountDueCurrency come from the shared reader (also used by the trainer portal list).
     private async Task<List<ClientDto>> EnrichClientListSummariesAsync(List<ClientDto> clients)
     {
         await ClientListSummaryReader.EnrichAsync(_context, clients.Select(c => (c.Id, (ClientListSummaryDto)c)).ToList());
-        if (clients.Count == 0) return clients;
-        // One grouped query for the page; same definition as ClientBillingSummaryDto.TotalAmountDue.
-        var ids = clients.Select(c => c.Id).Distinct().ToArray();
-        var due = await _context.ClientPackages.AsNoTracking()
-            .Where(p => ids.Contains(p.ClientId) && p.TotalPrice > p.AmountPaid)
-            .GroupBy(p => p.ClientId)
-            .Select(g => new { ClientId = g.Key, Amount = g.Sum(p => p.TotalPrice - p.AmountPaid), Currency = g.Max(p => p.Currency) })
-            .ToDictionaryAsync(x => x.ClientId);
-        foreach (var client in clients)
-        {
-            if (!due.TryGetValue(client.Id, out var row)) continue;
-            client.TotalAmountDue = row.Amount;
-            client.AmountDueCurrency = row.Currency ?? "PLN";
-        }
         return clients;
     }
 
