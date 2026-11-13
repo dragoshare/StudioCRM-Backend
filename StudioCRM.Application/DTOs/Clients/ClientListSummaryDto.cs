@@ -24,6 +24,13 @@ public class ClientListSummaryDto
 
     public string AmountDueCurrency { get; set; } = "PLN";
 
+    // Milestone rewards, computed from active definitions and tenure on every read (see ClientMilestoneRewards).
+    public int MilestonesAchieved { get; set; }
+
+    public int MilestoneRewardsClaimed { get; set; }
+
+    public int MilestoneRewardsPending { get; set; }
+
     public List<ClientListPackageDto> ActivePackages { get; set; } = new();
 }
 

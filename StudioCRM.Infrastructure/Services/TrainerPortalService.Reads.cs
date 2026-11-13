@@ -44,8 +44,11 @@ public partial class TrainerPortalService
         }
         if (filter.HasActivePackage.HasValue) query = WhereHasActivePackage(_context, query, filter.HasActivePackage.Value);
         if (filter.HasAmountDue == true) query = WhereHasAmountDue(_context, query);
+        var milestones = filter.HasPendingReward == true || filter.Sort.StartsWith("rewards")
+            ? await ClientMilestoneRewards.LoadThresholdsAsync(_context) : null;
+        if (filter.HasPendingReward == true) query = ClientMilestoneRewards.WhereHasPending(_context, query, milestones!);
         var count = await query.CountAsync();
-        var ordered = OrderPortalClients(_context, query, filter.Sort);
+        var ordered = OrderPortalClients(_context, query, filter.Sort, milestones);
         var items = await ordered.Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(c => new TrainerPortalClientDto
             {
@@ -106,7 +109,9 @@ public partial class TrainerPortalService
 
     // Balance, usage and amount due mirror ClientListSummaryReader: settlement balance without payment credit/reversal,
     // and UsedSessions/TotalSessions of the personal/semi package shown in the flat ActivePackage* fields.
-    internal static IOrderedQueryable<Client> OrderPortalClients(StudioCRMDbContext db, IQueryable<Client> query, string sort)
+    // Milestone sorts need the active definitions as thresholds (ClientMilestoneRewards.LoadThresholdsAsync).
+    internal static IOrderedQueryable<Client> OrderPortalClients(StudioCRMDbContext db, IQueryable<Client> query, string sort,
+        IReadOnlyList<MilestoneThreshold>? milestones = null)
     {
         Expression<Func<Client, decimal>> balance = c => db.ClientBalanceTransactions
             .Where(t => t.ClientId == c.Id && t.Type != BalanceTransactionType.PaymentCredit && t.Type != BalanceTransactionType.PaymentReversal)
@@ -123,6 +128,9 @@ public partial class TrainerPortalService
         Expression<Func<Client, decimal>> amountDue = c => db.ClientPackages
             .Where(p => p.ClientId == c.Id && p.TotalPrice > p.AmountPaid)
             .Sum(p => p.TotalPrice - p.AmountPaid);
+        var thresholds = milestones ?? [];
+        var pending = ClientMilestoneRewards.Pending(db, thresholds);
+        var claimed = ClientMilestoneRewards.Claimed(db);
         return sort switch
         {
             "nameDesc" => query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName).ThenBy(c => c.Id),
@@ -135,6 +143,11 @@ public partial class TrainerPortalService
             "packageUsageDesc" => query.OrderByDescending(hasPersonal).ThenByDescending(usage).ThenBy(c => c.Id),
             "amountDue" => query.OrderBy(amountDue).ThenBy(c => c.Id),
             "amountDueDesc" => query.OrderByDescending(amountDue).ThenByDescending(c => c.Id),
+            // Ties on pending: longer tenure first (it has waited longer for its milestones).
+            "rewardsPending" => query.OrderBy(pending).ThenByDescending(c => c.TrainingStartDate ?? c.CreatedAt).ThenBy(c => c.Id),
+            "rewardsPendingDesc" => query.OrderByDescending(pending).ThenBy(c => c.TrainingStartDate ?? c.CreatedAt).ThenBy(c => c.Id),
+            "rewardsClaimed" => query.OrderBy(claimed).ThenBy(pending).ThenBy(c => c.Id),
+            "rewardsClaimedDesc" => query.OrderByDescending(claimed).ThenByDescending(pending).ThenBy(c => c.Id),
             _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id)
         };
     }

@@ -37,9 +37,12 @@ internal static class ClientListSummaryReader
             .GroupBy(p => p.ClientId)
             .Select(g => new { ClientId = g.Key, Amount = g.Sum(p => p.TotalPrice - p.AmountPaid), Currency = g.Max(p => p.Currency) })
             .ToDictionaryAsync(x => x.ClientId);
+        var rewards = await ClientMilestoneRewards.ReadAsync(db, ids);
         foreach (var (id, summary) in clients)
         {
             summary.CurrentBalance = balances.GetValueOrDefault(id);
+            if (rewards.TryGetValue(id, out var reward))
+                (summary.MilestonesAchieved, summary.MilestoneRewardsClaimed, summary.MilestoneRewardsPending) = reward;
             if (due.TryGetValue(id, out var owed))
             {
                 summary.TotalAmountDue = owed.Amount;

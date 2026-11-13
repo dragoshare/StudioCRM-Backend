@@ -26,12 +26,17 @@ public partial class ClientService
             query = TrainerPortalService.WhereHasActivePackage(_context, query, filter.PackageStatus == "active");
         if (filter.HasAmountDue == true)
             query = TrainerPortalService.WhereHasAmountDue(_context, query);
+        var sort = filter.ResolveSort();
+        var milestones = filter.HasPendingReward == true || sort.StartsWith("rewards")
+            ? await ClientMilestoneRewards.LoadThresholdsAsync(_context) : null;
+        if (filter.HasPendingReward == true)
+            query = ClientMilestoneRewards.WhereHasPending(_context, query, milestones!);
 
         var totalCount = await query.CountAsync();
         var activeCount = await query.CountAsync(c => c.Status == "Active");
         var withPackageCount = await TrainerPortalService.WhereHasActivePackage(_context, query, true).CountAsync();
 
-        var ids = await OrderClientPage(_context, query, filter.ResolveSort())
+        var ids = await OrderClientPage(_context, query, sort, milestones)
             .Skip((filter.Page - 1) * filter.PageSize).Take(filter.PageSize)
             .Select(c => c.Id).ToListAsync();
         var rows = await BuildClientQuery(includeArchived: filter.IsArchived).Where(c => ids.Contains(c.Id)).ToListAsync();
@@ -54,7 +59,8 @@ public partial class ClientService
     }
 
     // Balance, packageUsage and amountDue reuse the trainer portal definitions; every sort ends with Id for stable paging.
-    internal static IOrderedQueryable<Client> OrderClientPage(StudioCRMDbContext db, IQueryable<Client> query, string sort) => sort switch
+    internal static IOrderedQueryable<Client> OrderClientPage(StudioCRMDbContext db, IQueryable<Client> query, string sort,
+        IReadOnlyList<MilestoneThreshold>? milestones = null) => sort switch
     {
         "trainer" => query.OrderBy(c => c.TrainerId == null)
             .ThenBy(c => c.Trainer!.User.LastName).ThenBy(c => c.Trainer!.User.FirstName)
@@ -65,7 +71,7 @@ public partial class ClientService
         "archivedAt" => query.OrderBy(c => c.DeletedAt == null).ThenBy(c => c.DeletedAt).ThenBy(c => c.Id),
         "archivedAtDesc" => query.OrderBy(c => c.DeletedAt == null).ThenByDescending(c => c.DeletedAt).ThenByDescending(c => c.Id),
         "name" => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName).ThenBy(c => c.Id),
-        _ => TrainerPortalService.OrderPortalClients(db, query, sort)
+        _ => TrainerPortalService.OrderPortalClients(db, query, sort, milestones)
     };
 
     // Name/email contain the term; with 3+ digits the term also matches the phone number with separators

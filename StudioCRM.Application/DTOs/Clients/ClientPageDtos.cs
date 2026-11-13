@@ -5,7 +5,7 @@ namespace StudioCRM.Application.DTOs.Clients;
 // Paged mode of GET /api/clients (enabled when page or pageSize is sent).
 public class ClientPageFilter
 {
-    public const string SortValues = "createdDesc|created|name|nameDesc|balance|balanceDesc|packageUsage|packageUsageDesc|trainer|trainerDesc|archivedAt|archivedAtDesc|amountDue|amountDueDesc";
+    public const string SortValues = "createdDesc|created|name|nameDesc|balance|balanceDesc|packageUsage|packageUsageDesc|trainer|trainerDesc|archivedAt|archivedAtDesc|amountDue|amountDueDesc|rewardsPending|rewardsPendingDesc|rewardsClaimed|rewardsClaimedDesc";
     public const string PackageStatusValues = "active|none";
 
     // Name or email (case-insensitive); with 3+ digits also the phone number, see NormalizePhoneSearch.
@@ -23,6 +23,8 @@ public class ClientPageFilter
     public string? PackageStatus { get; set; }
     // true: only clients with TotalAmountDue > 0; false or missing: no filter.
     public bool? HasAmountDue { get; set; }
+    // true: only clients with MilestoneRewardsPending > 0; false or missing: no filter.
+    public bool? HasPendingReward { get; set; }
     [RegularExpression("^(" + SortValues + ")$")]
     public string? Sort { get; set; }
     [RegularExpression("^(asc|desc)$")]

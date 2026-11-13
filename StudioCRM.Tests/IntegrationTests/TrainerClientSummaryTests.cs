@@ -96,6 +96,59 @@ public class TrainerClientSummaryTests
     }
 
     [PostgresFact]
+    public async Task MilestoneRewardsAreCountedFromTenureIncludingDefinitionsAddedLater()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var now = DateTime.UtcNow;
+        var location = new Location { Name = "Studio" };
+        var trainer = new Trainer { User = new User { Email = "rewards-trainer@test.invalid" } };
+        Client Member(string name, DateTime start) =>
+            new() { FirstName = name, LastName = name, Trainer = trainer, Location = location, TrainingStartDate = start };
+        var veteran = Member("Veteran", now.AddMonths(-7));
+        var mid = Member("Mid", now.AddMonths(-4));
+        var done = Member("Done", now.AddMonths(-2));
+        var fresh = Member("Fresh", now.AddDays(-10));
+        var month = new MilestoneDefinition { Name = "1m", RequiredMonths = 1, RewardName = "Shaker" };
+        var quarter = new MilestoneDefinition { Name = "3m", RequiredMonths = 3, RewardName = "Shirt" };
+        var half = new MilestoneDefinition { Name = "6m", RequiredMonths = 6, RewardName = "Bag" };
+        var retired = new MilestoneDefinition { Name = "old", RequiredMonths = 1, RewardName = "Old", IsActive = false };
+        ClientMilestone Claimed(Client client, MilestoneDefinition definition) =>
+            new() { Client = client, MilestoneDefinition = definition, AchievedAt = now, IsRewardClaimed = true, RewardClaimedAt = now };
+        db.AddRange(fresh, half,
+            Claimed(veteran, month), Claimed(veteran, quarter),
+            // A lazily synced, not claimed row must not count as claimed.
+            new ClientMilestone { Client = mid, MilestoneDefinition = month, AchievedAt = now },
+            Claimed(done, month), Claimed(done, retired));
+        await db.SaveChangesAsync();
+        var actor = new PortalSecurityTests.Actor(trainer.UserId);
+        var portal = new TrainerPortalService(db, actor, new ClientService(db, actor, null!, null!), null!, null!);
+        async Task<List<TrainerPortalClientDto>> Page(string sort, bool? pending = null) =>
+            (await portal.GetClientsPageAsync(new PortalPageFilter { Sort = sort, HasPendingReward = pending })).Items;
+
+        var byPending = await Page("rewardsPendingDesc");
+        Assert.Equal([mid.Id, veteran.Id, done.Id, fresh.Id], byPending.Select(c => c.ClientId));
+        Assert.Equal([(2, 0, 2), (3, 2, 1), (1, 2, 0), (0, 0, 0)],
+            byPending.Select(c => (c.MilestonesAchieved, c.MilestoneRewardsClaimed, c.MilestoneRewardsPending)));
+        Assert.Equal([veteran.Id, done.Id, mid.Id, fresh.Id], (await Page("rewardsClaimedDesc")).Select(c => c.ClientId));
+        Assert.Equal([fresh.Id, done.Id, veteran.Id, mid.Id], (await Page("rewardsPending")).Select(c => c.ClientId));
+        Assert.Equal([mid.Id, veteran.Id], (await Page("rewardsPendingDesc", pending: true)).Select(c => c.ClientId));
+
+        // A definition added later applies at once to everybody past it, without any ClientMilestone rows.
+        db.Add(new MilestoneDefinition { Name = "2m", RequiredMonths = 2, RewardName = "Towel" });
+        await db.SaveChangesAsync();
+        var later = await Page("rewardsPendingDesc");
+        Assert.Equal([mid.Id, veteran.Id, done.Id, fresh.Id], later.Select(c => c.ClientId));
+        Assert.Equal([3, 2, 1, 0], later.Select(c => c.MilestoneRewardsPending));
+        Assert.Equal([done.Id, mid.Id, veteran.Id], (await Page("name", pending: true)).Select(c => c.ClientId));
+
+        var owner = await new ClientService(db, new PortalSecurityTests.Actor(999, "Owner"), null!, null!)
+            .GetPageAsync(new() { Sort = "rewardsPendingDesc", HasPendingReward = true, PageSize = 10 });
+        Assert.Equal(later.Where(c => c.MilestoneRewardsPending > 0).Select(c => (c.ClientId, c.MilestonesAchieved, c.MilestoneRewardsClaimed, c.MilestoneRewardsPending)),
+            owner.Items.Select(c => (c.Id, c.MilestonesAchieved, c.MilestoneRewardsClaimed, c.MilestoneRewardsPending)));
+    }
+
+    [PostgresFact]
     public async Task TrainerCreatesClientRecordAssignedToThemselvesOnlyAtOwnLocation()
     {
         await using var database = await TestDatabase.CreateAsync();

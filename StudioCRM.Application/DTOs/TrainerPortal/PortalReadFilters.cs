@@ -12,9 +12,11 @@ public class PortalPageFilter
     public bool? HasActivePackage { get; set; }
     // true: only clients with TotalAmountDue > 0; false or missing: no filter. Only clients/page.
     public bool? HasAmountDue { get; set; }
+    // true: only clients with MilestoneRewardsPending > 0; false or missing: no filter. Only clients/page.
+    public bool? HasPendingReward { get; set; }
     [RegularExpression("^(" + SortValues + ")$")]
     public string Sort { get; set; } = "name";
-    public const string SortValues = "name|nameDesc|created|createdDesc|balance|balanceDesc|packageUsage|packageUsageDesc|amountDue|amountDueDesc";
+    public const string SortValues = "name|nameDesc|created|createdDesc|balance|balanceDesc|packageUsage|packageUsageDesc|amountDue|amountDueDesc|rewardsPending|rewardsPendingDesc|rewardsClaimed|rewardsClaimedDesc";
     public void Validate()
     {
         Validator.ValidateObject(this, new ValidationContext(this), true);

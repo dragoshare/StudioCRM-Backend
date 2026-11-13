@@ -118,6 +118,40 @@ public class ListSortTranslationTests
     }
 
     [Theory]
+    [InlineData("rewardsPending")] [InlineData("rewardsPendingDesc")] [InlineData("rewardsClaimed")] [InlineData("rewardsClaimedDesc")]
+    public void MilestoneRewardSortsAndFilterTranslateToOneStatement(string sort)
+    {
+        using var db = Context();
+        StudioCRM.Infrastructure.Services.MilestoneThreshold[] thresholds =
+            [new(1, new DateTime(2026, 10, 13, 0, 0, 0, DateTimeKind.Utc)), new(2, new DateTime(2026, 5, 13, 0, 0, 0, DateTimeKind.Utc))];
+        new PortalPageFilter { Sort = sort, HasPendingReward = true }.Validate();
+        new StudioCRM.Application.DTOs.Clients.ClientPageFilter { Sort = sort, HasPendingReward = true }.Validate();
+        var query = StudioCRM.Infrastructure.Services.ClientMilestoneRewards.WhereHasPending(db, db.Clients, thresholds);
+        foreach (var ordered in new[] {
+            StudioCRM.Infrastructure.Services.TrainerPortalService.OrderPortalClients(db, query, sort, thresholds),
+            StudioCRM.Infrastructure.Services.ClientService.OrderClientPage(db, query, sort, thresholds) })
+        {
+            var sql = Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.ToQueryString(ordered.Skip(25).Take(25));
+            Assert.Contains("\"ClientMilestones\"", sql[sql.IndexOf("ORDER BY", StringComparison.Ordinal)..]);
+            Assert.Matches(@"\.""Id""( DESC)?$", sql[..sql.LastIndexOf("LIMIT", StringComparison.Ordinal)].TrimEnd());
+        }
+    }
+
+    [Fact]
+    public void MilestoneThresholdMatchesMilestoneServiceAddMonthsRule()
+    {
+        // Achieved in MilestoneService: start.AddMonths(months) <= today. The SQL bound must give the same answer for every start.
+        foreach (var today in new[] { new DateTime(2026, 2, 28), new DateTime(2028, 2, 29), new DateTime(2026, 3, 31), new DateTime(2026, 11, 13) })
+            foreach (var months in new[] { 1, 3, 6, 12, 13 })
+            {
+                var bound = StudioCRM.Infrastructure.Services.ClientMilestoneRewards.StartBefore(today, months);
+                Assert.Equal(DateTimeKind.Utc, bound.Kind);
+                for (var start = today.AddMonths(-months).AddDays(-5); start <= today.AddMonths(-months).AddDays(5); start = start.AddDays(1))
+                    Assert.Equal(start.AddMonths(months) <= today, start < bound);
+            }
+    }
+
+    [Theory]
     [InlineData(null)] [InlineData("paymentDate")] [InlineData("amount")] [InlineData("amountDesc")]
     [InlineData("clientName")] [InlineData("clientNameDesc")] [InlineData("overpayment")] [InlineData("overpaymentDesc")]
     public void PaymentSortsUsePaymentDateAndIdTieBreak(string? sort)

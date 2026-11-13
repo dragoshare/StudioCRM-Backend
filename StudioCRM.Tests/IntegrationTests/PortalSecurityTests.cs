@@ -137,6 +137,33 @@ public class PortalSecurityTests
     }
 
     [PostgresFact]
+    public async Task TrainerMilestoneRewardSortAndFilterNeverIncludeOtherTrainersClients()
+    {
+        await using var database = await TestDatabase.CreateAsync();
+        await using var db = database.Context();
+        var location = new Location { Name = "Shared", City = "Test" };
+        var trainer = new Trainer { User = new User { Email = "reward-own@test.invalid" } };
+        var other = new Trainer { User = new User { Email = "reward-other@test.invalid" } };
+        var start = DateTime.UtcNow.AddMonths(-5);
+        var own = new Client { FirstName = "Own", LastName = "Member", Trainer = trainer, Location = location, TrainingStartDate = start };
+        var foreign = new Client { FirstName = "Foreign", LastName = "Member", Trainer = other, Location = location, TrainingStartDate = start.AddYears(-3) };
+        var definition = new MilestoneDefinition { Name = "1m", RequiredMonths = 1, RewardName = "Shaker" };
+        db.AddRange(own, foreign, definition,
+            new ClientMilestone { Client = foreign, MilestoneDefinition = definition, AchievedAt = start, IsRewardClaimed = true });
+        await db.SaveChangesAsync();
+        var user = new Actor(trainer.UserId);
+        var portal = new TrainerPortalService(db, user, new ClientService(db, user, null!, null!), null!, null!);
+
+        foreach (var filter in new[] { new PortalPageFilter { Sort = "rewardsClaimedDesc" }, new PortalPageFilter { HasPendingReward = true, Sort = "rewardsPendingDesc" } })
+        {
+            var page = await portal.GetClientsPageAsync(filter);
+            Assert.Equal(1, page.TotalCount);
+            var row = Assert.Single(page.Items);
+            Assert.Equal((own.Id, 1, 0, 1), (row.ClientId, row.MilestonesAchieved, row.MilestoneRewardsClaimed, row.MilestoneRewardsPending));
+        }
+    }
+
+    [PostgresFact]
     public async Task BillingSummaryMatchesLegacyTotalsAndPendingPaymentsAreScoped()
     {
         await using var database = await TestDatabase.CreateAsync();
