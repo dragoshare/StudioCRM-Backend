@@ -289,9 +289,20 @@ public class SessionParticipantService : ISessionParticipantService
             ? await SessionCorrectionRecorder.CaptureAsync(_context, session.Id)
             : null;
 
+        var keptSettledClientIds = new HashSet<int>();
         if (updatesCompletedSession)
         {
-            await RevertSessionPackageAccountingAsync(session);
+            var addsParticipantsOnly = IsAdditionOnlyCorrection(session, request);
+            try
+            {
+                await RevertSessionPackageAccountingAsync(session);
+            }
+            catch (CodedInvalidOperationException) when (addsParticipantsOnly)
+            {
+                // Rozliczenia dotychczasowych uczestników nie da się cofnąć (np. zamknięty pakiet lub wykorzystane odnowienie).
+                // Przy samym dopisaniu osób zostawiamy ich rozliczenie bez zmian i rozliczamy tylko dopisanych.
+                keptSettledClientIds = session.Participants.Select(p => p.ClientId).ToHashSet();
+            }
 
             var requestedClientIds = request.Participants
                 .Select(p => p.ClientId)
@@ -308,6 +319,9 @@ public class SessionParticipantService : ISessionParticipantService
 
         foreach (var participantRequest in request.Participants)
         {
+            if (keptSettledClientIds.Contains(participantRequest.ClientId))
+                continue;
+
             var client = await _context.Clients
                 .FirstOrDefaultAsync(c => c.Id == participantRequest.ClientId);
 
@@ -519,6 +533,19 @@ public class SessionParticipantService : ISessionParticipantService
 
         if (!ownsSession)
             throw new InvalidOperationException("Trainer can manage only their own sessions.");
+    }
+
+    // Korekta zakończonej sesji, która tylko dopisuje uczestników: każdy dotychczasowy uczestnik zostaje
+    // z tą samą obecnością, naliczaniem i liczbą wejść.
+    internal static bool IsAdditionOnlyCorrection(Session session, CompleteSessionDto request)
+    {
+        var requested = request.Participants.ToDictionary(p => p.ClientId);
+        return requested.Count > session.Participants.Count &&
+            session.Participants.All(existing =>
+                requested.TryGetValue(existing.ClientId, out var r) &&
+                r.AttendanceStatus == existing.AttendanceStatus &&
+                r.CountsAgainstPackage == existing.CountsAgainstPackage &&
+                NormalizeSessionsCharged(r.SessionsCharged) == existing.SessionsCharged);
     }
 
     private async Task RevertSessionPackageAccountingAsync(Session session)
